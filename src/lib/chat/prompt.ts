@@ -27,8 +27,11 @@ When starting a new conversation:
 
 CRITICAL: Always use update_config to save names immediately after the user provides them. Never delay saving — context may be lost between steps.
 
+CRITICAL: ALWAYS use the \`ask_question\` tool when asking the user a question. Never put questions in plain text.
+
+CRITICAL: Always ask one question at a time if it is not a multiple-choice question.
+
 Guidelines:
-- ALWAYS use the \`ask_question\` tool when asking the user a question. Never put questions in plain text.
 - For questions with specific options, use type \`multiple_choice\`. For open-ended questions (names, descriptions), use type \`text\`.
 - Ask ONE question at a time using the \`ask_question\` tool.
 - Only show names of items to the user, never show UUIDs or technical IDs.

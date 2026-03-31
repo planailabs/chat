@@ -96,10 +96,11 @@ export interface ChatState {
      *   idle      → composer visible (or greeting if pendingGreeting set)
      *   waiting   → thinking indicator, waiting for server
      *   streaming → word-by-word reveal of assistant text
+     *   tool      → executing a server-side tool (spinner indicator)
      *   question  → showing ask_question UI (buttons or text input)
      *   error     → error message + composer
      */
-    phase: 'idle' | 'waiting' | 'streaming' | 'question' | 'error';
+    phase: 'idle' | 'waiting' | 'streaming' | 'tool' | 'question' | 'error';
     /** Word-by-word streaming reveal of the last assistant message */
     streamingText?: { full: string; visible: string };
     error?: string;
@@ -111,8 +112,8 @@ export interface ChatState {
       question: string;
       options?: string[];
     };
-    /** Name of currently executing tool (for subtle UI indicator) */
-    toolInProgress?: string;
+    /** Name of currently executing tool (set during 'tool' phase) */
+    toolName?: string;
   };
   /** Post-login UI state (signed-in bubble, newsletter prompt) */
   postLogin?: {

@@ -535,7 +535,7 @@ let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
  */
 const transition = (
   mc: NonNullable<typeof store.state.chat>['machineConfig'],
-  phase: 'idle' | 'waiting' | 'streaming' | 'question' | 'error',
+  phase: 'idle' | 'waiting' | 'streaming' | 'tool' | 'question' | 'error',
 ) => {
   if (!mc) return;
 
@@ -549,7 +549,7 @@ const transition = (
   mc.streamingText = undefined;
   mc.activeQuestion = undefined;
   mc.error = undefined;
-  mc.toolInProgress = undefined;
+  mc.toolName = undefined;
 
   mc.phase = phase;
 };
@@ -697,12 +697,13 @@ const handleServerEvent = (type: string, data: Record<string, unknown>) => {
     }
 
     case 'tool_start':
-      currentMc.toolInProgress = data.name as string;
+      transition(currentMc, 'tool');
+      currentMc.toolName = data.name as string;
       store.notify();
       break;
 
     case 'tool_end':
-      currentMc.toolInProgress = undefined;
+      transition(currentMc, 'waiting');
       store.notify();
       break;
 
@@ -723,7 +724,7 @@ const handleServerEvent = (type: string, data: Record<string, unknown>) => {
       mc2.phase = 'question';
       mc2.activeQuestion = data.question as any;
       mc2.streamingText = undefined;
-      mc2.toolInProgress = undefined;
+      mc2.toolName = undefined;
       store.notify();
       break;
     }
@@ -736,7 +737,7 @@ const handleServerEvent = (type: string, data: Record<string, unknown>) => {
       const mc2 = store.state.chat?.machineConfig;
       if (mc2) {
         mc2.phase = 'idle';
-        mc2.toolInProgress = undefined;
+        mc2.toolName = undefined;
         cacheMachineConfigMessages(mc2.messages);
         store.notify();
       }

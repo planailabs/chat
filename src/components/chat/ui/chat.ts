@@ -237,10 +237,6 @@ export const renderChatSection = (
         </div>`
       : '';
 
-    const toolLabel = mc.toolInProgress
-      ? `<p class="mt-1 text-xs text-(--text-muted)">${escapeHtml(locale.machineConfig.configuringLabel)}</p>`
-      : '';
-
     const thinkingIndicator = phase === 'waiting'
       ? `<div class="flex justify-start">
           <div class="max-w-[min(100%,640px)] text-base leading-relaxed text-(--text-muted)">
@@ -249,7 +245,15 @@ export const renderChatSection = (
               <span class="inline-block h-2 w-2 rounded-full bg-(--text-muted) animate-bounce" style="animation-delay: 150ms"></span>
               <span class="inline-block h-2 w-2 rounded-full bg-(--text-muted) animate-bounce" style="animation-delay: 300ms"></span>
             </span>
-            ${toolLabel}
+          </div>
+        </div>`
+      : '';
+
+    const toolIndicator = phase === 'tool'
+      ? `<div class="flex justify-start">
+          <div class="max-w-[min(100%,640px)] flex items-center gap-2 text-xs text-(--text-muted)">
+            <span class="inline-block h-3 w-3 animate-spin rounded-full border-2 border-(--text-muted) border-t-transparent"></span>
+            ${escapeHtml(locale.machineConfig.configuringLabel)}
           </div>
         </div>`
       : '';
@@ -361,6 +365,7 @@ export const renderChatSection = (
         ${messageBubbles}
         ${streamingBubble}
         ${thinkingIndicator}
+        ${toolIndicator}
         ${errorMessage}
         ${questionLabel}
         ${questionButtons}
