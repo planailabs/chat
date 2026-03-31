@@ -11,12 +11,7 @@ export const prerender = false;
 import type { APIRoute } from 'astro';
 import { createClient } from '@supabase/supabase-js';
 import { handleChatMessage, acquireLock, releaseLock, broadcast, type ChatConfig } from '@/lib/chat/handler';
-
-const SUPABASE_URL = process.env.SUPABASE_URL ?? import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_SERVICE_KEY =
-  process.env.SUPABASE_SERVICE_ROLE_KEY ?? import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-const MAC_MGMT_URL = process.env.MAC_MGMT_URL;
+import { env } from '@/lib/env';
 
 const jsonResponse = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), {
@@ -25,7 +20,7 @@ const jsonResponse = (data: unknown, status = 200) =>
   });
 
 export const POST: APIRoute = async ({ request }) => {
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY || !ANTHROPIC_API_KEY) {
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY || !env.ANTHROPIC_API_KEY) {
     return jsonResponse({ error: 'Server not configured' }, 503);
   }
 
@@ -36,7 +31,7 @@ export const POST: APIRoute = async ({ request }) => {
   }
   const jwt = authHeader.slice(7);
 
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
@@ -73,10 +68,10 @@ export const POST: APIRoute = async ({ request }) => {
 
   // ── Config ──────────────────────────────────────────────────────────────
   const config: ChatConfig = {
-    anthropicApiKey: ANTHROPIC_API_KEY,
-    macMgmtUrl: MAC_MGMT_URL ?? '',
-    supabaseUrl: SUPABASE_URL,
-    supabaseServiceKey: SUPABASE_SERVICE_KEY,
+    anthropicApiKey: env.ANTHROPIC_API_KEY,
+    macMgmtUrl: env.MAC_MGMT_URL,
+    supabaseUrl: env.SUPABASE_URL,
+    supabaseServiceKey: env.SUPABASE_SERVICE_ROLE_KEY,
   };
 
   // ── Fire and forget ─────────────────────────────────────────────────────

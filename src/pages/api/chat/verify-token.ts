@@ -9,11 +9,7 @@ export const prerender = false;
 
 import type { APIRoute } from 'astro';
 import { createClient } from '@supabase/supabase-js';
-
-const SUPABASE_URL = process.env.SUPABASE_URL ?? import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_SERVICE_KEY =
-  process.env.SUPABASE_SERVICE_ROLE_KEY ?? import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-const MAC_MGMT_URL = process.env.MAC_MGMT_URL;
+import { env } from '@/lib/env';
 
 const jsonResponse = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), {
@@ -22,7 +18,7 @@ const jsonResponse = (data: unknown, status = 200) =>
   });
 
 export const GET: APIRoute = async ({ request }) => {
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY || !MAC_MGMT_URL) {
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY || !env.MAC_MGMT_URL) {
     return jsonResponse({ valid: false, error: 'Server not configured' }, 503);
   }
 
@@ -32,7 +28,7 @@ export const GET: APIRoute = async ({ request }) => {
   }
   const jwt = authHeader.slice(7);
 
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
@@ -59,7 +55,7 @@ export const GET: APIRoute = async ({ request }) => {
 
   // Validate against mac-mgmt
   try {
-    const res = await fetch(`${MAC_MGMT_URL}/api/self`, {
+    const res = await fetch(`${env.MAC_MGMT_URL}/api/self`, {
       headers: { Authorization: `Bearer ${customerToken}` },
     });
     if (!res.ok) {

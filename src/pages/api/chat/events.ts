@@ -16,13 +16,10 @@ export const prerender = false;
 import type { APIRoute } from 'astro';
 import { createClient } from '@supabase/supabase-js';
 import { addConnection, type SSEWriter } from '@/lib/chat/handler';
-
-const SUPABASE_URL = process.env.SUPABASE_URL ?? import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_SERVICE_KEY =
-  process.env.SUPABASE_SERVICE_ROLE_KEY ?? import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+import { env } from '@/lib/env';
 
 export const GET: APIRoute = async ({ request }) => {
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {
     return new Response(JSON.stringify({ error: 'Server not configured' }), {
       status: 503,
       headers: { 'Content-Type': 'application/json' },
@@ -46,7 +43,7 @@ export const GET: APIRoute = async ({ request }) => {
     });
   }
 
-  const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
+  const supabase = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 
