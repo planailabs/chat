@@ -1,0 +1,118 @@
+---
+import '../components/chat/style.css';
+import { ClientRouter } from 'astro:transitions';
+---
+
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <title>plan.ai</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" sizes="any" />
+    <link rel="shortcut icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="canonical" href="https://plan.ai" />
+    <meta name="description" content="We love it when a plan comes together." />
+    <ClientRouter />
+    <script is:inline>
+      (() => {
+        const THEME_STORAGE_KEY = 'planai-theme-mode';
+        const LANGUAGE_STORAGE_KEY = 'planai-language';
+        const SUPPORTED_LANGS = ['en', 'de'];
+        const DARK_BG = '#1e1e1e';
+        const LIGHT_BG = '#fcfcfc';
+        const DARK_TEXT = '#dadada';
+        const LIGHT_TEXT = '#222222';
+        const root = document.documentElement;
+
+        // Set lang attribute from stored preference or browser detection
+        const resolveLanguage = () => {
+          try {
+            const stored = sessionStorage.getItem(LANGUAGE_STORAGE_KEY);
+            if (stored && SUPPORTED_LANGS.includes(stored)) {
+              return stored;
+            }
+          } catch {
+            /* ignore */
+          }
+          // Fallback to browser language detection
+          const browserLang = (navigator.language || '')
+            .slice(0, 2)
+            .toLowerCase();
+          return SUPPORTED_LANGS.includes(browserLang) ? browserLang : 'en';
+        };
+        root.lang = resolveLanguage();
+
+        // Fade-in logic: show only on first visit within session
+        // Skip for: OAuth redirects, back navigation, or returning from external pages (legal docs)
+        const VISITED_KEY = 'planai-visited';
+        const isOAuthRedirect = window.location.hash.includes('access_token');
+        let hasVisitedBefore = false;
+        try {
+          hasVisitedBefore = sessionStorage.getItem(VISITED_KEY) === '1';
+          sessionStorage.setItem(VISITED_KEY, '1');
+        } catch {
+          /* ignore sessionStorage errors */
+        }
+        if (!isOAuthRedirect && !hasVisitedBefore) {
+          root.classList.add('is-first-visit');
+        }
+
+        const resolveStoredMode = () => {
+          try {
+            const stored = sessionStorage.getItem(THEME_STORAGE_KEY);
+            if (
+              stored === 'dark' ||
+              stored === 'light' ||
+              stored === 'system'
+            ) {
+              return stored;
+            }
+          } catch {
+            /* ignore sessionStorage errors */
+          }
+          return null;
+        };
+        const prefersDark =
+          window.matchMedia &&
+          window.matchMedia('(prefers-color-scheme: dark)').matches;
+        const storedMode = resolveStoredMode();
+        const resolvedTheme =
+          storedMode === 'dark' || storedMode === 'light'
+            ? storedMode
+            : prefersDark
+              ? 'dark'
+              : 'light';
+        const background = resolvedTheme === 'dark' ? DARK_BG : LIGHT_BG;
+        const textColor = resolvedTheme === 'dark' ? DARK_TEXT : LIGHT_TEXT;
+        root.setAttribute('data-theme', resolvedTheme);
+        root.style.backgroundColor = background;
+        root.style.color = textColor;
+        root.style.setProperty(
+          'color-scheme',
+          resolvedTheme === 'dark' ? 'dark' : 'light',
+        );
+        const applyBodyColors = () => {
+          if (!document.body) {
+            return;
+          }
+          document.body.style.backgroundColor = background;
+          document.body.style.color = textColor;
+        };
+        if (document.readyState === 'loading') {
+          document.addEventListener('DOMContentLoaded', applyBodyColors, {
+            once: true,
+          });
+        } else {
+          applyBodyColors();
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="app" class="min-h-screen"></div>
+    <script src="../components/chat/main.ts"></script>
+  </body>
+</html>
