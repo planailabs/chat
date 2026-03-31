@@ -529,6 +529,10 @@ let intentionalClose = false;
 let reconnectAttempt = 0;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
+/** Pending delayed transition from tool → waiting */
+let toolTransitionTimer: ReturnType<typeof setTimeout> | null = null;
+const TOOL_TRANSITION_DELAY_MS = 500;
+
 /**
  * Transition to a new phase, cleaning up any state from the previous one.
  * Always call this instead of setting phase/fields directly.
@@ -538,6 +542,26 @@ const transition = (
   phase: 'idle' | 'waiting' | 'streaming' | 'tool' | 'question' | 'error',
 ) => {
   if (!mc) return;
+
+  // Always cancel a pending tool→waiting transition
+  if (toolTransitionTimer) {
+    clearTimeout(toolTransitionTimer);
+    toolTransitionTimer = null;
+  }
+
+  // Delay tool → waiting so the spinner doesn't flash to dots immediately
+  if (mc.phase === 'tool' && phase === 'waiting') {
+    toolTransitionTimer = setTimeout(() => {
+      toolTransitionTimer = null;
+      const cur = store.state.chat?.machineConfig;
+      if (cur?.phase === 'tool') {
+        cur.phase = 'waiting';
+        cur.toolName = undefined;
+        store.notify();
+      }
+    }, TOOL_TRANSITION_DELAY_MS);
+    return;
+  }
 
   // Cancel in-flight streaming — finalises text into messages
   if (machineConfigStreamCancel) {
