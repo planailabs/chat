@@ -28,8 +28,7 @@ stdenv.mkDerivation (finalAttrs: {
           ./flake.lock
           ./package.nix
           ./module.nix
-          ./.env.example
-          ./.env.development.example
+          ./.env.local.example
         ]
       )
     );
