@@ -18,6 +18,8 @@ interface EndpointSpec {
   path: string;
   /** Append this input field as a path segment (e.g. DELETE /skills/{id}) */
   pathParam?: string;
+  /** Append a fixed suffix after the path param (e.g. /bundles/{id}/skills) */
+  pathSuffix?: string;
   /** Send input as JSON body (POST / PUT) */
   jsonBody?: boolean;
 }
@@ -78,7 +80,7 @@ const TOOLS: ToolEntry[] = [
     tool: {
       name: 'list_skills',
       description:
-        'List all skills currently assigned to this customer. Returns customer_skill_id, skill_slug, and channel for each.',
+        'List all skills currently assigned to this customer. Returns id, skill_slug, channel, installed, installed_bundle, and customer_skill_id (only present for direct assignments) for each.',
       input_schema: obj(),
     },
     endpoint: { method: 'GET', path: '/api/setting/skills' },
@@ -111,7 +113,7 @@ const TOOLS: ToolEntry[] = [
     tool: {
       name: 'available_skill_channels',
       description:
-        'List all available skill channels that can be added. Returns id, skill_slug, channel, and installed boolean for each.',
+        'List all available skill channels that can be added. Returns id, skill_slug, channel, installed, and installed_bundle for each.',
       input_schema: obj(),
     },
     endpoint: { method: 'GET', path: '/api/setting/available/skill-channels' },
@@ -166,7 +168,7 @@ const TOOLS: ToolEntry[] = [
     tool: {
       name: 'list_mcp_servers',
       description:
-        'List all MCP servers currently assigned to this customer. Returns customer_mcp_server_id, server_slug, and server_name.',
+        'List all MCP servers currently assigned to this customer. Returns id, slug, name, installed, installed_bundle, installed_transitive, and customer_mcp_server_id (only present for direct assignments) for each.',
       input_schema: obj(),
     },
     endpoint: { method: 'GET', path: '/api/setting/mcp-servers' },
@@ -199,7 +201,7 @@ const TOOLS: ToolEntry[] = [
     tool: {
       name: 'available_mcp_servers',
       description:
-        'List all available MCP servers that can be added. Returns id, slug, name, and installed boolean for each.',
+        'List all available MCP servers that can be added. Returns id, slug, name, installed, installed_bundle, and installed_transitive for each.',
       input_schema: obj(),
     },
     endpoint: { method: 'GET', path: '/api/setting/available/mcp-servers' },
@@ -249,12 +251,38 @@ const TOOLS: ToolEntry[] = [
     endpoint: { method: 'GET', path: '/api/setting/available/mcp-bundles' },
   },
 
+  // ── Bundle Contents ────────────────────────────────────────────────
+  {
+    tool: {
+      name: 'list_bundle_skills',
+      description:
+        'List the skill channels included in a specific bundle. Returns id, skill_slug, and channel for each skill in the bundle.',
+      input_schema: obj(
+        { bundle_id: { type: 'string', description: 'The UUID of the bundle.' } },
+        ['bundle_id'],
+      ),
+    },
+    endpoint: { method: 'GET', path: '/api/setting/available/bundles', pathParam: 'bundle_id', pathSuffix: '/skills' },
+  },
+  {
+    tool: {
+      name: 'list_mcp_bundle_servers',
+      description:
+        'List the MCP servers included in a specific MCP bundle. Returns id, slug, and name for each server in the bundle.',
+      input_schema: obj(
+        { bundle_id: { type: 'string', description: 'The UUID of the MCP bundle.' } },
+        ['bundle_id'],
+      ),
+    },
+    endpoint: { method: 'GET', path: '/api/setting/available/mcp-bundles', pathParam: 'bundle_id', pathSuffix: '/mcp-servers' },
+  },
+
   // ── Catalog (combined view) ─────────────────────────────────────────
   {
     tool: {
       name: 'list_catalog',
       description:
-        'List ALL available bundles, skills, MCP bundles, and MCP servers in a single call. Returns { skill_channels, bundles, mcp_servers, mcp_bundles }, each item includes an `installed` boolean.',
+        'List ALL available bundles, skills, MCP bundles, and MCP servers in a single call. Returns { skill_channels, bundles, mcp_servers, mcp_bundles }. Bundles and MCP bundles include their nested skills/servers. Items include installed, installed_bundle, and installed_transitive flags where applicable.',
       input_schema: obj(),
     },
     endpoint: { method: 'GET', path: '/api/setting/catalog' },
@@ -381,10 +409,13 @@ export const executeTool = async (
     return JSON.stringify({ error: `Unknown tool: ${name}` });
   }
 
-  // Build URL, appending path param if needed (e.g., DELETE /skills/{id})
+  // Build URL, appending path param and suffix if needed (e.g., DELETE /skills/{id}, GET /bundles/{id}/skills)
   let url = `${macMgmtUrl}${spec.path}`;
   if (spec.pathParam && input[spec.pathParam]) {
     url += `/${input[spec.pathParam]}`;
+  }
+  if (spec.pathSuffix) {
+    url += spec.pathSuffix;
   }
 
   const headers: Record<string, string> = {
