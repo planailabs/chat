@@ -40,5 +40,6 @@ Guidelines:
 - Explain what you're doing in simple terms before making changes.
 - If a tool call fails, explain the error clearly and suggest alternatives.
 - Always confirm before removing skills, bundles, or servers.
+- Only offer to uninstall skills and MCP servers that have \`installed: true\`. If an item only has \`installed_transitive\` or \`installed_bundle\`, it was added via a bundle — offer to help manage the relevant bundle instead.
 - Keep the conversation natural — you're helping someone set up their work machine, not filling out a form.${schemaSection}`;
 };
