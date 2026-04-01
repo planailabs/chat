@@ -8,8 +8,6 @@ SQL source of truth per `docs/supabase/supabase-sql-style-guide.md`.
 | ------------------------- | --------------------------------------------------------------------------------------- |
 | `001_core.sql`            | `profiles`, `messages`, `newsletter_events`, `data_export_events`, `touch_updated_at()` |
 | `002_dashboard_admin.sql` | `admins`, `private.is_admin()`, admin RLS policies, Realtime on `messages`              |
-| `003_luzi.sql`            | `whitelist_tg`, `luzi` tables + RLS policies                                            |
-| `004_luzi_bot_role.sql`   | `luzi_bot` role + minimal permissions                                                   |
 
 ## Style Guide
 

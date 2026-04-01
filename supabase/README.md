@@ -24,7 +24,6 @@ supabase/
 | `authenticated` | Logged-in users, RLS-governed                             |
 | `anon`          | No access (all policies require auth)                     |
 | `service_role`  | Bypasses RLS (admin ops only)                             |
-| `luzi_bot`      | Telegram bot: SELECT `whitelist_tg`, SELECT/INSERT `luzi` |
 
 ## Workflow
 
