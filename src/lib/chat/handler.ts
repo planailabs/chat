@@ -225,7 +225,7 @@ const hasToolUse = (msg: StoredMessage): boolean =>
   (msg.content as any[]).some((b) => b.type === 'tool_use');
 
 const trimMessages = (msgs: StoredMessage[]): StoredMessage[] => {
-  const CHAR_LIMIT = 3000;
+  const CHAR_LIMIT = 32768;
   if (msgs.length <= 1) return msgs;
 
   type Chunk = StoredMessage[];
@@ -351,9 +351,15 @@ export async function handleChatMessage(
     customerToken = profile.customer_token as string;
   }
 
-  // Config schema + conversation record in parallel
+  // Config schema, current config, and conversation record in parallel
+  const authHeaders = { Authorization: `Bearer ${customerToken}`, Accept: 'application/json' };
+
   const schemaPromise = fetch(`${config.macMgmtUrl}/api/setting/config/schema`, {
-    headers: { Authorization: `Bearer ${customerToken}`, Accept: 'application/json' },
+    headers: authHeaders,
+  }).then((res) => res.ok ? res.text() : undefined).catch(() => undefined);
+
+  const configPromise = fetch(`${config.macMgmtUrl}/api/setting/config`, {
+    headers: authHeaders,
   }).then((res) => res.ok ? res.text() : undefined).catch(() => undefined);
 
   const recordPromise = (async () => {
@@ -371,7 +377,7 @@ export async function handleChatMessage(
     return null;
   })();
 
-  const [schema, loadedRecord] = await Promise.all([schemaPromise, recordPromise]);
+  const [schema, currentConfig, loadedRecord] = await Promise.all([schemaPromise, configPromise, recordPromise]);
   configSchema = schema;
   if (loadedRecord) record = loadedRecord;
 
@@ -427,7 +433,7 @@ export async function handleChatMessage(
 
   // ── Run the tool loop ─────────────────────────────────────────────────────
 
-  await runToolLoop(userId, config, record, customerToken!, locale, configSchema, setPhase);
+  await runToolLoop(userId, config, record, customerToken!, locale, configSchema, currentConfig, setPhase);
 }
 
 // ─── Question Tool Results ──────────────────────────────────────────────────
@@ -457,6 +463,7 @@ async function runToolLoop(
   customerToken: string,
   locale: string,
   configSchema: string | undefined,
+  currentConfig: string | undefined,
   setPhase: (phase: Phase, pendingQuestion?: QuestionInput | null) => Promise<void>,
 ): Promise<void> {
   const anthropic = new Anthropic({ apiKey: config.anthropicApiKey });
@@ -498,6 +505,18 @@ async function runToolLoop(
 
     const trimmed = trimMessages(record.messages.filter((m) => m.role !== 'cancel'));
     const claudeMessages = sanitizeMessages(toClaudeMessages(trimmed));
+
+    // Inject current config as a hidden message (not stored, always re-inserted)
+    if (currentConfig && claudeMessages.length > 0 && claudeMessages[0].role === 'user') {
+      const configNote = `[Current machine configuration]\n\`\`\`toml\n${currentConfig}\n\`\`\``;
+      const first = claudeMessages[0];
+      if (typeof first.content === 'string') {
+        first.content = configNote + '\n\n' + first.content;
+      } else {
+        (first.content as Anthropic.ContentBlockParam[]).unshift({ type: 'text' as const, text: configNote });
+      }
+    }
+
     console.log(`[chat] Round ${rounds}/${MAX_TOOL_ROUNDS}, ${claudeMessages.length} msgs`);
 
     broadcast(userId, 'thinking', { type: 'thinking' });
