@@ -331,6 +331,8 @@ export const PROMPT_PREFERENCE_TOOL: ToolDef = {
   },
 };
 
+import { DOC_IDS } from './content';
+
 export const GET_PRODUCT_INFO_TOOL: ToolDef = {
   name: 'get_product_info',
   description:
@@ -340,7 +342,7 @@ export const GET_PRODUCT_INFO_TOOL: ToolDef = {
     properties: {
       topic: {
         type: 'string',
-        enum: ['overview', 'departments', 'architecture', 'use-cases', 'getting-started', 'faq'],
+        enum: DOC_IDS,
         description: 'The documentation topic to retrieve.',
       },
     },

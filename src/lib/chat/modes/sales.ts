@@ -8,7 +8,7 @@
 import ISO6391 from 'iso-639-1';
 import { registerChatMode, type ChatModeConfig, type ModeContext } from '../modes';
 import { ASK_QUESTION_TOOL, PROMPT_PREFERENCE_TOOL, GET_PRODUCT_INFO_TOOL } from '../tools';
-import { lookupProductDoc } from '../content';
+import { lookupProductDoc, DOC_IDS } from '../content';
 import type Anthropic from '@anthropic-ai/sdk';
 
 export const salesMode: ChatModeConfig = {
@@ -37,7 +37,7 @@ Your role is to:
 CRITICAL RULES:
 - ALWAYS use the \`get_product_info\` tool to retrieve product documentation BEFORE answering product-related questions. Do not make up information.
 - ALWAYS use the \`ask_question\` tool when asking the user a question. Never put questions in plain text.
-- Available topics for \`get_product_info\`: overview, departments, architecture, use-cases, getting-started, faq
+- Available topics for \`get_product_info\`: ${DOC_IDS.join(', ')}
 
 Guidelines:
 - Be friendly, professional, and concise
@@ -56,7 +56,7 @@ Guidelines:
       const topic = input.topic as string;
       const doc = lookupProductDoc(topic);
       if (!doc) {
-        return JSON.stringify({ error: `Unknown topic: ${topic}. Available: overview, departments, architecture, use-cases, getting-started, faq` });
+        return JSON.stringify({ error: `Unknown topic: ${topic}. Available: ${DOC_IDS.join(', ')}` });
       }
       return doc;
     }
