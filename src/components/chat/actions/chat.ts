@@ -560,6 +560,12 @@ const transition = (
     return;
   }
 
+  // Finalize any pending streaming text before leaving the phase
+  if (mc.streamingText?.full) {
+    mc.messages.push({ role: 'assistant', content: mc.streamingText.full });
+    cacheMachineConfigMessages(mc.messages);
+  }
+
   // Clear transient state from any previous phase
   mc.streamingText = undefined;
   mc.activeQuestion = undefined;
@@ -662,16 +668,20 @@ const handleServerEvent = (type: string, data: Record<string, unknown>) => {
     case 'question': {
       const mc2 = store.state.chat?.machineConfig;
       if (!mc2) return;
+      // Finalize any pending streaming text before showing question
+      if (mc2.streamingText?.full) {
+        mc2.messages.push({ role: 'assistant', content: mc2.streamingText.full });
+      }
+      mc2.streamingText = undefined;
       const lastMsg = mc2.messages[mc2.messages.length - 1];
       const alreadyDisplayed = lastMsg?.role === 'assistant' && lastMsg.content === (data.question as any)?.question;
       if (!alreadyDisplayed) {
         mc2.messages.push({ role: 'assistant', content: (data.question as any).question });
-        cacheMachineConfigMessages(mc2.messages);
       }
       mc2.phase = 'question';
       mc2.activeQuestion = data.question as any;
-      mc2.streamingText = undefined;
       mc2.toolName = undefined;
+      cacheMachineConfigMessages(mc2.messages);
       store.notify();
       break;
     }
@@ -679,6 +689,11 @@ const handleServerEvent = (type: string, data: Record<string, unknown>) => {
     case 'done': {
       const mc2 = store.state.chat?.machineConfig;
       if (mc2) {
+        // Finalize any pending streaming text that wasn't closed by text_done
+        if (mc2.streamingText?.full) {
+          mc2.messages.push({ role: 'assistant', content: mc2.streamingText.full });
+          mc2.streamingText = undefined;
+        }
         mc2.phase = 'idle';
         mc2.toolName = undefined;
         cacheMachineConfigMessages(mc2.messages);
