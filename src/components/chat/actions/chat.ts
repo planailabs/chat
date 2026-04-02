@@ -71,6 +71,50 @@ export const clearChatTimers = clearPostLoginTimers;
 let preferenceQuestionStreamCancel: (() => void) | null = null;
 let preferenceFollowupStreamCancel: (() => void) | null = null;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Login Invite Stream (anonymous user prompt → sign-in invite)
+// ─────────────────────────────────────────────────────────────────────────────
+let loginInviteStreamCancel: (() => void) | null = null;
+
+const startLoginInviteStream = () => {
+  const invite = store.state.chat?.aiChat?.loginInvite;
+  if (!invite) return;
+
+  if (loginInviteStreamCancel) {
+    loginInviteStreamCancel();
+    loginInviteStreamCancel = null;
+  }
+
+  const totalLength = invite.text.length;
+  loginInviteStreamCancel = startCharacterStream(
+    totalLength,
+    invite.stream.chunkSize,
+    invite.stream.intervalMs,
+    (index) => {
+      const cur = store.state.chat?.aiChat?.loginInvite;
+      if (!cur) return;
+      cur.visibleText = cur.text.slice(0, index);
+      store.notify();
+    },
+    () => {
+      loginInviteStreamCancel = null;
+      const cur = store.state.chat?.aiChat?.loginInvite;
+      if (!cur) return;
+      cur.visibleText = cur.text;
+      cur.isStreaming = false;
+      store.notify();
+      // Reveal OAuth CTAs after a short delay
+      setTimeout(() => {
+        const curInvite = store.state.chat?.aiChat?.loginInvite;
+        if (curInvite) {
+          curInvite.ctaVisible = true;
+          store.notify();
+        }
+      }, 200);
+    },
+  );
+};
+
 const startNewsletterQuestionStream = () => {
   const newsletterState = store.state.chat?.postLogin?.newsletter;
   if (!newsletterState) {
@@ -513,11 +557,28 @@ export const restoreAIChatSession = (): void => {
   // Don't re-init if already active
   if (state.chat?.aiChat) return;
 
-  // Anonymous users in sales mode: show chat UI with pending prompt (if any)
+  // Anonymous users in sales mode: show chat UI
   if (!state.isAuthenticated) {
     const pending = readPendingSalesPrompt();
-    const msgs: StoredMessage[] = pending ? [{ role: 'user', content: pending }] : [];
-    initAIChat(msgs);
+    if (pending) {
+      // Restore with login phase: show prompt + sign-in invite (skip streaming)
+      const currentLocale = locales[state.localeKey];
+      const inviteStep = currentLocale.conversationScenarios.anonymousInvite.steps['invite-intro'];
+      initAIChat([{ role: 'user', content: pending }], 'idle');
+      const mc = state.chat?.aiChat;
+      if (mc) {
+        mc.phase = 'login';
+        mc.loginInvite = {
+          text: inviteStep.text,
+          visibleText: inviteStep.text,
+          stream: inviteStep.stream,
+          isStreaming: false,
+          ctaVisible: true,
+        };
+      }
+    } else {
+      initAIChat([]);
+    }
     store.notify();
     return;
   }
@@ -644,7 +705,7 @@ const TOOL_TRANSITION_DELAY_MS = 500;
  */
 const transition = (
   mc: NonNullable<typeof store.state.chat>['aiChat'],
-  phase: 'idle' | 'waiting' | 'streaming' | 'tool' | 'question' | 'error',
+  phase: 'idle' | 'waiting' | 'streaming' | 'tool' | 'question' | 'login' | 'error',
 ) => {
   if (!mc) return;
 
@@ -689,6 +750,11 @@ const transition = (
     preferenceFollowupStreamCancel();
     preferenceFollowupStreamCancel = null;
   }
+  if (loginInviteStreamCancel) {
+    loginInviteStreamCancel();
+    loginInviteStreamCancel = null;
+  }
+  mc.loginInvite = undefined;
 
   mc.phase = phase;
 };
@@ -1076,18 +1142,27 @@ export const sendChatMessage = async (message: string) => {
   const state = store.state;
   if (!state.chat?.aiChat) return;
 
-  // Anonymous user: trigger sign-in invite via conversation planner
+  // Anonymous user: save prompt and show sign-in invite within aiChat
   if (!state.isAuthenticated || !state.userId) {
+    const mc = state.chat.aiChat;
     const currentLocale = locales[state.localeKey];
     // Save the prompt for post-login send to sales bot
     savePendingSalesPrompt(message);
-    // Cache the prompt for post-auth restoration
-    appendPromptToCache(message, state.localeKey);
-    // Transition out of aiChat and into the conversation planner sign-in flow
-    state.chat.aiChat = undefined;
-    state.heroPhase = 'composer';
+    // Add as user message and transition to login phase
+    mc.messages.push({ role: 'user', content: message });
+    const inviteStep = currentLocale.conversationScenarios.anonymousInvite.steps['invite-intro'];
+    mc.loginInvite = {
+      text: inviteStep.text,
+      visibleText: '',
+      stream: inviteStep.stream,
+      isStreaming: true,
+      ctaVisible: false,
+    };
+    mc.phase = 'login';
+    cacheAIChatMessages(mc.messages);
     store.notify();
-    startChatFromPrompt(message, currentLocale, { animateHeroTransition: true });
+    // Start streaming the sign-in invite text
+    setTimeout(() => startLoginInviteStream(), inviteStep.stream.initialDelayMs);
     return;
   }
 
@@ -1299,10 +1374,13 @@ export const restoreChatSession = () => {
     return;
   }
 
-  // If we have a cache but no pending auth, we normally exit.
-  // However, if we are here, we should clean up pendingAuth if it exists but is false?
-  // No, readPreAuthState returns null if empty.
+  // If there's a pending sales prompt, skip conversation planner restoration —
+  // the aiChat state machine handles the full flow (login invite + post-login send).
+  if (readPendingSalesPrompt()) {
+    return;
+  }
 
+  // If we have a cache but no pending auth, we normally exit.
   if (!cached.pendingAuth) {
     return;
   }

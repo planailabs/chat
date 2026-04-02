@@ -378,6 +378,51 @@ export const renderChatSection = (
       }
     }
 
+    // ── Login Invite (anonymous user sign-in) ──────────────────────────
+    let loginInviteBlock = '';
+    if (phase === 'login' && mc.loginInvite) {
+      const invite = mc.loginInvite;
+      const inviteStreamIndicator = invite.isStreaming
+        ? '<span class="ml-1 inline-block h-4 w-1.5 rounded-full bg-(--text-muted) animate-pulse"></span>'
+        : '';
+      loginInviteBlock += `<div class="flex justify-start">
+        <p class="max-w-[min(100%,640px)] text-base leading-relaxed text-(--text-primary)">
+          ${escapeHtml(invite.visibleText)}${inviteStreamIndicator}
+        </p>
+      </div>`;
+
+      if (invite.ctaVisible) {
+        const providers = locale.navigation.loginMenu.providers;
+        const isLocked = Boolean(invite.ctaLocked);
+        const buttons = Object.entries(providers)
+          .map(([provider, label]) => {
+            const icon = getOAuthIcon(provider);
+            return `
+              <button
+                type="button"
+                class="chat-cta-button ${isLocked ? 'is-disabled' : ''} ${invite.selectedProvider === provider ? 'is-selected' : ''}"
+                data-action="login-invite-oauth"
+                data-provider="${provider}"
+                ${isLocked ? 'disabled' : ''}
+                aria-disabled="${isLocked}"
+                aria-pressed="${invite.selectedProvider === provider}"
+              >
+                <span class="chat-cta-button__icon" aria-hidden="true">
+                  ${icon}
+                </span>
+                ${escapeHtml(label)}
+              </button>
+            `;
+          })
+          .join('');
+        loginInviteBlock += `
+          <div class="chat-cta-stack flex flex-wrap gap-3 text-sm text-(--text-primary) transition-all duration-300 chat-cta-stack--fade">
+            ${buttons}
+          </div>
+        `;
+      }
+    }
+
     // Show composer in idle, error, or text-type question phases
     const aqInput = prompt?.toolName === 'ask_question' ? prompt.input as { type?: string; question?: string } : undefined;
     const isTextQuestion = phase === 'question' && aqInput?.type === 'text';
@@ -445,6 +490,7 @@ export const renderChatSection = (
         ${questionLabel}
         ${questionButtons}
         ${preferenceBlock}
+        ${loginInviteBlock}
         ${inputField}
       </section>
     `;

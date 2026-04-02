@@ -78,9 +78,10 @@ export interface ChatState {
      *   streaming → word-by-word reveal of assistant text
      *   tool      → executing a server-side tool (spinner indicator)
      *   question  → showing ask_question UI (buttons or text input)
+     *   login     → anonymous user prompt submitted, showing sign-in invite
      *   error     → error message + composer
      */
-    phase: 'idle' | 'waiting' | 'streaming' | 'tool' | 'question' | 'error';
+    phase: 'idle' | 'waiting' | 'streaming' | 'tool' | 'question' | 'login' | 'error';
     /** Word-by-word streaming reveal of the last assistant message */
     streamingText?: { full: string; visible: string };
     error?: string;
@@ -98,6 +99,16 @@ export interface ChatState {
         choice?: 'yes' | 'no';
         ctaLocked?: boolean;
       };
+    };
+    /** Login invite state (anonymous user submitted prompt, showing sign-in) */
+    loginInvite?: {
+      text: string;
+      visibleText: string;
+      stream: StreamConfig;
+      isStreaming: boolean;
+      ctaVisible: boolean;
+      selectedProvider?: string | null;
+      ctaLocked?: boolean;
     };
     /** Name of currently executing tool (set during 'tool' phase) */
     toolName?: string;

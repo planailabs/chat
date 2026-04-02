@@ -98,7 +98,7 @@ const initApp = () => {
         // Auto-scroll to bottom during streaming, waiting, or just after
         const mc = state.chat?.aiChat;
         if (mc?.phase === 'streaming' || mc?.phase === 'waiting'
-          || mc?.phase === 'idle' || mc?.phase === 'question') {
+          || mc?.phase === 'idle' || mc?.phase === 'question' || mc?.phase === 'login') {
           mainRegion.scrollTop = mainRegion.scrollHeight;
         }
       } else {
@@ -279,6 +279,24 @@ const initApp = () => {
         store.setState(updates);
       }
     });
+
+    // Chat: Login Invite OAuth (anonymous sales chat sign-in)
+    delegateEvent(
+      app,
+      'click',
+      '[data-action="login-invite-oauth"]',
+      (event, target) => {
+        event.stopPropagation();
+        const provider = target.getAttribute('data-provider') as AuthProvider | null;
+        const invite = store.state.chat?.aiChat?.loginInvite;
+        if (!provider || !invite || invite.ctaLocked) return;
+        // Lock CTAs and show selected state
+        invite.ctaLocked = true;
+        invite.selectedProvider = provider;
+        store.notify();
+        void launchOAuthFlow(provider, 'chat');
+      },
+    );
 
     // Chat: OAuth
     delegateEvent(
