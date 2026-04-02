@@ -10,7 +10,7 @@ import type { LocaleContent, LocaleKey } from '../content';
 import { getLocaleDateString } from '../utils/date';
 import { signOut } from '../auth/controller';
 import { clearPreAuthState } from '../auth/preAuthCache';
-import { isImpersonating } from '../impersonation';
+import { isImpersonating, getImpersonateId } from '../impersonation';
 
 export const handlePendingDeletionSignOut = (
   locale: LocaleContent,
@@ -69,14 +69,21 @@ export const loadProfilePreferences = (
   if (profileSyncPromise) {
     return profileSyncPromise;
   }
+
+  // When impersonating, fetch the impersonated user's profile (for customerToken)
+  // but skip applying their personal preferences (theme, language, newsletter, deletion).
+  const impersonatedId = getImpersonateId();
+  const targetUserId = impersonatedId ?? state.userId;
+
   setNewsletterSyncing(true);
   profileSyncPromise = fetchProfilePreferences({
-    userId: state.userId,
+    userId: targetUserId,
   })
     .then((preferences) => {
       if (!state.userId) {
         return;
       }
+
       if (preferences?.language && preferences.language !== state.localeKey) {
         state.localeKey = preferences.language;
         persistLocaleSelection(preferences.language);
@@ -91,18 +98,18 @@ export const loadProfilePreferences = (
       if (preferences?.customerToken !== undefined) {
         const hadToken = Boolean(state.customerToken);
         state.customerToken = preferences.customerToken;
-        // Persist customerToken in the user cache so it's available on next page load
-        cacheUserState({
-          isAuthenticated: state.isAuthenticated,
-          userId: state.userId,
-          userEmail: state.userEmail,
-          userAvatarUrl: state.userAvatarUrl,
-          userDisplayName: state.userDisplayName,
-          isAdmin: state.isAdmin,
-          customerToken: preferences.customerToken,
-        });
+        if (!impersonatedId) {
+          cacheUserState({
+            isAuthenticated: state.isAuthenticated,
+            userId: state.userId,
+            userEmail: state.userEmail,
+            userAvatarUrl: state.userAvatarUrl,
+            userDisplayName: state.userDisplayName,
+            isAdmin: state.isAdmin,
+            customerToken: preferences.customerToken,
+          });
+        }
         store.notify();
-        // If token just became available, initialize machine config chat
         if (!hadToken && preferences.customerToken) {
           import('./chat').then(({ restoreMachineConfigSession }) => {
             restoreMachineConfigSession();
@@ -116,7 +123,8 @@ export const loadProfilePreferences = (
       } else {
         setNewsletterStatus('unknown');
       }
-      if (preferences?.pendingDeletion) {
+      // Skip deletion sign-out when impersonating — don't kick out the admin
+      if (preferences?.pendingDeletion && !impersonatedId) {
         const parsed = preferences.deletionRequestedAt
           ? Date.parse(preferences.deletionRequestedAt)
           : null;
