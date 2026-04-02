@@ -336,7 +336,7 @@ export const handleChatNewsletterChoice = (choice: 'yes' | 'no') => {
 // Machine Config Persistence (server-side via Supabase, sessionStorage as cache)
 // ─────────────────────────────────────────────────────────────────────────────
 
-type StoredMessage = { role: 'user' | 'assistant' | 'cancel'; content: string };
+type StoredMessage = { id?: string; role: 'user' | 'assistant' | 'cancel'; content: string };
 
 const cacheMachineConfigMessages = (messages: StoredMessage[]) => {
   try {
@@ -516,9 +516,6 @@ export const restoreMachineConfigSession = (): void => {
 // entering the new one, which prevents stale UI from leaking across phases.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Cancel function for current word-by-word streaming animation */
-let machineConfigStreamCancel: (() => void) | null = null;
-
 /** Persistent EventSource connection */
 let eventSource: EventSource | null = null;
 
@@ -563,12 +560,6 @@ const transition = (
     return;
   }
 
-  // Cancel in-flight streaming — finalises text into messages
-  if (machineConfigStreamCancel) {
-    machineConfigStreamCancel();
-    machineConfigStreamCancel = null;
-  }
-
   // Clear transient state from any previous phase
   mc.streamingText = undefined;
   mc.activeQuestion = undefined;
@@ -576,79 +567,6 @@ const transition = (
   mc.toolName = undefined;
 
   mc.phase = phase;
-};
-
-/**
- * Builds an array of word-boundary indices for word-by-word reveal.
- */
-const buildWordBoundaries = (text: string): number[] => {
-  const boundaries: number[] = [];
-  const re = /\S+\s*/g;
-  let match: RegExpExecArray | null;
-  while ((match = re.exec(text)) !== null) {
-    boundaries.push(match.index + match[0].length);
-  }
-  if (boundaries.length === 0 || boundaries[boundaries.length - 1] < text.length) {
-    boundaries.push(text.length);
-  }
-  return boundaries;
-};
-
-/**
- * Runs a word-by-word streaming reveal.
- *
- * On natural completion: pushes assistant message, caches, calls onComplete.
- * On cancellation (via machineConfigStreamCancel): pushes + caches, but does
- * NOT call onComplete — the caller that cancelled is responsible for the
- * next phase transition.
- */
-const streamWords = (fullText: string, onComplete: () => void): void => {
-  const mc = store.state.chat?.machineConfig;
-  if (!mc) return;
-
-  mc.streamingText = { full: fullText, visible: '' };
-  store.notify();
-
-  const boundaries = buildWordBoundaries(fullText);
-  const WORD_INTERVAL_MS = 30;
-  let wordIdx = 0;
-
-  const finalise = () => {
-    const cur = store.state.chat?.machineConfig;
-    if (cur?.streamingText) {
-      cur.messages.push({ role: 'assistant', content: fullText });
-      cur.streamingText = undefined;
-      cacheMachineConfigMessages(cur.messages);
-    }
-  };
-
-  const advance = () => {
-    const cur = store.state.chat?.machineConfig;
-    if (!cur?.streamingText) return;
-
-    if (wordIdx >= boundaries.length) {
-      clearInterval(intervalId);
-      finalise();
-      machineConfigStreamCancel = null;
-      store.notify();
-      onComplete();
-      return;
-    }
-
-    cur.streamingText.visible = fullText.slice(0, boundaries[wordIdx]);
-    wordIdx++;
-    store.notify();
-  };
-
-  const intervalId = setInterval(advance, WORD_INTERVAL_MS);
-  advance();
-
-  machineConfigStreamCancel = () => {
-    clearInterval(intervalId);
-    finalise();
-    machineConfigStreamCancel = null;
-    // No onComplete — caller owns the next transition
-  };
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -706,17 +624,27 @@ const handleServerEvent = (type: string, data: Record<string, unknown>) => {
       store.notify();
       break;
 
-    case 'text': {
+    case 'text_delta': {
       const content: string = data.content as string;
-      if (machineConfigStreamCancel) {
-        machineConfigStreamCancel();
-        machineConfigStreamCancel = null;
+      if (currentMc.phase !== 'streaming') {
+        transition(currentMc, 'streaming');
+        currentMc.streamingText = { full: '', visible: '' };
       }
-      transition(currentMc, 'streaming');
+      currentMc.streamingText!.full += content;
+      currentMc.streamingText!.visible += content;
       store.notify();
-      streamWords(content, () => {
-        // Natural completion — stay in streaming until done/question/next text
-      });
+      break;
+    }
+
+    case 'text_done': {
+      const content: string = data.content as string;
+      const mc2 = store.state.chat?.machineConfig;
+      if (mc2) {
+        mc2.messages.push({ role: 'assistant', content });
+        mc2.streamingText = undefined;
+        cacheMachineConfigMessages(mc2.messages);
+        store.notify();
+      }
       break;
     }
 
@@ -732,11 +660,6 @@ const handleServerEvent = (type: string, data: Record<string, unknown>) => {
       break;
 
     case 'question': {
-      if (machineConfigStreamCancel) {
-        machineConfigStreamCancel();
-        machineConfigStreamCancel = null;
-      }
-
       const mc2 = store.state.chat?.machineConfig;
       if (!mc2) return;
       const lastMsg = mc2.messages[mc2.messages.length - 1];
@@ -754,10 +677,6 @@ const handleServerEvent = (type: string, data: Record<string, unknown>) => {
     }
 
     case 'done': {
-      if (machineConfigStreamCancel) {
-        machineConfigStreamCancel();
-        machineConfigStreamCancel = null;
-      }
       const mc2 = store.state.chat?.machineConfig;
       if (mc2) {
         mc2.phase = 'idle';
@@ -799,7 +718,7 @@ const connectEvents = (): Promise<void> => {
 
       // Register event listeners BEFORE waiting for open — avoids missing
       // events that arrive between onopen and listener registration
-      const eventTypes = ['thinking', 'text', 'tool_start', 'tool_end', 'question', 'done', 'error'];
+      const eventTypes = ['thinking', 'text_delta', 'text_done', 'tool_start', 'tool_end', 'question', 'done', 'error'];
       for (const type of eventTypes) {
         es.addEventListener(type, (event) => {
           try {

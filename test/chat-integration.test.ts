@@ -124,7 +124,7 @@ class TestClient {
 
       const handler = (type: string, data: Record<string, unknown>) => {
         collected.push({ direction: 'server', data, ts: Date.now() });
-        if (type === 'done' || type === 'question') {
+        if (type === 'done' || type === 'question' || type === 'error') {
           cleanup();
           resolve(collected);
         }

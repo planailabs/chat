@@ -62,18 +62,14 @@ export const GET: APIRoute = async ({ request }) => {
   // ── Check for pending question to send on connect ───────────────────────
   let pendingQuestion: unknown = null;
   try {
-    const { data: chatRow } = await supabase
-      .from('machine_config_chat')
-      .select('messages')
+    const { data } = await supabase
+      .from('machine_config_state')
+      .select('phase, pending_question')
       .eq('user_id', user.id)
       .maybeSingle();
 
-    const stored = chatRow?.messages;
-    if (stored && typeof stored === 'object' && (stored as any).v === 1) {
-      const record = stored as { phase: string; pendingQuestion: unknown };
-      if (record.phase === 'waiting_for_answer' && record.pendingQuestion) {
-        pendingQuestion = record.pendingQuestion;
-      }
+    if (data?.phase === 'waiting_for_answer' && data.pending_question) {
+      pendingQuestion = data.pending_question;
     }
   } catch {
     // Non-critical — continue without pending question

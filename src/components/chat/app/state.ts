@@ -90,7 +90,7 @@ export interface ChatState {
   };
   /** Machine config AI chat state */
   machineConfig?: {
-    messages: Array<{ role: 'user' | 'assistant' | 'cancel'; content: string }>;
+    messages: Array<{ id?: string; role: 'user' | 'assistant' | 'cancel'; content: string }>;
     /**
      * State machine phase:
      *   idle      → composer visible (or greeting if pendingGreeting set)

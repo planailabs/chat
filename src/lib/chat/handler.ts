@@ -14,10 +14,11 @@
  *   { type: "answer",  text: "..." }
  *
  * Protocol — server → client (SSE /api/chat/events):
- *   thinking, text, tool_start, tool_end, question, done, error
+ *   thinking, text_delta, text_done, tool_start, tool_end, question, done, error
+ *   (text kept as fallback for backwards compat)
  */
 
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import Anthropic from '@anthropic-ai/sdk';
 import { buildToolDefinitions, executeTool, isClientSideTool } from './tools';
 import { buildSystemPrompt } from './prompt';
@@ -43,10 +44,10 @@ export interface ChatConfig {
 type Phase = 'idle' | 'waiting_for_answer' | 'tool_pending';
 
 type StoredMessage =
-  | { role: 'user'; content: string }
-  | { role: 'assistant'; content: Anthropic.ContentBlock[] }
-  | { role: 'user'; content: Anthropic.ToolResultBlockParam[] }
-  | { role: 'cancel'; content: string };
+  | { id?: string; role: 'user'; content: string }
+  | { id?: string; role: 'assistant'; content: Anthropic.ContentBlock[] }
+  | { id?: string; role: 'user'; content: Anthropic.ToolResultBlockParam[] }
+  | { id?: string; role: 'cancel'; content: string };
 
 interface QuestionInput {
   type: 'multiple_choice' | 'text';
@@ -54,19 +55,18 @@ interface QuestionInput {
   options?: string[];
 }
 
-/** Stored in the DB `messages` JSONB column */
-interface ConversationRecord {
-  v: 1;
+/** In-memory state for skipPersistence mode */
+interface MemoryState {
   phase: Phase;
-  messages: StoredMessage[];
   pendingQuestion: QuestionInput | null;
+  messages: StoredMessage[];
 }
 
 // ─── Connection Registry + Locking ──────────────────────────────────────────
 
 const activeSessions = new Map<string, string>();  // userId → lockId
 const connections = new Map<string, Set<SSEWriter>>();  // userId → all SSE connections
-const memoryRecords = new Map<string, ConversationRecord>();  // userId → in-memory record (skipPersistence mode)
+const memoryRecords = new Map<string, MemoryState>();  // userId → in-memory record (skipPersistence mode)
 
 let lockCounter = 0;
 
@@ -115,15 +115,82 @@ export function broadcast(userId: string, event: string, data: unknown): void {
   }
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
+// ─── DB Operations ──────────────────────────────────────────────────────────
 
-/** Load a ConversationRecord from the raw JSONB value. */
-const loadRecord = (raw: unknown): ConversationRecord => {
-  if (raw && typeof raw === 'object' && (raw as any).v === 1) {
-    return raw as ConversationRecord;
-  }
-  return { v: 1, phase: 'idle', messages: [], pendingQuestion: null };
-};
+async function loadState(supabase: SupabaseClient, userId: string): Promise<{ phase: Phase; pendingQuestion: QuestionInput | null }> {
+  const { data } = await supabase
+    .from('machine_config_state')
+    .select('phase, pending_question')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (!data) return { phase: 'idle', pendingQuestion: null };
+  return { phase: data.phase as Phase, pendingQuestion: data.pending_question as QuestionInput | null };
+}
+
+async function loadMessages(supabase: SupabaseClient, userId: string): Promise<StoredMessage[]> {
+  const { data } = await supabase
+    .from('machine_config_messages')
+    .select('id, role, content, content_blocks, ordinal')
+    .eq('user_id', userId)
+    .order('ordinal', { ascending: true });
+
+  if (!data) return [];
+  return data.map((row) => {
+    const base = { id: row.id };
+    if (row.role === 'cancel') {
+      return { ...base, role: 'cancel' as const, content: row.content };
+    }
+    if (row.role === 'assistant') {
+      // Reconstruct ContentBlock[] from content_blocks, falling back to text
+      const blocks: Anthropic.ContentBlock[] = row.content_blocks
+        ? (row.content_blocks as Anthropic.ContentBlock[])
+        : [{ type: 'text', text: row.content, citations: [] } as Anthropic.ContentBlock];
+      return { ...base, role: 'assistant' as const, content: blocks };
+    }
+    // user — either plain text or tool results
+    if (row.content_blocks && Array.isArray(row.content_blocks) &&
+        row.content_blocks.length > 0 && (row.content_blocks[0] as any)?.type === 'tool_result') {
+      return { ...base, role: 'user' as const, content: row.content_blocks as Anthropic.ToolResultBlockParam[] };
+    }
+    return { ...base, role: 'user' as const, content: row.content };
+  });
+}
+
+async function upsertState(supabase: SupabaseClient, userId: string, phase: Phase, pendingQuestion: QuestionInput | null): Promise<void> {
+  await supabase
+    .from('machine_config_state')
+    .upsert({
+      user_id: userId,
+      phase,
+      pending_question: pendingQuestion,
+    }, { onConflict: 'user_id' });
+}
+
+async function appendMessage(
+  supabase: SupabaseClient,
+  userId: string,
+  role: string,
+  content: string,
+  contentBlocks: unknown | null,
+  ordinal: number,
+): Promise<string> {
+  const { data } = await supabase
+    .from('machine_config_messages')
+    .insert({
+      user_id: userId,
+      role,
+      content,
+      content_blocks: contentBlocks,
+      ordinal,
+    })
+    .select('id')
+    .single();
+
+  return data?.id ?? '';
+}
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
 
 /**
  * Convert StoredMessage[] → Claude MessageParam[], merging consecutive
@@ -282,6 +349,64 @@ const getLastToolUseBlocks = (messages: StoredMessage[]): Anthropic.ToolUseBlock
   return null;
 };
 
+/** Extract display text from a StoredMessage */
+const extractDisplayText = (msg: StoredMessage): string => {
+  if (typeof msg.content === 'string') return msg.content;
+  if (Array.isArray(msg.content)) {
+    return (msg.content as any[])
+      .filter((b) => b.type === 'text' && b.text)
+      .map((b) => b.text as string)
+      .join('\n\n');
+  }
+  return '';
+};
+
+// ─── Persistence Adapter ────────────────────────────────────────────────────
+
+interface PersistenceAdapter {
+  setPhase(phase: Phase, pendingQuestion?: QuestionInput | null): Promise<void>;
+  appendMsg(msg: StoredMessage): Promise<void>;
+}
+
+function createDbAdapter(
+  supabase: SupabaseClient,
+  userId: string,
+  ordinalRef: { value: number },
+): PersistenceAdapter {
+  return {
+    async setPhase(phase, pendingQuestion) {
+      await upsertState(supabase, userId, phase, pendingQuestion ?? null);
+    },
+    async appendMsg(msg) {
+      const ordinal = ordinalRef.value++;
+      const displayText = extractDisplayText(msg);
+      const contentBlocks = typeof msg.content === 'string' ? null : msg.content;
+      const id = await appendMessage(supabase, userId, msg.role, displayText, contentBlocks, ordinal);
+      msg.id = id;
+    },
+  };
+}
+
+function createMemoryAdapter(userId: string, messages: StoredMessage[]): PersistenceAdapter {
+  return {
+    async setPhase(phase, pendingQuestion) {
+      let rec = memoryRecords.get(userId);
+      if (!rec) {
+        rec = { phase: 'idle', pendingQuestion: null, messages };
+        memoryRecords.set(userId, rec);
+      }
+      rec.phase = phase;
+      rec.pendingQuestion = pendingQuestion ?? null;
+      rec.messages = messages;
+    },
+    async appendMsg(msg) {
+      messages.push(msg);
+      const rec = memoryRecords.get(userId);
+      if (rec) rec.messages = messages;
+    },
+  };
+}
+
 // ─── Main Handler ───────────────────────────────────────────────────────────
 
 export async function handleChatMessage(
@@ -299,33 +424,11 @@ export async function handleChatMessage(
     : null;
 
   // ── Per-request state ─────────────────────────────────────────────────────
-  let record: ConversationRecord = { v: 1, phase: 'idle', messages: [], pendingQuestion: null };
+  let phase: Phase = 'idle';
+  let pendingQuestion: QuestionInput | null = null;
+  let messages: StoredMessage[] = [];
   let customerToken: string | null = null;
   let configSchema: string | undefined;
-
-  // ── Persist ───────────────────────────────────────────────────────────────
-
-  const persist = async () => {
-    if (config.skipPersistence) {
-      // In-memory fallback for test/no-DB mode
-      memoryRecords.set(userId, record);
-      return;
-    }
-    if (!supabase) return;
-    try {
-      await supabase
-        .from('machine_config_chat')
-        .upsert({ user_id: userId, messages: record }, { onConflict: 'user_id' });
-    } catch {
-      // Ignore persistence errors
-    }
-  };
-
-  const setPhase = async (phase: Phase, pendingQuestion?: QuestionInput | null) => {
-    record.phase = phase;
-    record.pendingQuestion = pendingQuestion ?? null;
-    await persist();
-  };
 
   // ── Init ──────────────────────────────────────────────────────────────────
 
@@ -364,30 +467,53 @@ export async function handleChatMessage(
 
   const recordPromise = (async () => {
     if (config.skipPersistence) {
-      return memoryRecords.get(userId) ?? null;
+      const rec = memoryRecords.get(userId);
+      return rec ? { phase: rec.phase, pendingQuestion: rec.pendingQuestion, messages: rec.messages } : null;
     }
     if (supabase) {
-      const { data: chatRow } = await supabase
-        .from('machine_config_chat')
-        .select('messages')
-        .eq('user_id', userId)
-        .maybeSingle();
-      return chatRow?.messages ? loadRecord(chatRow.messages) : null;
+      const [state, msgs] = await Promise.all([
+        loadState(supabase, userId),
+        loadMessages(supabase, userId),
+      ]);
+      return { phase: state.phase, pendingQuestion: state.pendingQuestion, messages: msgs };
     }
     return null;
   })();
 
   const [schema, currentConfig, loadedRecord] = await Promise.all([schemaPromise, configPromise, recordPromise]);
   configSchema = schema;
-  if (loadedRecord) record = loadedRecord;
+  if (loadedRecord) {
+    phase = loadedRecord.phase;
+    pendingQuestion = loadedRecord.pendingQuestion;
+    messages = loadedRecord.messages;
+  }
 
-  console.log(`[chat] Loaded: ${record.messages.length} msgs, phase=${record.phase}`);
+  console.log(`[chat] Loaded: ${messages.length} msgs, phase=${phase}`);
+
+  // ── Ordinal tracking ──────────────────────────────────────────────────────
+  const ordinalRef = { value: messages.length };
+
+  // ── Persistence adapter ───────────────────────────────────────────────────
+  const adapter: PersistenceAdapter = (config.skipPersistence || !supabase)
+    ? createMemoryAdapter(userId, messages)
+    : createDbAdapter(supabase, userId, ordinalRef);
+
+  const setPhase = async (p: Phase, pq?: QuestionInput | null) => {
+    phase = p;
+    pendingQuestion = pq ?? null;
+    await adapter.setPhase(p, pq);
+  };
+
+  const appendMsg = async (msg: StoredMessage) => {
+    messages.push(msg);
+    await adapter.appendMsg(msg);
+  };
 
   // ── Handle incoming message based on type and current phase ────────────────
 
   if (body.type === 'answer') {
     // Answer to a pending question — resume from waiting_for_answer
-    if (record.phase !== 'waiting_for_answer') {
+    if (phase !== 'waiting_for_answer') {
       broadcast(userId, 'error', { type: 'error', message: 'No pending question to answer' });
       return;
     }
@@ -395,7 +521,7 @@ export async function handleChatMessage(
     const answer = body.text;
     const cancelled = answer === '__cancel__';
 
-    const toolUseBlocks = getLastToolUseBlocks(record.messages);
+    const toolUseBlocks = getLastToolUseBlocks(messages);
     if (!toolUseBlocks) {
       broadcast(userId, 'error', { type: 'error', message: 'Resume error: no tool_use blocks found' });
       return;
@@ -404,9 +530,9 @@ export async function handleChatMessage(
     const clientToolBlock = toolUseBlocks.find((b) => isClientSideTool(b.name));
 
     if (cancelled) {
-      record.messages.push({ role: 'cancel', content: '' });
+      await appendMsg({ role: 'cancel', content: '' });
     } else {
-      record.messages.push({ role: 'user', content: answer });
+      await appendMsg({ role: 'user', content: answer });
     }
 
     const toolResults = buildQuestionToolResults(
@@ -415,16 +541,16 @@ export async function handleChatMessage(
       answer,
       cancelled,
     );
-    record.messages.push({ role: 'user', content: toolResults });
+    await appendMsg({ role: 'user', content: toolResults });
     await setPhase('idle');
   } else if (body.type === 'message') {
     // New user message
-    if (record.phase === 'waiting_for_answer' || record.phase === 'tool_pending') {
+    if (phase === 'waiting_for_answer' || phase === 'tool_pending') {
       broadcast(userId, 'error', { type: 'error', message: 'A conversation turn is already in progress' });
       return;
     }
 
-    record.messages.push({ role: 'user', content: body.text });
+    await appendMsg({ role: 'user', content: body.text });
     await setPhase('idle');
   } else {
     broadcast(userId, 'error', { type: 'error', message: `Unknown message type: ${body.type}` });
@@ -433,7 +559,7 @@ export async function handleChatMessage(
 
   // ── Run the tool loop ─────────────────────────────────────────────────────
 
-  await runToolLoop(userId, config, record, customerToken!, locale, configSchema, currentConfig, setPhase);
+  await runToolLoop(userId, config, messages, phase, customerToken!, locale, configSchema, currentConfig, setPhase, appendMsg);
 }
 
 // ─── Question Tool Results ──────────────────────────────────────────────────
@@ -459,12 +585,14 @@ const buildQuestionToolResults = (
 async function runToolLoop(
   userId: string,
   config: ChatConfig,
-  record: ConversationRecord,
+  messages: StoredMessage[],
+  phase: Phase,
   customerToken: string,
   locale: string,
   configSchema: string | undefined,
   currentConfig: string | undefined,
   setPhase: (phase: Phase, pendingQuestion?: QuestionInput | null) => Promise<void>,
+  appendMsg: (msg: StoredMessage) => Promise<void>,
 ): Promise<void> {
   const anthropic = new Anthropic({ apiKey: config.anthropicApiKey });
   const systemPrompt = buildSystemPrompt(locale, configSchema);
@@ -472,10 +600,10 @@ async function runToolLoop(
 
   // ── Pre-step: resume from tool_pending ──────────────────────────────────
 
-  if (record.phase === 'tool_pending') {
+  if (phase === 'tool_pending') {
     broadcast(userId, 'thinking', { type: 'thinking' });
 
-    const toolUseBlocks = getLastToolUseBlocks(record.messages);
+    const toolUseBlocks = getLastToolUseBlocks(messages);
     if (!toolUseBlocks) throw new Error('Resume error: no tool_use blocks found');
 
     const toolResults: Anthropic.ToolResultBlockParam[] = [];
@@ -491,7 +619,7 @@ async function runToolLoop(
       broadcast(userId, 'tool_end', { type: 'tool_end', name: block.name });
     }
 
-    record.messages.push({ role: 'user', content: toolResults });
+    await appendMsg({ role: 'user', content: toolResults });
     await setPhase('idle');
   }
 
@@ -503,7 +631,7 @@ async function runToolLoop(
   while (rounds < MAX_TOOL_ROUNDS) {
     rounds++;
 
-    const trimmed = trimMessages(record.messages.filter((m) => m.role !== 'cancel'));
+    const trimmed = trimMessages(messages.filter((m) => m.role !== 'cancel'));
     const claudeMessages = sanitizeMessages(toClaudeMessages(trimmed));
 
     // Inject current config as a hidden message (not stored, always re-inserted)
@@ -521,7 +649,9 @@ async function runToolLoop(
 
     broadcast(userId, 'thinking', { type: 'thinking' });
 
-    const response = await anthropic.messages.create({
+    // ── Real streaming via messages.stream() ────────────────────────────────
+
+    const stream = anthropic.messages.stream({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 2048,
       system: systemPrompt,
@@ -529,19 +659,26 @@ async function runToolLoop(
       messages: claudeMessages,
     });
 
+    stream.on('text', (delta) => {
+      broadcast(userId, 'text_delta', { type: 'text_delta', content: delta });
+    });
+
+    const response = await stream.finalMessage();
+
     const toolUseBlocks = response.content.filter((b) => b.type === 'tool_use') as Anthropic.ToolUseBlock[];
     const textBlocks = response.content.filter((b) => b.type === 'text') as Anthropic.TextBlock[];
     console.log(`[chat] stop=${response.stop_reason}, ${toolUseBlocks.length} tools, ${textBlocks.length} text`);
 
+    // Send text_done for each text block (full text for client to finalize)
     for (const block of textBlocks) {
-      if (block.text) broadcast(userId, 'text', { type: 'text', content: block.text });
+      if (block.text) broadcast(userId, 'text_done', { type: 'text_done', content: block.text });
     }
 
     // ── Final response (no tools or end_turn) ──────────────────────────────
     if (toolUseBlocks.length === 0 || response.stop_reason === 'end_turn') {
       const safeContent = response.content.filter((b) => b.type !== 'tool_use');
       if (safeContent.length > 0) {
-        record.messages.push({ role: 'assistant', content: safeContent });
+        await appendMsg({ role: 'assistant', content: safeContent });
       }
       await setPhase('idle');
       broadcast(userId, 'done', { type: 'done' });
@@ -549,7 +686,7 @@ async function runToolLoop(
     }
 
     // Store full assistant response (tool_use blocks included)
-    record.messages.push({ role: 'assistant', content: response.content });
+    await appendMsg({ role: 'assistant', content: response.content });
 
     // ── ask_question ────────────────────────────────────────────────────────
     const clientToolBlock = toolUseBlocks.find((b) => isClientSideTool(b.name));
@@ -583,17 +720,17 @@ async function runToolLoop(
       broadcast(userId, 'tool_end', { type: 'tool_end', name: block.name });
     }
 
-    record.messages.push({ role: 'user', content: toolResults });
+    await appendMsg({ role: 'user', content: toolResults });
     await setPhase('idle');
   }
 
   // Safety: max rounds
   const msg = "I've been working on your request but it required too many steps. Could you try a more specific request?";
-  record.messages.push({
+  await appendMsg({
     role: 'assistant',
     content: [{ type: 'text', text: msg, citations: [] }] as Anthropic.ContentBlock[],
   });
   await setPhase('idle');
-  broadcast(userId, 'text', { type: 'text', content: msg });
+  broadcast(userId, 'text_done', { type: 'text_done', content: msg });
   broadcast(userId, 'done', { type: 'done' });
 }

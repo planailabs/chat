@@ -2,13 +2,9 @@
  * GET /api/chat/history/
  *
  * Fetches the persisted machine-config conversation for the authenticated user.
- * Returns { messages: Array<{role, content}> } or { messages: [] } if none.
+ * Returns { messages: Array<{id, role, content}>, phase?, pendingQuestion? } or { messages: [] }.
  *
- * Storage format is a v1 ConversationRecord:
- *   { v: 1, phase, messages: StoredMessage[], pendingQuestion }
- *
- * Assistant messages have ContentBlock[] content — we extract text blocks
- * and flatten to displayable strings. Tool-result user messages are skipped.
+ * Queries normalized tables: machine_config_state + machine_config_messages.
  */
 
 export const prerender = false;
@@ -24,41 +20,30 @@ const jsonResponse = (data: unknown, status = 200) =>
   });
 
 /**
- * Flatten a stored message to a displayable { role, content: string } form.
- * - user (string content): pass through
- * - user (ToolResultBlockParam[]): skip — internal
- * - assistant (ContentBlock[]): extract text blocks
- * - cancel: pass through
+ * Flatten a message row to a displayable { id, role, content: string } form.
+ * Skips rows where content is empty and content_blocks has tool_result entries.
  */
 const flattenMessage = (
-  msg: { role: string; content: unknown },
-): { role: string; content: string } | null => {
-  const { role, content } = msg;
+  row: { id: string; role: string; content: string; content_blocks: unknown },
+): { id: string; role: string; content: string } | null => {
+  const { id, role, content, content_blocks } = row;
 
   if (role === 'cancel') {
-    return { role, content: typeof content === 'string' ? content : '' };
+    return { id, role, content: content ?? '' };
   }
 
-  if (typeof content === 'string') {
-    return { role, content };
+  // Skip user messages with tool_result blocks (internal)
+  if (role === 'user' && Array.isArray(content_blocks) &&
+      content_blocks.length > 0 && (content_blocks[0] as any)?.type === 'tool_result') {
+    return null;
   }
 
-  if (Array.isArray(content)) {
-    // User message with tool_result blocks → skip (internal)
-    if (content.length > 0 && content[0]?.type === 'tool_result') {
-      return null;
-    }
-
-    // Assistant message with ContentBlock[] → extract text
-    const textParts = content
-      .filter((b: any) => b.type === 'text' && b.text)
-      .map((b: any) => b.text as string);
-
-    if (textParts.length === 0) return null; // tool_use only — skip
-    return { role: 'assistant', content: textParts.join('\n\n') };
+  // Skip assistant messages with no text content (tool_use only)
+  if (role === 'assistant' && !content) {
+    return null;
   }
 
-  return null;
+  return { id, role, content };
 };
 
 export const GET: APIRoute = async ({ request }) => {
@@ -86,32 +71,35 @@ export const GET: APIRoute = async ({ request }) => {
     return jsonResponse({ error: 'Unauthorized' }, 401);
   }
 
-  // ─── Fetch chat history ─────────────────────────────────────────────────
-  const { data, error } = await supabase
-    .from('machine_config_chat')
-    .select('messages')
-    .eq('user_id', user.id)
-    .maybeSingle();
+  // ─── Fetch state + messages in parallel ─────────────────────────────────
+  const [stateResult, messagesResult] = await Promise.all([
+    supabase
+      .from('machine_config_state')
+      .select('phase, pending_question')
+      .eq('user_id', user.id)
+      .maybeSingle(),
+    supabase
+      .from('machine_config_messages')
+      .select('id, role, content, content_blocks')
+      .eq('user_id', user.id)
+      .order('ordinal', { ascending: true }),
+  ]);
 
-  if (error) {
-    console.error('[chat/history] Fetch error:', error);
+  if (messagesResult.error) {
+    console.error('[chat/history] Fetch error:', messagesResult.error);
     return jsonResponse({ error: 'Failed to load chat history' }, 500);
   }
 
-  const stored = data?.messages;
-  const rawMessages: Array<{ role: string; content: unknown }> =
-    stored && typeof stored === 'object' && (stored as any).v === 1
-      ? (stored as any).messages ?? []
-      : [];
-
-  const messages = rawMessages.map(flattenMessage).filter(Boolean);
+  const messages = (messagesResult.data ?? [])
+    .map(flattenMessage)
+    .filter(Boolean);
 
   // Include pending question and phase for session restoration
-  const record = stored as any;
   const extra: Record<string, unknown> = {};
-  if (record?.phase === 'waiting_for_answer' && record.pendingQuestion) {
-    extra.pendingQuestion = record.pendingQuestion;
-    extra.phase = record.phase;
+  const state = stateResult.data;
+  if (state?.phase === 'waiting_for_answer' && state.pending_question) {
+    extra.pendingQuestion = state.pending_question;
+    extra.phase = state.phase;
   }
 
   return jsonResponse({ messages, ...extra });
