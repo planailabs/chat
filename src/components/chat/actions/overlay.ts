@@ -1,4 +1,5 @@
 import { store } from '../app/store';
+import { profileSetDataExport } from '../app/profileState';
 
 let settingsOverlayHistoryActive = false;
 
@@ -19,7 +20,7 @@ export const closeSettingsOverlay = (options?: { fromHistory?: boolean }) => {
   if (!state.isSettingsOverlayOpen) {
     return;
   }
-  store.state.profile.dataExportStatus = 'idle';
+  profileSetDataExport(store.state.profile, 'idle', false);
   store.setState({
     isSettingsOverlayOpen: false,
   });

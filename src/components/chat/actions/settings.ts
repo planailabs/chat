@@ -43,7 +43,7 @@ export const requestAccountDeletion = async (locale: LocaleContent) => {
 
   const ps = state.profile;
   profileSetNewsletterSyncing(ps, true);
-store.notify();
+  store.notify();
 
   try {
     const timestamp = new Date().toISOString();
@@ -81,7 +81,7 @@ export const handleDataExport = async (locale: LocaleContent) => {
   }
 
   profileSetDataExport(ps, 'started', true);
-store.notify();
+  store.notify();
 
   try {
     const exportPayload = await exportUserData({ userId: state.userId });
@@ -115,7 +115,7 @@ export const persistNewsletterChoice = async (
 
   const ps = state.profile;
   profileSetNewsletterSyncing(ps, true);
-store.notify();
+  store.notify();
 
   try {
     await persistNewsletterPreference({
