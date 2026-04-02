@@ -9,6 +9,7 @@ import { describe, test, expect, beforeAll, afterAll, beforeEach } from 'vitest'
 import http from 'node:http';
 import { startServer, readDotenv } from './test-server';
 import { evaluateExchange, generateAnswer, type LogEntry } from './haiku-evaluator';
+import type { ChatModeId } from '../src/lib/chat/modes';
 
 // ─── Env ──────────────────────────────────────────────────────────────────────
 
@@ -27,13 +28,17 @@ class TestClient {
   private listeners: Array<(type: string, data: Record<string, unknown>) => void> = [];
   private sseReq: http.ClientRequest | null = null;
 
-  constructor(private port: number, private lang = 'en') {}
+  constructor(
+    private port: number,
+    private lang = 'en',
+    private mode: ChatModeId = 'machine_config',
+  ) {}
 
   /** Open an SSE connection to GET /api/chat/events */
   async connect(): Promise<void> {
     return new Promise((resolve, reject) => {
       const req = http.get(
-        `http://localhost:${this.port}/api/chat/events`,
+        `http://localhost:${this.port}/api/chat/events?mode=${this.mode}`,
         { headers: { Accept: 'text/event-stream' } },
         (res) => {
           if (res.statusCode !== 200) {
@@ -86,7 +91,7 @@ class TestClient {
     const body = JSON.stringify(data);
     const res = await new Promise<http.IncomingMessage>((resolve, reject) => {
       const req = http.request(
-        `http://localhost:${this.port}/api/chat/message?lang=${this.lang}`,
+        `http://localhost:${this.port}/api/chat/message?lang=${this.lang}&mode=${this.mode}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
@@ -196,7 +201,29 @@ function lastEventData(events: LogEntry[]): unknown {
   return undefined;
 }
 
-// ─── Test ─────────────────────────────────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/** POST helper that returns the status code */
+function postRaw(port: number, path: string, jsonBody: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      `http://localhost:${port}${path}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(jsonBody) },
+      },
+      (res) => {
+        res.resume();
+        res.on('end', () => resolve(res.statusCode!));
+      },
+    );
+    req.on('error', reject);
+    req.write(jsonBody);
+    req.end();
+  });
+}
+
+// ─── Tests ───────────────────────────────────────────────────────────────────
 
 describe('Chat Integration', () => {
   let port: number;
@@ -227,8 +254,10 @@ describe('Chat Integration', () => {
     closeServer?.();
   });
 
-  test('full conversation: agent name → user name → skills', async () => {
-    const client = new TestClient(port);
+  // ─── Machine Config Mode ────────────────────────────────────────────────
+
+  test('machine_config: full conversation — agent name → user name → skills', async () => {
+    const client = new TestClient(port, 'en', 'machine_config');
     await client.connect();
 
     // Phase 1: initial message → expect ask_question about agent name
@@ -274,8 +303,8 @@ describe('Chat Integration', () => {
     client.close();
   }, 300_000);
 
-  test('German language: responds in German when lang=de', async () => {
-    const client = new TestClient(port, 'de');
+  test('machine_config: responds in German when lang=de', async () => {
+    const client = new TestClient(port, 'de', 'machine_config');
     await client.connect();
 
     const events1 = await client.send(
@@ -289,7 +318,6 @@ describe('Chat Integration', () => {
     console.log(`[eval-de] pass=${eval1.pass} — ${eval1.reasoning}`);
     expect(eval1.pass).toBe(true);
 
-    // Log transcript
     console.log('\n=== German Transcript ===');
     for (const entry of client.getLog()) {
       console.log(`[${entry.direction}] ${JSON.stringify(entry.data)}`);
@@ -298,51 +326,57 @@ describe('Chat Integration', () => {
     client.close();
   }, 120_000);
 
-  test('locking: second POST returns 409 while first is processing', async () => {
-    const client1 = new TestClient(port);
-    const client2 = new TestClient(port);
+  // ─── Sales Mode ─────────────────────────────────────────────────────────
+
+  test('sales: responds to inquiry and asks a structured question', async () => {
+    const client = new TestClient(port, 'en', 'sales');
+    await client.connect();
+
+    const events1 = await client.send(
+      { type: 'message', text: 'We have 50 Macs and need help managing them' },
+      60_000,
+    );
+
+    // Sales mode should respond and use ask_question tool
+    const terminal = lastEventType(events1);
+    expect(terminal === 'question' || terminal === 'done').toBe(true);
+
+    const eval1 = await evaluateExchange(apiKey, client.getLog(),
+      'The server responded as a sales assistant, acknowledging the fleet size and either asking a follow-up question or providing helpful information');
+    console.log(`[eval-sales] pass=${eval1.pass} — ${eval1.reasoning}`);
+    expect(eval1.pass).toBe(true);
+
+    console.log('\n=== Sales Transcript ===');
+    for (const entry of client.getLog()) {
+      console.log(`[${entry.direction}] ${JSON.stringify(entry.data)}`);
+    }
+
+    client.close();
+  }, 120_000);
+
+  // ─── Locking (per-mode isolation) ───────────────────────────────────────
+
+  test('locking: second POST to same mode returns 409 while first is processing', async () => {
+    const client1 = new TestClient(port, 'en', 'machine_config');
+    const client2 = new TestClient(port, 'en', 'machine_config');
     await client1.connect();
     await client2.connect();
 
     // Client1 sends a message (starts processing)
-    const body = JSON.stringify({ type: 'message', text: 'Hello' });
-    const post1 = new Promise<number>((resolve, reject) => {
-      const req = http.request(
-        `http://localhost:${port}/api/chat/message?lang=en`,
-        { method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } },
-        (res) => {
-          res.resume(); // drain response body
-          res.on('end', () => resolve(res.statusCode!));
-        },
-      );
-      req.on('error', reject);
-      req.write(body);
-      req.end();
-    });
-
-    const status1 = await post1;
+    const status1 = await postRaw(port,
+      '/api/chat/message?lang=en&mode=machine_config',
+      JSON.stringify({ type: 'message', text: 'Hello' }),
+    );
     expect(status1).toBe(202);
 
-    // Client2 sends immediately — should get 409
-    const body2 = JSON.stringify({ type: 'message', text: 'Also hello' });
-    const post2 = new Promise<number>((resolve, reject) => {
-      const req = http.request(
-        `http://localhost:${port}/api/chat/message?lang=en`,
-        { method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body2) } },
-        (res) => {
-          res.resume(); // drain response body
-          res.on('end', () => resolve(res.statusCode!));
-        },
-      );
-      req.on('error', reject);
-      req.write(body2);
-      req.end();
-    });
-
-    const status2 = await post2;
+    // Client2 sends immediately to same mode — should get 409
+    const status2 = await postRaw(port,
+      '/api/chat/message?lang=en&mode=machine_config',
+      JSON.stringify({ type: 'message', text: 'Also hello' }),
+    );
     expect(status2).toBe(409);
 
-    // Wait for client1's processing to complete so both SSE connections get events
+    // Wait for client1's processing to complete
     await new Promise<void>((resolve) => {
       const timer = setTimeout(() => { clearInterval(poll); resolve(); }, 60_000);
 
@@ -358,7 +392,7 @@ describe('Chat Integration', () => {
       }, 100);
     });
 
-    // Both clients should have received events
+    // Both clients should have received events (shared SSE for same user+mode)
     const client1Events = client1.getLog().filter((e) => e.direction === 'server');
     const client2Events = client2.getLog().filter((e) => e.direction === 'server');
     expect(client1Events.length).toBeGreaterThan(0);
@@ -366,5 +400,53 @@ describe('Chat Integration', () => {
 
     client1.close();
     client2.close();
+  }, 120_000);
+
+  test('locking: different modes can process concurrently', async () => {
+    const mcClient = new TestClient(port, 'en', 'machine_config');
+    const salesClient = new TestClient(port, 'en', 'sales');
+    await mcClient.connect();
+    await salesClient.connect();
+
+    // POST to machine_config
+    const status1 = await postRaw(port,
+      '/api/chat/message?lang=en&mode=machine_config',
+      JSON.stringify({ type: 'message', text: 'Hello' }),
+    );
+    expect(status1).toBe(202);
+
+    // POST to sales concurrently — should NOT be blocked (different mode)
+    const status2 = await postRaw(port,
+      '/api/chat/message?lang=en&mode=sales',
+      JSON.stringify({ type: 'message', text: 'Tell me about plan.ai' }),
+    );
+    expect(status2).toBe(202);
+
+    // Wait for both to finish
+    const waitForTerminal = (client: TestClient) =>
+      new Promise<void>((resolve) => {
+        const timer = setTimeout(() => { clearInterval(poll); resolve(); }, 60_000);
+        const poll = setInterval(() => {
+          const log = client.getLog();
+          const terminal = log.some((e) =>
+            e.direction === 'server' &&
+            ['done', 'question', 'error'].includes((e.data as any)?.type),
+          );
+          if (terminal) {
+            clearInterval(poll);
+            clearTimeout(timer);
+            resolve();
+          }
+        }, 100);
+      });
+
+    await Promise.all([waitForTerminal(mcClient), waitForTerminal(salesClient)]);
+
+    // Both should have received events
+    expect(mcClient.getLog().filter((e) => e.direction === 'server').length).toBeGreaterThan(0);
+    expect(salesClient.getLog().filter((e) => e.direction === 'server').length).toBeGreaterThan(0);
+
+    mcClient.close();
+    salesClient.close();
   }, 120_000);
 });
