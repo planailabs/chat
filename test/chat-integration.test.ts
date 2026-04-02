@@ -7,8 +7,9 @@
 
 import { describe, test, expect, beforeAll, afterAll, beforeEach } from 'vitest';
 import http from 'node:http';
-import { startServer, readDotenv } from './test-server';
+import { startServer, readDotenv, type TestServer } from './test-server';
 import { evaluateExchange, generateAnswer, type LogEntry } from './haiku-evaluator';
+import { parse, stringify } from 'smol-toml';
 import type { ChatModeId } from '../src/lib/chat/modes';
 
 // ─── Env ──────────────────────────────────────────────────────────────────────
@@ -223,17 +224,54 @@ function postRaw(port: number, path: string, jsonBody: string): Promise<number> 
   });
 }
 
+// ─── Mac-mgmt Config Helpers ─────────────────────────────────────────────────
+
+/** Read the current TOML config from mac-mgmt */
+async function getConfig(srv: TestServer): Promise<string> {
+  const res = await fetch(`${srv.macMgmtUrl}/api/setting/config`, {
+    headers: { Authorization: `Bearer ${srv.customerToken}`, Accept: 'application/json' },
+  });
+  return res.ok ? res.text() : '';
+}
+
+/** Write a full TOML config to mac-mgmt */
+async function setConfig(srv: TestServer, toml: string): Promise<void> {
+  await fetch(`${srv.macMgmtUrl}/api/setting/config`, {
+    method: 'PUT',
+    headers: {
+      Authorization: `Bearer ${srv.customerToken}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({ config_toml: toml }),
+  });
+}
+
+/** Remove agent_name and user_name from the [global] section */
+async function clearNameFields(srv: TestServer): Promise<string> {
+  const toml = await getConfig(srv);
+  const doc = parse(toml) as Record<string, unknown>;
+  const global = doc.global as Record<string, unknown> | undefined;
+  if (global) {
+    delete global.agent_name;
+    delete global.user_name;
+  }
+  await setConfig(srv, stringify(doc));
+  return toml; // return original for restoration
+}
+
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 describe('Chat Integration', () => {
   let port: number;
+  let srv: TestServer;
   let closeServer: () => void;
   let apiKey: string;
 
   beforeAll(async () => {
-    const server = await startServer();
-    port = server.port;
-    closeServer = server.close;
+    srv = await startServer();
+    port = srv.port;
+    closeServer = srv.close;
     apiKey = getApiKey();
   });
 
@@ -256,52 +294,81 @@ describe('Chat Integration', () => {
 
   // ─── Machine Config Mode ────────────────────────────────────────────────
 
-  test('machine_config: full conversation — agent name → user name → skills', async () => {
+  test('machine_config: fresh setup — agent name → user name → industry → skills', async () => {
+    // Clear agent_name and user_name so the assistant asks for them
+    const originalConfig = await clearNameFields(srv);
+
+    try {
+      const client = new TestClient(port, 'en', 'machine_config');
+      await client.connect();
+
+      // Phase 1: initial message → expect ask_question about agent name
+      const events1 = await client.send({ type: 'message', text: 'Hi, I want to set up my machine' }, 60_000);
+      expect(lastEventType(events1)).toBe('question');
+      const eval1 = await evaluateExchange(apiKey, client.getLog(),
+        'The server asked what the user wants to call their agent/assistant');
+      console.log(`[eval1] pass=${eval1.pass} — ${eval1.reasoning}`);
+      expect(eval1.pass).toBe(true);
+
+      // Phase 2: answer agent name → expect ask_question about user name
+      const events2 = await client.send({ type: 'answer', text: 'Jarvis' }, 60_000);
+      expect(lastEventType(events2)).toBe('question');
+      const eval2 = await evaluateExchange(apiKey, client.getLog(),
+        'The server asked what the user wants to be called (their name)');
+      console.log(`[eval2] pass=${eval2.pass} — ${eval2.reasoning}`);
+      expect(eval2.pass).toBe(true);
+
+      // Phase 3: answer user name → expect config update + industry question
+      const events3 = await client.send({ type: 'answer', text: 'Maciej' }, 60_000);
+      expect(lastEventType(events3)).toBe('question');
+      const eval3 = await evaluateExchange(apiKey, client.getLog(),
+        'The server updated config and asked about industry or work type');
+      console.log(`[eval3] pass=${eval3.pass} — ${eval3.reasoning}`);
+      expect(eval3.pass).toBe(true);
+
+      // Phase 4: answer industry → expect skill/tool fetching until done
+      const events4 = await client.sendUntilDone(
+        { type: 'answer', text: 'Software development' },
+        { apiKey, timeout: 180_000 },
+      );
+      const eval4 = await evaluateExchange(apiKey, client.getLog(),
+        'After the user said "Software development", the server called tools to fetch available skills, bundles, or MCP servers');
+      console.log(`[eval4] pass=${eval4.pass} — ${eval4.reasoning}`);
+      expect(eval4.pass).toBe(true);
+
+      console.log('\n=== Full Transcript ===');
+      for (const entry of client.getLog()) {
+        console.log(`[${entry.direction}] ${JSON.stringify(entry.data)}`);
+      }
+
+      client.close();
+    } finally {
+      // Restore original config
+      await setConfig(srv, originalConfig);
+    }
+  }, 300_000);
+
+  test('machine_config: existing config — skips name questions, asks about industry or offers help', async () => {
+    // Config already has agent_name and user_name set (restored by previous test)
     const client = new TestClient(port, 'en', 'machine_config');
     await client.connect();
 
-    // Phase 1: initial message → expect ask_question about agent name
-    const events1 = await client.send({ type: 'message', text: 'Hi, I want to set up my machine' }, 60_000);
-    expect(lastEventType(events1)).toBe('question');
-    const eval1 = await evaluateExchange(apiKey, client.getLog(),
-      'The server asked what the user wants to call their agent/assistant');
-    console.log(`[eval1] pass=${eval1.pass} — ${eval1.reasoning}`);
-    expect(eval1.pass).toBe(true);
+    const events = await client.send({ type: 'message', text: 'Hello' }, 60_000);
+    const terminal = lastEventType(events);
+    expect(terminal === 'question' || terminal === 'done').toBe(true);
 
-    // Phase 2: answer agent name → expect ask_question about user name
-    const events2 = await client.send({ type: 'answer', text: 'Jarvis' }, 60_000);
-    expect(lastEventType(events2)).toBe('question');
-    const eval2 = await evaluateExchange(apiKey, client.getLog(),
-      'The server asked what the user wants to be called (their name)');
-    console.log(`[eval2] pass=${eval2.pass} — ${eval2.reasoning}`);
-    expect(eval2.pass).toBe(true);
+    const evalResult = await evaluateExchange(apiKey, client.getLog(),
+      'The server recognized existing config (names already set) and either asked about industry/work, offered to help configure skills/tools, or provided relevant suggestions — without re-asking for agent name or user name');
+    console.log(`[eval-existing] pass=${evalResult.pass} — ${evalResult.reasoning}`);
+    expect(evalResult.pass).toBe(true);
 
-    // Phase 3: answer user name → expect config update + industry question
-    const events3 = await client.send({ type: 'answer', text: 'Maciej' }, 60_000);
-    expect(lastEventType(events3)).toBe('question');
-    const eval3 = await evaluateExchange(apiKey, client.getLog(),
-      'The server updated config and asked about industry or work type');
-    console.log(`[eval3] pass=${eval3.pass} — ${eval3.reasoning}`);
-    expect(eval3.pass).toBe(true);
-
-    // Phase 4: answer industry → expect skill/tool fetching until done
-    const events4 = await client.sendUntilDone(
-      { type: 'answer', text: 'Software development' },
-      { apiKey, timeout: 180_000 },
-    );
-    const eval4 = await evaluateExchange(apiKey, client.getLog(),
-      'After the user said "Software development", the server called tools to fetch available skills, bundles, or MCP servers');
-    console.log(`[eval4] pass=${eval4.pass} — ${eval4.reasoning}`);
-    expect(eval4.pass).toBe(true);
-
-    // Log full transcript
-    console.log('\n=== Full Transcript ===');
+    console.log('\n=== Existing Config Transcript ===');
     for (const entry of client.getLog()) {
       console.log(`[${entry.direction}] ${JSON.stringify(entry.data)}`);
     }
 
     client.close();
-  }, 300_000);
+  }, 120_000);
 
   test('machine_config: responds in German when lang=de', async () => {
     const client = new TestClient(port, 'de', 'machine_config');
@@ -350,6 +417,48 @@ describe('Chat Integration', () => {
     for (const entry of client.getLog()) {
       console.log(`[${entry.direction}] ${JSON.stringify(entry.data)}`);
     }
+
+    client.close();
+  }, 120_000);
+
+  // ─── Locking (per-mode isolation) ───────────────────────────────────────
+
+  // ─── Anti-Prompt Tests (cupcake recipe) ──────────────────────────────
+
+  test('machine_config: rejects off-topic requests (cupcake recipe)', async () => {
+    const client = new TestClient(port, 'en', 'machine_config');
+    await client.connect();
+
+    const events = await client.send(
+      { type: 'message', text: 'Give me a cupcake recipe with chocolate frosting' },
+      60_000,
+    );
+    const terminal = lastEventType(events);
+    expect(terminal === 'question' || terminal === 'done').toBe(true);
+
+    const evalResult = await evaluateExchange(apiKey, client.getLog(),
+      'The server did NOT provide a cupcake recipe. Instead it redirected the conversation back to machine configuration, or politely declined the off-topic request');
+    console.log(`[eval-mc-anti] pass=${evalResult.pass} — ${evalResult.reasoning}`);
+    expect(evalResult.pass).toBe(true);
+
+    client.close();
+  }, 120_000);
+
+  test('sales: rejects off-topic requests (cupcake recipe)', async () => {
+    const client = new TestClient(port, 'en', 'sales');
+    await client.connect();
+
+    const events = await client.send(
+      { type: 'message', text: 'Give me a cupcake recipe with chocolate frosting' },
+      60_000,
+    );
+    const terminal = lastEventType(events);
+    expect(terminal === 'question' || terminal === 'done').toBe(true);
+
+    const evalResult = await evaluateExchange(apiKey, client.getLog(),
+      'The server did NOT provide a cupcake recipe. Instead it redirected the conversation back to sales/plan.ai topics, or politely declined the off-topic request');
+    console.log(`[eval-sales-anti] pass=${evalResult.pass} — ${evalResult.reasoning}`);
+    expect(evalResult.pass).toBe(true);
 
     client.close();
   }, 120_000);

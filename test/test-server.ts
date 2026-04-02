@@ -56,7 +56,14 @@ export function readDotenv(mode = 'development'): Record<string, string> {
   return env;
 }
 
-export async function startServer(): Promise<{ port: number; close: () => void }> {
+export interface TestServer {
+  port: number;
+  close: () => void;
+  macMgmtUrl: string;
+  customerToken: string;
+}
+
+export async function startServer(): Promise<TestServer> {
   const env = readDotenv();
 
   const required = ['CUSTOMER_TOKEN', 'ANTHROPIC_API_KEY', 'MAC_MGMT_URL'] as const;
@@ -183,6 +190,8 @@ export async function startServer(): Promise<{ port: number; close: () => void }
       resolveP({
         port,
         close: () => { server.close(); },
+        macMgmtUrl: config.macMgmtUrl,
+        customerToken: config.customerToken!,
       });
     });
   });

@@ -75,9 +75,13 @@ export function compositeKey(userId: string, modeId: string): string {
   return `${userId}:${modeId}`;
 }
 
-/** Clear in-memory conversation record (for tests). */
+/** Clear in-memory conversation records for a user across all modes (for tests). */
 export function clearMemoryRecord(userId: string): void {
-  memoryRecords.delete(userId);
+  for (const key of memoryRecords.keys()) {
+    if (key === userId || key.startsWith(`${userId}:`)) {
+      memoryRecords.delete(key);
+    }
+  }
 }
 
 export function acquireLock(key: string): string | null {
@@ -436,16 +440,18 @@ interface PersistenceAdapter {
 function createDbAdapter(
   supabase: SupabaseClient,
   userId: string,
+  messages: StoredMessage[],
   ordinalRef: { value: number },
   stateTable: string,
   messagesTable: string,
-  modeColumn: string | null,
+  modeColumn: string,
 ): PersistenceAdapter {
   return {
     async setPhase(phase, pendingQuestion) {
       await upsertState(supabase, userId, phase, pendingQuestion ?? null, stateTable, modeColumn);
     },
     async appendMsg(msg) {
+      messages.push(msg);
       const ordinal = ordinalRef.value++;
       const displayText = extractDisplayText(msg);
       const contentBlocks = typeof msg.content === 'string' ? null : msg.content;
@@ -558,7 +564,7 @@ export async function handleChatMessage(
   // ── Persistence adapter ───────────────────────────────────────────────────
   const adapter: PersistenceAdapter = (config.skipPersistence || !supabase)
     ? createMemoryAdapter(connKey, messages)
-    : createDbAdapter(supabase, userId, ordinalRef, mode.stateTable, mode.messagesTable, mode.modeColumn);
+    : createDbAdapter(supabase, userId, messages, ordinalRef, mode.stateTable, mode.messagesTable, mode.modeColumn);
 
   const setPhase = async (p: Phase, pq?: QuestionInput | null) => {
     phase = p;
@@ -567,7 +573,6 @@ export async function handleChatMessage(
   };
 
   const appendMsg = async (msg: StoredMessage) => {
-    messages.push(msg);
     await adapter.appendMsg(msg);
   };
 
