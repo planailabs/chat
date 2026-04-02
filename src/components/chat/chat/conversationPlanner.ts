@@ -22,7 +22,7 @@ export type PromptConversationPlan =
       followup: 'newsletter-reconsider';
     }
   | {
-      type: 'machineConfig';
+      type: 'aiChat';
     };
 
 export type PostLoginQuestionPlan = 'default' | 'alreadySubscribed';
@@ -40,9 +40,12 @@ export const planPromptConversation = (
     };
   }
 
-  // Machine configuration mode: user has a customer_token
-  if (state.customerToken) {
-    return { type: 'machineConfig' };
+  // AI chat mode: machine config (needs token), or sales/newsletter (always available)
+  if (state.activeChatMode === 'machine_config' && state.customerToken) {
+    return { type: 'aiChat' };
+  }
+  if (state.activeChatMode === 'sales' || state.activeChatMode === 'newsletter_signup') {
+    return { type: 'aiChat' }; // Reuse the same plan type — routes to AI chat
   }
 
   const newsletterStatus = state.newsletterPreference.status;

@@ -1,17 +1,23 @@
 /**
  * GET /api/chat/history/
  *
- * Fetches the persisted machine-config conversation for the authenticated user.
+ * Fetches the persisted conversation for the authenticated user.
  * Returns { messages: Array<{id, role, content}>, phase?, pendingQuestion? } or { messages: [] }.
  *
- * Queries normalized tables: machine_config_state + machine_config_messages.
+ * Supports ?mode= query param (defaults to machine_config).
  */
 
 export const prerender = false;
 
 import type { APIRoute } from 'astro';
 import { createClient } from '@supabase/supabase-js';
+import { getChatModeConfig, type ChatModeId } from '@/lib/chat/modes';
 import { env } from '@/lib/env';
+
+// Ensure all modes are registered
+import '@/lib/chat/modes/machine-config';
+import '@/lib/chat/modes/sales';
+import '@/lib/chat/modes/newsletter';
 
 const jsonResponse = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), {
@@ -71,17 +77,27 @@ export const GET: APIRoute = async ({ request }) => {
     return jsonResponse({ error: 'Unauthorized' }, 401);
   }
 
+  // ─── Mode ─────────────────────────────────────────────────────────────────
+  const url = new URL(request.url);
+  const modeId = (url.searchParams.get('mode') ?? 'machine_config') as ChatModeId;
+  const mode = getChatModeConfig(modeId);
+  if (!mode) {
+    return jsonResponse({ error: `Unknown chat mode: ${modeId}` }, 400);
+  }
+
   // ─── Fetch state + messages in parallel ─────────────────────────────────
   const [stateResult, messagesResult] = await Promise.all([
     supabase
-      .from('machine_config_state')
+      .from(mode.stateTable)
       .select('phase, pending_question')
       .eq('user_id', user.id)
+      .eq('mode', mode.modeColumn)
       .maybeSingle(),
     supabase
-      .from('machine_config_messages')
+      .from(mode.messagesTable)
       .select('id, role, content, content_blocks')
       .eq('user_id', user.id)
+      .eq('mode', mode.modeColumn)
       .order('ordinal', { ascending: true }),
   ]);
 

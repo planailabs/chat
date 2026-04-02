@@ -193,8 +193,8 @@ export const renderChatSection = (
       </div>
     `;
 
-  // ─── Machine Config Mode ────────────────────────────────────────────────
-  const mc = state.chat.machineConfig;
+  // ─── AI Chat Mode ────────────────────────────────────��─────────────────
+  const mc = state.chat.aiChat;
   if (mc) {
     const messageBubbles = mc.messages
       .map((msg) => {
@@ -249,11 +249,14 @@ export const renderChatSection = (
         </div>`
       : '';
 
-    const toolIndicator = phase === 'tool'
+    const modeLocale = locale.chatModes[state.activeChatMode] ?? locale.chatModes.machine_config;
+    const hasServerTools = state.activeChatMode === 'machine_config';
+
+    const toolIndicator = phase === 'tool' && hasServerTools
       ? `<div class="flex justify-start">
           <div class="max-w-[min(100%,640px)] flex items-center gap-2 text-xs text-(--text-muted)">
             <span class="inline-block h-3 w-3 animate-spin rounded-full border-2 border-(--text-muted) border-t-transparent"></span>
-            ${escapeHtml(locale.machineConfig.configuringLabel)}
+            ${escapeHtml(modeLocale.configuringLabel)}
           </div>
         </div>`
       : '';
@@ -282,7 +285,7 @@ export const renderChatSection = (
               class="chat-cta-button chat-cta-button--cancel"
               data-action="mc-question-cancel"
             >
-              ${escapeHtml(locale.machineConfig.cancelLabel)}
+              ${escapeHtml(modeLocale.cancelLabel)}
             </button>`;
 
     const questionButtons =
@@ -313,7 +316,7 @@ export const renderChatSection = (
     const showComposer = phase === 'idle' || phase === 'error'
       || (phase === 'question' && activeQ?.type === 'text');
 
-    const placeholder = escapeHtml(locale.machineConfig.placeholder);
+    const placeholder = escapeHtml(modeLocale.placeholder);
     const greeting = mc.pendingGreeting;
     const hasGreeting = Boolean(greeting);
     const inputField = showComposer
@@ -347,10 +350,10 @@ export const renderChatSection = (
     const heroHeader = isEmptyState
       ? `<div class="space-y-3 text-center md:space-y-4">
           <p class="text-[0.65rem] uppercase tracking-[0.35em] text-(--text-muted) md:text-xs md:tracking-[0.4em]">
-            ${escapeHtml(locale.machineConfig.heroBadgeLabel)}
+            ${escapeHtml(modeLocale.heroBadgeLabel)}
           </p>
           <h1 class="text-3xl font-semibold tracking-tight sm:text-4xl md:text-5xl">
-            ${escapeHtml(locale.machineConfig.heading)}
+            ${escapeHtml(modeLocale.heading)}
           </h1>
         </div>`
       : '';

@@ -1,5 +1,6 @@
 export type LocaleKey = 'en' | 'de';
 type OAuthProviderName = 'google' | 'apple' | 'microsoft' | 'github';
+type ChatModeKey = 'machine_config' | 'sales' | 'newsletter_signup';
 
 export type ScenarioId = 'anonymousInvite' | 'postLoginNewsletter';
 
@@ -34,6 +35,15 @@ export interface ConversationScenario {
   id: ScenarioId;
   entryStepId: string;
   steps: Record<string, ConversationStep>;
+}
+
+export interface ChatModeLocale {
+  heroBadgeLabel: string;
+  heading: string;
+  placeholder: string;
+  cancelLabel: string;
+  configuringLabel: string;
+  greeting: string;
 }
 
 export interface LocaleContent {
@@ -116,6 +126,7 @@ export interface LocaleContent {
     cancelLabel: string;
     configuringLabel: string;
   };
+  chatModes: Record<ChatModeKey, ChatModeLocale>;
   conversationScenarios: Record<ScenarioId, ConversationScenario>;
 }
 
@@ -217,6 +228,32 @@ const en: LocaleContent = {
     placeholder: 'Install dev tools, add MCP servers, show my config...',
     cancelLabel: 'Skip',
     configuringLabel: 'Configuring…',
+  },
+  chatModes: {
+    machine_config: {
+      heroBadgeLabel: 'Machine configuration',
+      heading: 'What should your Mac do?',
+      placeholder: 'Install dev tools, add MCP servers, show my config...',
+      cancelLabel: 'Skip',
+      configuringLabel: 'Configuring…',
+      greeting: 'Hello',
+    },
+    sales: {
+      heroBadgeLabel: 'Sales',
+      heading: 'How can we help your team?',
+      placeholder: 'Tell us about your Mac fleet...',
+      cancelLabel: 'Skip',
+      configuringLabel: 'Thinking…',
+      greeting: 'Hello',
+    },
+    newsletter_signup: {
+      heroBadgeLabel: 'Newsletter',
+      heading: 'Stay in the loop',
+      placeholder: 'Ask about our newsletter...',
+      cancelLabel: 'Skip',
+      configuringLabel: 'Thinking…',
+      greeting: 'Hello',
+    },
   },
   conversationScenarios: {
     anonymousInvite: {
@@ -368,6 +405,32 @@ const de: LocaleContent = {
     placeholder: 'Dev-Tools installieren, MCP-Server hinzufügen, Config anzeigen...',
     cancelLabel: 'Überspringen',
     configuringLabel: 'Konfiguriere…',
+  },
+  chatModes: {
+    machine_config: {
+      heroBadgeLabel: 'Maschinenkonfiguration',
+      heading: 'Was soll dein Mac können?',
+      placeholder: 'Dev-Tools installieren, MCP-Server hinzufügen, Config anzeigen...',
+      cancelLabel: 'Überspringen',
+      configuringLabel: 'Konfiguriere…',
+      greeting: 'Hallo',
+    },
+    sales: {
+      heroBadgeLabel: 'Vertrieb',
+      heading: 'Wie können wir deinem Team helfen?',
+      placeholder: 'Erzähl uns von deiner Mac-Flotte...',
+      cancelLabel: 'Überspringen',
+      configuringLabel: 'Denke nach…',
+      greeting: 'Hallo',
+    },
+    newsletter_signup: {
+      heroBadgeLabel: 'Newsletter',
+      heading: 'Bleib auf dem Laufenden',
+      placeholder: 'Frag nach unserem Newsletter...',
+      cancelLabel: 'Überspringen',
+      configuringLabel: 'Denke nach…',
+      greeting: 'Hallo',
+    },
   },
   conversationScenarios: {
     anonymousInvite: {

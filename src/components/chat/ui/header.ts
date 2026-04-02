@@ -18,7 +18,7 @@ import type { AppState } from '../app/state';
 import { getOAuthIcon } from './oauthIcons';
 import { escapeHtml } from '../utils/html';
 import { store } from '../app/store';
-import { APP_VERSION } from '../constants';
+import { APP_VERSION, type ClientChatModeId } from '../constants';
 
 /**
  * Counter for unique SVG mask IDs to prevent DOM conflicts.
@@ -152,6 +152,64 @@ const renderAuthOptions = (locale: LocaleContent): string =>
     .join('');
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Mode Switcher
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface ChatModeOption {
+  id: ClientChatModeId;
+  label: string;
+  requiresToken: boolean;
+}
+
+const getModeOptions = (locale: LocaleContent): ChatModeOption[] => [
+  { id: 'machine_config', label: locale.chatModes.machine_config.heroBadgeLabel, requiresToken: true },
+  { id: 'sales', label: locale.chatModes.sales.heroBadgeLabel, requiresToken: false },
+  { id: 'newsletter_signup', label: locale.chatModes.newsletter_signup.heroBadgeLabel, requiresToken: false },
+];
+
+const renderModeSwitcher = (locale: LocaleContent, state: AppState): string => {
+  if (!state.isAuthenticated) return '';
+
+  const options = getModeOptions(locale).filter(
+    (opt) => !opt.requiresToken || state.customerToken,
+  );
+
+  // Don't show switcher if only one option available
+  if (options.length <= 1) return '';
+
+  const currentLabel = options.find((o) => o.id === state.activeChatMode)?.label ?? options[0].label;
+
+  const optionButtons = options
+    .map((opt) => {
+      const isSelected = state.activeChatMode === opt.id;
+      return `<button
+        type="button"
+        class="dropdown-option"
+        data-action="switch-chat-mode"
+        data-mode="${opt.id}"
+        role="menuitemradio"
+        aria-checked="${isSelected}">
+        <span>${escapeHtml(opt.label)}</span>
+        ${isSelected ? CHECK_ICON_SVG : ''}
+      </button>`;
+    })
+    .join('');
+
+  return `<div class="relative" data-menu="mode-switcher">
+    <button
+      class="pill-button pill-button--mode"
+      type="button"
+      data-action="mode-switcher-toggle"
+      aria-haspopup="menu">
+      ${escapeHtml(currentLabel)}
+    </button>
+    <div class="dropdown-panel dropdown-panel--mode hidden" role="menu" data-mode-dropdown>
+      <div class="flex flex-col gap-1">${optionButtons}</div>
+    </div>
+  </div>`;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Header Component
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -274,6 +332,8 @@ export const renderHeader = ({ locale, state }: HeaderParams): string => {
     </a>
 
     <div class="flex items-center gap-3 text-sm text-(--text-muted) md:gap-[14px]">
+      ${renderModeSwitcher(locale, state)}
+
       <div class="relative">
         <button
           class="icon-button tooltip"

@@ -20,8 +20,8 @@
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import Anthropic from '@anthropic-ai/sdk';
-import { buildToolDefinitions, executeTool, isClientSideTool } from './tools';
-import { buildSystemPrompt } from './prompt';
+import { isClientSideTool } from './tools';
+import type { ChatModeConfig, ModeContext } from './modes';
 
 // ─── Public Interfaces ──────────────────────────────────────────────────────
 
@@ -64,47 +64,52 @@ interface MemoryState {
 
 // ─── Connection Registry + Locking ──────────────────────────────────────────
 
-const activeSessions = new Map<string, string>();  // userId → lockId
-const connections = new Map<string, Set<SSEWriter>>();  // userId → all SSE connections
-const memoryRecords = new Map<string, MemoryState>();  // userId → in-memory record (skipPersistence mode)
+const activeSessions = new Map<string, string>();  // compositeKey → lockId
+const connections = new Map<string, Set<SSEWriter>>();  // compositeKey → all SSE connections
+const memoryRecords = new Map<string, MemoryState>();  // compositeKey → in-memory record (skipPersistence mode)
 
 let lockCounter = 0;
+
+/** Build composite key for per-user-per-mode isolation */
+export function compositeKey(userId: string, modeId: string): string {
+  return `${userId}:${modeId}`;
+}
 
 /** Clear in-memory conversation record (for tests). */
 export function clearMemoryRecord(userId: string): void {
   memoryRecords.delete(userId);
 }
 
-export function acquireLock(userId: string): string | null {
-  if (activeSessions.has(userId)) return null;
+export function acquireLock(key: string): string | null {
+  if (activeSessions.has(key)) return null;
   const lockId = `lock-${++lockCounter}-${Date.now()}`;
-  activeSessions.set(userId, lockId);
+  activeSessions.set(key, lockId);
   return lockId;
 }
 
-export function releaseLock(userId: string, lockId: string): void {
-  if (activeSessions.get(userId) === lockId) {
-    activeSessions.delete(userId);
+export function releaseLock(key: string, lockId: string): void {
+  if (activeSessions.get(key) === lockId) {
+    activeSessions.delete(key);
   }
 }
 
-export function addConnection(userId: string, writer: SSEWriter): () => void {
-  let set = connections.get(userId);
+export function addConnection(key: string, writer: SSEWriter): () => void {
+  let set = connections.get(key);
   if (!set) {
     set = new Set();
-    connections.set(userId, set);
+    connections.set(key, set);
   }
   set.add(writer);
 
   // Return unsubscribe function
   return () => {
     set!.delete(writer);
-    if (set!.size === 0) connections.delete(userId);
+    if (set!.size === 0) connections.delete(key);
   };
 }
 
-export function broadcast(userId: string, event: string, data: unknown): void {
-  const set = connections.get(userId);
+export function broadcast(key: string, event: string, data: unknown): void {
+  const set = connections.get(key);
   if (!set) return;
   for (const writer of set) {
     try {
@@ -117,22 +122,34 @@ export function broadcast(userId: string, event: string, data: unknown): void {
 
 // ─── DB Operations ──────────────────────────────────────────────────────────
 
-async function loadState(supabase: SupabaseClient, userId: string): Promise<{ phase: Phase; pendingQuestion: QuestionInput | null }> {
+async function loadState(
+  supabase: SupabaseClient,
+  userId: string,
+  stateTable: string,
+  modeColumn: string,
+): Promise<{ phase: Phase; pendingQuestion: QuestionInput | null }> {
   const { data } = await supabase
-    .from('machine_config_state')
+    .from(stateTable)
     .select('phase, pending_question')
     .eq('user_id', userId)
+    .eq('mode', modeColumn)
     .maybeSingle();
 
   if (!data) return { phase: 'idle', pendingQuestion: null };
   return { phase: data.phase as Phase, pendingQuestion: data.pending_question as QuestionInput | null };
 }
 
-async function loadMessages(supabase: SupabaseClient, userId: string): Promise<StoredMessage[]> {
+async function loadMessages(
+  supabase: SupabaseClient,
+  userId: string,
+  messagesTable: string,
+  modeColumn: string,
+): Promise<StoredMessage[]> {
   const { data } = await supabase
-    .from('machine_config_messages')
+    .from(messagesTable)
     .select('id, role, content, content_blocks, ordinal')
     .eq('user_id', userId)
+    .eq('mode', modeColumn)
     .order('ordinal', { ascending: true });
 
   if (!data) return [];
@@ -157,14 +174,20 @@ async function loadMessages(supabase: SupabaseClient, userId: string): Promise<S
   });
 }
 
-async function upsertState(supabase: SupabaseClient, userId: string, phase: Phase, pendingQuestion: QuestionInput | null): Promise<void> {
-  await supabase
-    .from('machine_config_state')
-    .upsert({
-      user_id: userId,
-      phase,
-      pending_question: pendingQuestion,
-    }, { onConflict: 'user_id' });
+async function upsertState(
+  supabase: SupabaseClient,
+  userId: string,
+  phase: Phase,
+  pendingQuestion: QuestionInput | null,
+  stateTable: string,
+  modeColumn: string,
+): Promise<void> {
+  await supabase.from(stateTable).upsert({
+    user_id: userId,
+    mode: modeColumn,
+    phase,
+    pending_question: pendingQuestion,
+  }, { onConflict: 'user_id,mode' });
 }
 
 async function appendMessage(
@@ -174,11 +197,14 @@ async function appendMessage(
   content: string,
   contentBlocks: unknown | null,
   ordinal: number,
+  messagesTable: string,
+  modeColumn: string,
 ): Promise<string> {
   const { data } = await supabase
-    .from('machine_config_messages')
+    .from(messagesTable)
     .insert({
       user_id: userId,
+      mode: modeColumn,
       role,
       content,
       content_blocks: contentBlocks,
@@ -188,6 +214,45 @@ async function appendMessage(
     .single();
 
   return data?.id ?? '';
+}
+
+// ─── Token Rate Limiting ─────────────────────────────────────────────────────
+
+const TOKEN_BUDGET_PER_HOUR = 1_000_000;
+
+export async function checkTokenBudget(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<{ allowed: boolean; used: number }> {
+  const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+
+  const { data } = await supabase
+    .from('chat_token_usage')
+    .select('input_tokens, output_tokens')
+    .eq('user_id', userId)
+    .gte('created_at', oneHourAgo);
+
+  const used = (data ?? []).reduce(
+    (sum, row) => sum + (row.input_tokens ?? 0) + (row.output_tokens ?? 0),
+    0,
+  );
+
+  return { allowed: used < TOKEN_BUDGET_PER_HOUR, used };
+}
+
+async function recordTokenUsage(
+  supabase: SupabaseClient,
+  userId: string,
+  mode: string,
+  inputTokens: number,
+  outputTokens: number,
+): Promise<void> {
+  await supabase.from('chat_token_usage').insert({
+    user_id: userId,
+    mode,
+    input_tokens: inputTokens,
+    output_tokens: outputTokens,
+  });
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -372,28 +437,31 @@ function createDbAdapter(
   supabase: SupabaseClient,
   userId: string,
   ordinalRef: { value: number },
+  stateTable: string,
+  messagesTable: string,
+  modeColumn: string | null,
 ): PersistenceAdapter {
   return {
     async setPhase(phase, pendingQuestion) {
-      await upsertState(supabase, userId, phase, pendingQuestion ?? null);
+      await upsertState(supabase, userId, phase, pendingQuestion ?? null, stateTable, modeColumn);
     },
     async appendMsg(msg) {
       const ordinal = ordinalRef.value++;
       const displayText = extractDisplayText(msg);
       const contentBlocks = typeof msg.content === 'string' ? null : msg.content;
-      const id = await appendMessage(supabase, userId, msg.role, displayText, contentBlocks, ordinal);
+      const id = await appendMessage(supabase, userId, msg.role, displayText, contentBlocks, ordinal, messagesTable, modeColumn);
       msg.id = id;
     },
   };
 }
 
-function createMemoryAdapter(userId: string, messages: StoredMessage[]): PersistenceAdapter {
+function createMemoryAdapter(key: string, messages: StoredMessage[]): PersistenceAdapter {
   return {
     async setPhase(phase, pendingQuestion) {
-      let rec = memoryRecords.get(userId);
+      let rec = memoryRecords.get(key);
       if (!rec) {
         rec = { phase: 'idle', pendingQuestion: null, messages };
-        memoryRecords.set(userId, rec);
+        memoryRecords.set(key, rec);
       }
       rec.phase = phase;
       rec.pendingQuestion = pendingQuestion ?? null;
@@ -401,7 +469,7 @@ function createMemoryAdapter(userId: string, messages: StoredMessage[]): Persist
     },
     async appendMsg(msg) {
       messages.push(msg);
-      const rec = memoryRecords.get(userId);
+      const rec = memoryRecords.get(key);
       if (rec) rec.messages = messages;
     },
   };
@@ -414,8 +482,10 @@ export async function handleChatMessage(
   config: ChatConfig,
   locale: string,
   body: { type: string; text: string },
+  mode: ChatModeConfig,
 ): Promise<void> {
-  console.log(`[chat] handleChatMessage user=${userId} type=${body.type}`);
+  const connKey = compositeKey(userId, mode.id);
+  console.log(`[chat] handleChatMessage user=${userId} mode=${mode.id} type=${body.type}`);
 
   const supabase = (!config.customerToken || !config.skipPersistence)
     ? createClient(config.supabaseUrl, config.supabaseServiceKey, {
@@ -423,65 +493,57 @@ export async function handleChatMessage(
       })
     : null;
 
+  // ── Token rate limiting ──────────────────────────────────────────────────
+  if (supabase) {
+    const { allowed, used } = await checkTokenBudget(supabase, userId);
+    if (!allowed) {
+      broadcast(connKey, 'error', {
+        type: 'error',
+        message: `Token rate limit exceeded (${used.toLocaleString()} tokens used in the last hour, limit is ${TOKEN_BUDGET_PER_HOUR.toLocaleString()})`,
+      });
+      return;
+    }
+  }
+
   // ── Per-request state ─────────────────────────────────────────────────────
   let phase: Phase = 'idle';
   let pendingQuestion: QuestionInput | null = null;
   let messages: StoredMessage[] = [];
-  let customerToken: string | null = null;
-  let configSchema: string | undefined;
+  let modeContext: ModeContext = {};
 
-  // ── Init ──────────────────────────────────────────────────────────────────
+  // ── Mode-specific preparation ───────────────────────────────────────────
 
-  // Customer token
-  if (config.customerToken) {
-    customerToken = config.customerToken;
-  } else {
-    if (!supabase) {
-      broadcast(userId, 'error', { type: 'error', message: 'No customer token configured' });
-      return;
-    }
-    const { data: profile, error: profileError } = await supabase
-      .from('profiles')
-      .select('customer_token')
-      .eq('user_id', userId)
-      .maybeSingle();
-
-    if (profileError || !profile?.customer_token) {
-      console.warn('[chat] No customer token for user', userId, profileError?.message);
-      broadcast(userId, 'error', { type: 'error', message: 'No customer token configured' });
-      return;
-    }
-    customerToken = profile.customer_token as string;
-  }
-
-  // Config schema, current config, and conversation record in parallel
-  const authHeaders = { Authorization: `Bearer ${customerToken}`, Accept: 'application/json' };
-
-  const schemaPromise = fetch(`${config.macMgmtUrl}/api/setting/config/schema`, {
-    headers: authHeaders,
-  }).then((res) => res.ok ? res.text() : undefined).catch(() => undefined);
-
-  const configPromise = fetch(`${config.macMgmtUrl}/api/setting/config`, {
-    headers: authHeaders,
-  }).then((res) => res.ok ? res.text() : undefined).catch(() => undefined);
+  const preparePromise = mode.prepare
+    ? mode.prepare(userId, config, supabase)
+    : Promise.resolve(null);
 
   const recordPromise = (async () => {
     if (config.skipPersistence) {
-      const rec = memoryRecords.get(userId);
+      const rec = memoryRecords.get(connKey);
       return rec ? { phase: rec.phase, pendingQuestion: rec.pendingQuestion, messages: rec.messages } : null;
     }
     if (supabase) {
       const [state, msgs] = await Promise.all([
-        loadState(supabase, userId),
-        loadMessages(supabase, userId),
+        loadState(supabase, userId, mode.stateTable, mode.modeColumn),
+        loadMessages(supabase, userId, mode.messagesTable, mode.modeColumn),
       ]);
       return { phase: state.phase, pendingQuestion: state.pendingQuestion, messages: msgs };
     }
     return null;
   })();
 
-  const [schema, currentConfig, loadedRecord] = await Promise.all([schemaPromise, configPromise, recordPromise]);
-  configSchema = schema;
+  const [prepareResult, loadedRecord] = await Promise.all([preparePromise, recordPromise]);
+
+  // Check if prepare() signaled failure (e.g. missing customer token)
+  if (mode.prepare && prepareResult === null) {
+    broadcast(connKey, 'error', { type: 'error', message: 'Mode setup failed — missing required configuration' });
+    return;
+  }
+
+  if (prepareResult) {
+    modeContext = prepareResult;
+  }
+
   if (loadedRecord) {
     phase = loadedRecord.phase;
     pendingQuestion = loadedRecord.pendingQuestion;
@@ -495,8 +557,8 @@ export async function handleChatMessage(
 
   // ── Persistence adapter ───────────────────────────────────────────────────
   const adapter: PersistenceAdapter = (config.skipPersistence || !supabase)
-    ? createMemoryAdapter(userId, messages)
-    : createDbAdapter(supabase, userId, ordinalRef);
+    ? createMemoryAdapter(connKey, messages)
+    : createDbAdapter(supabase, userId, ordinalRef, mode.stateTable, mode.messagesTable, mode.modeColumn);
 
   const setPhase = async (p: Phase, pq?: QuestionInput | null) => {
     phase = p;
@@ -514,7 +576,7 @@ export async function handleChatMessage(
   if (body.type === 'answer') {
     // Answer to a pending question — resume from waiting_for_answer
     if (phase !== 'waiting_for_answer') {
-      broadcast(userId, 'error', { type: 'error', message: 'No pending question to answer' });
+      broadcast(connKey, 'error', { type: 'error', message: 'No pending question to answer' });
       return;
     }
 
@@ -523,7 +585,7 @@ export async function handleChatMessage(
 
     const toolUseBlocks = getLastToolUseBlocks(messages);
     if (!toolUseBlocks) {
-      broadcast(userId, 'error', { type: 'error', message: 'Resume error: no tool_use blocks found' });
+      broadcast(connKey, 'error', { type: 'error', message: 'Resume error: no tool_use blocks found' });
       return;
     }
 
@@ -546,20 +608,20 @@ export async function handleChatMessage(
   } else if (body.type === 'message') {
     // New user message
     if (phase === 'waiting_for_answer' || phase === 'tool_pending') {
-      broadcast(userId, 'error', { type: 'error', message: 'A conversation turn is already in progress' });
+      broadcast(connKey, 'error', { type: 'error', message: 'A conversation turn is already in progress' });
       return;
     }
 
     await appendMsg({ role: 'user', content: body.text });
     await setPhase('idle');
   } else {
-    broadcast(userId, 'error', { type: 'error', message: `Unknown message type: ${body.type}` });
+    broadcast(connKey, 'error', { type: 'error', message: `Unknown message type: ${body.type}` });
     return;
   }
 
   // ── Run the tool loop ─────────────────────────────────────────────────────
 
-  await runToolLoop(userId, config, messages, phase, customerToken!, locale, configSchema, currentConfig, setPhase, appendMsg);
+  await runToolLoop(userId, config, messages, phase, mode, modeContext, locale, connKey, setPhase, appendMsg, supabase);
 }
 
 // ─── Question Tool Results ──────────────────────────────────────────────────
@@ -587,36 +649,44 @@ async function runToolLoop(
   config: ChatConfig,
   messages: StoredMessage[],
   phase: Phase,
-  customerToken: string,
+  mode: ChatModeConfig,
+  modeContext: ModeContext,
   locale: string,
-  configSchema: string | undefined,
-  currentConfig: string | undefined,
+  connKey: string,
   setPhase: (phase: Phase, pendingQuestion?: QuestionInput | null) => Promise<void>,
   appendMsg: (msg: StoredMessage) => Promise<void>,
+  supabase: SupabaseClient | null,
 ): Promise<void> {
   const anthropic = new Anthropic({ apiKey: config.anthropicApiKey });
-  const systemPrompt = buildSystemPrompt(locale, configSchema);
-  const tools = buildToolDefinitions();
+  const extraContext: Record<string, string> = {};
+  for (const [k, v] of Object.entries(modeContext)) {
+    if (typeof v === 'string') extraContext[k] = v;
+  }
+  const systemPrompt = mode.buildSystemPrompt(locale, extraContext);
+  const tools = mode.buildToolDefinitions();
+
+  // Token usage accumulator
+  let totalInputTokens = 0;
+  let totalOutputTokens = 0;
 
   // ── Pre-step: resume from tool_pending ──────────────────────────────────
 
   if (phase === 'tool_pending') {
-    broadcast(userId, 'thinking', { type: 'thinking' });
+    broadcast(connKey, 'thinking', { type: 'thinking' });
 
     const toolUseBlocks = getLastToolUseBlocks(messages);
     if (!toolUseBlocks) throw new Error('Resume error: no tool_use blocks found');
 
     const toolResults: Anthropic.ToolResultBlockParam[] = [];
     for (const block of toolUseBlocks) {
-      broadcast(userId, 'tool_start', { type: 'tool_start', name: block.name });
-      const result = await executeTool(
-        block.name,
-        (block.input ?? {}) as Record<string, unknown>,
-        customerToken,
-        config.macMgmtUrl,
-      );
+      if (isClientSideTool(block.name)) continue;
+
+      broadcast(connKey, 'tool_start', { type: 'tool_start', name: block.name });
+      const result = mode.executeTool
+        ? await mode.executeTool(block.name, (block.input ?? {}) as Record<string, unknown>, modeContext)
+        : JSON.stringify({ error: `No tool executor for mode ${mode.id}` });
       toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: result });
-      broadcast(userId, 'tool_end', { type: 'tool_end', name: block.name });
+      broadcast(connKey, 'tool_end', { type: 'tool_end', name: block.name });
     }
 
     await appendMsg({ role: 'user', content: toolResults });
@@ -634,36 +704,36 @@ async function runToolLoop(
     const trimmed = trimMessages(messages.filter((m) => m.role !== 'cancel'));
     const claudeMessages = sanitizeMessages(toClaudeMessages(trimmed));
 
-    // Inject current config as a hidden message (not stored, always re-inserted)
-    if (currentConfig && claudeMessages.length > 0 && claudeMessages[0].role === 'user') {
-      const configNote = `[Current machine configuration]\n\`\`\`toml\n${currentConfig}\n\`\`\``;
-      const first = claudeMessages[0];
-      if (typeof first.content === 'string') {
-        first.content = configNote + '\n\n' + first.content;
-      } else {
-        (first.content as Anthropic.ContentBlockParam[]).unshift({ type: 'text' as const, text: configNote });
-      }
+    // Mode-specific context injection (e.g. machine config prepends TOML)
+    if (mode.injectContext) {
+      mode.injectContext(claudeMessages, modeContext);
     }
 
     console.log(`[chat] Round ${rounds}/${MAX_TOOL_ROUNDS}, ${claudeMessages.length} msgs`);
 
-    broadcast(userId, 'thinking', { type: 'thinking' });
+    broadcast(connKey, 'thinking', { type: 'thinking' });
 
     // ── Real streaming via messages.stream() ────────────────────────────────
 
     const stream = anthropic.messages.stream({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 2048,
+      model: mode.model,
+      max_tokens: mode.maxTokens,
       system: systemPrompt,
       tools,
       messages: claudeMessages,
     });
 
     stream.on('text', (delta) => {
-      broadcast(userId, 'text_delta', { type: 'text_delta', content: delta });
+      broadcast(connKey, 'text_delta', { type: 'text_delta', content: delta });
     });
 
     const response = await stream.finalMessage();
+
+    // Accumulate token usage
+    if (response.usage) {
+      totalInputTokens += response.usage.input_tokens ?? 0;
+      totalOutputTokens += response.usage.output_tokens ?? 0;
+    }
 
     const toolUseBlocks = response.content.filter((b) => b.type === 'tool_use') as Anthropic.ToolUseBlock[];
     const textBlocks = response.content.filter((b) => b.type === 'text') as Anthropic.TextBlock[];
@@ -671,7 +741,7 @@ async function runToolLoop(
 
     // Send text_done for each text block (full text for client to finalize)
     for (const block of textBlocks) {
-      if (block.text) broadcast(userId, 'text_done', { type: 'text_done', content: block.text });
+      if (block.text) broadcast(connKey, 'text_done', { type: 'text_done', content: block.text });
     }
 
     // ── Final response (no tools or end_turn) ──────────────────────────────
@@ -681,8 +751,8 @@ async function runToolLoop(
         await appendMsg({ role: 'assistant', content: safeContent });
       }
       await setPhase('idle');
-      broadcast(userId, 'done', { type: 'done' });
-      return;
+      broadcast(connKey, 'done', { type: 'done' });
+      break;
     }
 
     // Store full assistant response (tool_use blocks included)
@@ -698,9 +768,13 @@ async function runToolLoop(
 
       // Persist phase BEFORE sending question — resumable checkpoint
       await setPhase('waiting_for_answer', questionInput);
-      broadcast(userId, 'question', { type: 'question', question: questionInput });
+      broadcast(connKey, 'question', { type: 'question', question: questionInput });
 
       // Return — the next POST will resume with an answer
+      // Record tokens before returning
+      if (supabase && (totalInputTokens > 0 || totalOutputTokens > 0)) {
+        await recordTokenUsage(supabase, userId, mode.id, totalInputTokens, totalOutputTokens);
+      }
       return;
     }
 
@@ -709,15 +783,12 @@ async function runToolLoop(
 
     const toolResults: Anthropic.ToolResultBlockParam[] = [];
     for (const block of toolUseBlocks) {
-      broadcast(userId, 'tool_start', { type: 'tool_start', name: block.name });
-      const result = await executeTool(
-        block.name,
-        (block.input ?? {}) as Record<string, unknown>,
-        customerToken,
-        config.macMgmtUrl,
-      );
+      broadcast(connKey, 'tool_start', { type: 'tool_start', name: block.name });
+      const result = mode.executeTool
+        ? await mode.executeTool(block.name, (block.input ?? {}) as Record<string, unknown>, modeContext)
+        : JSON.stringify({ error: `No tool executor for mode ${mode.id}` });
       toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: result });
-      broadcast(userId, 'tool_end', { type: 'tool_end', name: block.name });
+      broadcast(connKey, 'tool_end', { type: 'tool_end', name: block.name });
     }
 
     await appendMsg({ role: 'user', content: toolResults });
@@ -725,12 +796,19 @@ async function runToolLoop(
   }
 
   // Safety: max rounds
-  const msg = "I've been working on your request but it required too many steps. Could you try a more specific request?";
-  await appendMsg({
-    role: 'assistant',
-    content: [{ type: 'text', text: msg, citations: [] }] as Anthropic.ContentBlock[],
-  });
-  await setPhase('idle');
-  broadcast(userId, 'text_done', { type: 'text_done', content: msg });
-  broadcast(userId, 'done', { type: 'done' });
+  if (rounds >= MAX_TOOL_ROUNDS) {
+    const msg = "I've been working on your request but it required too many steps. Could you try a more specific request?";
+    await appendMsg({
+      role: 'assistant',
+      content: [{ type: 'text', text: msg, citations: [] }] as Anthropic.ContentBlock[],
+    });
+    await setPhase('idle');
+    broadcast(connKey, 'text_done', { type: 'text_done', content: msg });
+    broadcast(connKey, 'done', { type: 'done' });
+  }
+
+  // Record accumulated token usage after loop completes
+  if (supabase && (totalInputTokens > 0 || totalOutputTokens > 0)) {
+    await recordTokenUsage(supabase, userId, mode.id, totalInputTokens, totalOutputTokens);
+  }
 }

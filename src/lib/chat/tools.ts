@@ -291,7 +291,7 @@ const TOOLS: ToolEntry[] = [
 
 // ─── Client-Side Tools (no endpoint — intercepted on the server) ────────────
 
-const ASK_QUESTION_TOOL: ToolDef = {
+export const ASK_QUESTION_TOOL: ToolDef = {
   name: 'ask_question',
   description:
     'Ask the user a structured question. Use "multiple_choice" for picking from options, "text" for free-form input.',

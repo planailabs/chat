@@ -15,8 +15,14 @@ export const prerender = false;
 
 import type { APIRoute } from 'astro';
 import { createClient } from '@supabase/supabase-js';
-import { addConnection, type SSEWriter } from '@/lib/chat/handler';
+import { addConnection, compositeKey, type SSEWriter } from '@/lib/chat/handler';
+import { getChatModeConfig, type ChatModeId } from '@/lib/chat/modes';
 import { env } from '@/lib/env';
+
+// Ensure all modes are registered
+import '@/lib/chat/modes/machine-config';
+import '@/lib/chat/modes/sales';
+import '@/lib/chat/modes/newsletter';
 
 export const GET: APIRoute = async ({ request }) => {
   if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {
@@ -27,18 +33,28 @@ export const GET: APIRoute = async ({ request }) => {
   }
 
   // ── Auth: Bearer header or ?token= query param ─────────────────────────
+  const url = new URL(request.url);
   let jwt: string | null = null;
   const authHeader = request.headers.get('Authorization');
   if (authHeader?.startsWith('Bearer ')) {
     jwt = authHeader.slice(7);
   } else {
-    const url = new URL(request.url);
     jwt = url.searchParams.get('token');
   }
 
   if (!jwt) {
     return new Response(JSON.stringify({ error: 'Missing auth' }), {
       status: 401,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  // ── Mode ──────────────────────────────────────────────────────────────────
+  const modeId = (url.searchParams.get('mode') ?? 'machine_config') as ChatModeId;
+  const mode = getChatModeConfig(modeId);
+  if (!mode) {
+    return new Response(JSON.stringify({ error: `Unknown chat mode: ${modeId}` }), {
+      status: 400,
       headers: { 'Content-Type': 'application/json' },
     });
   }
@@ -63,9 +79,10 @@ export const GET: APIRoute = async ({ request }) => {
   let pendingQuestion: unknown = null;
   try {
     const { data } = await supabase
-      .from('machine_config_state')
+      .from(mode.stateTable)
       .select('phase, pending_question')
       .eq('user_id', user.id)
+      .eq('mode', mode.modeColumn)
       .maybeSingle();
 
     if (data?.phase === 'waiting_for_answer' && data.pending_question) {
@@ -76,7 +93,7 @@ export const GET: APIRoute = async ({ request }) => {
   }
 
   // ── SSE stream ──────────────────────────────────────────────────────────
-  const userId = user.id;
+  const connKey = compositeKey(user.id, modeId);
 
   const stream = new ReadableStream({
     start(controller) {
@@ -99,7 +116,7 @@ export const GET: APIRoute = async ({ request }) => {
         },
       };
 
-      const unsubscribe = addConnection(userId, writer);
+      const unsubscribe = addConnection(connKey, writer);
 
       // Send pending question immediately if exists
       if (pendingQuestion) {

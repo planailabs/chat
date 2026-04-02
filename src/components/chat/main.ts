@@ -27,11 +27,13 @@ import {
   handleChatNewsletterChoice,
   handlePromptSubmit,
   restoreChatSession,
-  restoreMachineConfigSession,
-  sendMachineConfigMessage,
-  answerMachineConfigQuestion,
-  cancelMachineConfigQuestion,
+  restoreAIChatSession,
+  sendChatMessage,
+  answerChatQuestion,
+  cancelChatQuestion,
+  switchChatMode,
 } from './actions/chat';
+import type { ClientChatModeId } from './constants';
 import { persistLanguagePreference } from './actions/profile';
 import { openSettingsOverlay, closeSettingsOverlay } from './actions/overlay';
 import { initTheme, cycleThemeMode } from './actions/theme';
@@ -78,8 +80,8 @@ const initApp = () => {
       const isChat = state.heroPhase === 'chat';
       const isMachineConfigEmpty =
         isChat &&
-        state.chat?.machineConfig?.messages.length === 0 &&
-        Boolean(state.chat?.machineConfig?.pendingGreeting);
+        state.chat?.aiChat?.messages.length === 0 &&
+        Boolean(state.chat?.aiChat?.pendingGreeting);
       // Hero / empty machine config: use justify-center to vertically center content
       // Chat with messages: use pt-10 and start from top with scrollable content
       const mainClasses =
@@ -95,7 +97,7 @@ const initApp = () => {
         // Update Chat
         mainRegion.innerHTML = renderChatSection(locale, state);
         // Auto-scroll to bottom during streaming, waiting, or just after
-        const mc = state.chat?.machineConfig;
+        const mc = state.chat?.aiChat;
         if (mc?.phase === 'streaming' || mc?.phase === 'waiting'
           || mc?.phase === 'idle' || mc?.phase === 'question') {
           mainRegion.scrollTop = mainRegion.scrollHeight;
@@ -240,6 +242,7 @@ const initApp = () => {
       const target = event.target as Node | null;
       const languageMenu = document.querySelector('[data-menu="language"]');
       const authMenu = document.querySelector('[data-menu="auth"]');
+      const modeMenu = document.querySelector('[data-menu="mode-switcher"]');
       const state = store.state;
 
       let updates: Partial<typeof state> = {};
@@ -256,6 +259,14 @@ const initApp = () => {
       if (state.isAuthMenuOpen && authMenu && !authMenu.contains(target)) {
         updates.isAuthMenuOpen = false;
         hasUpdates = true;
+      }
+
+      // Close mode switcher dropdown on outside click
+      if (modeMenu && !modeMenu.contains(target)) {
+        const dropdown = modeMenu.querySelector<HTMLElement>('[data-mode-dropdown]');
+        if (dropdown && !dropdown.classList.contains('hidden')) {
+          dropdown.classList.add('hidden');
+        }
       }
 
       if (hasUpdates) {
@@ -313,7 +324,7 @@ const initApp = () => {
         const value = getMachineConfigValue(input);
         if (!value) return;
         clearMachineConfigInput(input);
-        void sendMachineConfigMessage(value);
+        void sendChatMessage(value);
       },
     );
 
@@ -330,7 +341,7 @@ const initApp = () => {
         const value = getMachineConfigValue(input);
         if (!value) return;
         clearMachineConfigInput(input);
-        void sendMachineConfigMessage(value);
+        void sendChatMessage(value);
       },
     );
 
@@ -372,7 +383,7 @@ const initApp = () => {
           btn.classList.add('is-disabled');
         });
         setTimeout(() => {
-          answerMachineConfigQuestion(choice);
+          answerChatQuestion(choice);
         }, 200);
       },
     );
@@ -384,7 +395,37 @@ const initApp = () => {
       '[data-action="mc-question-cancel"]',
       (event) => {
         event.stopPropagation();
-        cancelMachineConfigQuestion();
+        cancelChatQuestion();
+      },
+    );
+
+    // Chat: Mode Switcher Toggle
+    delegateEvent(
+      app,
+      'click',
+      '[data-action="mode-switcher-toggle"]',
+      (event) => {
+        event.stopPropagation();
+        const dropdown = app.querySelector<HTMLElement>('[data-mode-dropdown]');
+        if (dropdown) {
+          dropdown.classList.toggle('hidden');
+        }
+      },
+    );
+
+    // Chat: Mode Switch
+    delegateEvent(
+      app,
+      'click',
+      '[data-action="switch-chat-mode"]',
+      (event, target) => {
+        event.stopPropagation();
+        const modeId = target.getAttribute('data-mode') as ClientChatModeId | null;
+        if (modeId) {
+          const dropdown = app.querySelector<HTMLElement>('[data-mode-dropdown]');
+          if (dropdown) dropdown.classList.add('hidden');
+          switchChatMode(modeId);
+        }
       },
     );
 
@@ -454,7 +495,7 @@ const initApp = () => {
   }
 
   restoreChatSession();
-  restoreMachineConfigSession();
+  restoreAIChatSession();
   store.notify(); // Initial render via subscription (since render is subscribed)
   // We can also explicitly call render() if store.subscribe doesn't fire on init
   // But subscribe only fires on changes. So we do need an initial render.

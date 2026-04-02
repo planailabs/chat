@@ -6,10 +6,11 @@
  * - Post-login sequences (signed-in bubble, newsletter prompt)
  * - Session restoration from pre-auth cache
  * - Newsletter choice handling
+ * - Multi-mode AI chat (machine config, sales, newsletter)
  */
 
 import { store } from '../app/store';
-import { STORAGE_KEYS } from '../constants';
+import { chatStorageKey, type ClientChatModeId } from '../constants';
 import {
   locales,
   type LocaleContent,
@@ -333,25 +334,24 @@ export const handleChatNewsletterChoice = (choice: 'yes' | 'no') => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Machine Config Persistence (server-side via Supabase, sessionStorage as cache)
+// AI Chat Persistence (server-side via Supabase, sessionStorage as cache)
 // ─────────────────────────────────────────────────────────────────────────────
 
 type StoredMessage = { id?: string; role: 'user' | 'assistant' | 'cancel'; content: string };
 
-const cacheMachineConfigMessages = (messages: StoredMessage[]) => {
+const cacheAIChatMessages = (messages: StoredMessage[], modeId?: ClientChatModeId) => {
   try {
-    sessionStorage.setItem(
-      STORAGE_KEYS.MACHINE_CONFIG_CHAT,
-      JSON.stringify(messages),
-    );
+    const key = chatStorageKey(modeId ?? store.state.activeChatMode);
+    sessionStorage.setItem(key, JSON.stringify(messages));
   } catch {
     // sessionStorage full or unavailable — silently ignore
   }
 };
 
-const readCachedMachineConfigMessages = (): StoredMessage[] | null => {
+const readCachedAIChatMessages = (modeId?: ClientChatModeId): StoredMessage[] | null => {
   try {
-    const raw = sessionStorage.getItem(STORAGE_KEYS.MACHINE_CONFIG_CHAT);
+    const key = chatStorageKey(modeId ?? store.state.activeChatMode);
+    const raw = sessionStorage.getItem(key);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (Array.isArray(parsed) && parsed.length > 0) return parsed;
@@ -361,13 +361,19 @@ const readCachedMachineConfigMessages = (): StoredMessage[] | null => {
   return null;
 };
 
-export const clearMachineConfigMessages = () => {
+export const clearAIChatMessages = (modeId?: ClientChatModeId) => {
   try {
-    sessionStorage.removeItem(STORAGE_KEYS.MACHINE_CONFIG_CHAT);
+    const key = chatStorageKey(modeId ?? store.state.activeChatMode);
+    sessionStorage.removeItem(key);
   } catch {
     // ignore
   }
 };
+
+// Legacy aliases for backwards compat within this file
+const cacheMachineConfigMessages = cacheAIChatMessages;
+const readCachedMachineConfigMessages = readCachedAIChatMessages;
+export const clearMachineConfigMessages = () => clearAIChatMessages('machine_config');
 
 let cachedJwt: { token: string; expiresAt: number } | null = null;
 
@@ -383,12 +389,13 @@ const getJwt = async (): Promise<string | null> => {
 /**
  * Fetches chat history from the server and populates state + sessionStorage cache.
  */
-const fetchMachineConfigHistory = async (): Promise<StoredMessage[] | null> => {
+const fetchAIChatHistory = async (modeId?: ClientChatModeId): Promise<StoredMessage[] | null> => {
   try {
     const jwt = await getJwt();
     if (!jwt) return null;
 
-    const response = await fetch('/api/chat/history/', {
+    const mode = modeId ?? store.state.activeChatMode;
+    const response = await fetch(`/api/chat/history/?mode=${encodeURIComponent(mode)}`, {
       headers: { Authorization: `Bearer ${jwt}` },
     });
     if (!response.ok) return null;
@@ -396,7 +403,7 @@ const fetchMachineConfigHistory = async (): Promise<StoredMessage[] | null> => {
     const data = await response.json();
     const messages = data.messages as StoredMessage[];
     if (Array.isArray(messages) && messages.length > 0) {
-      cacheMachineConfigMessages(messages);
+      cacheAIChatMessages(messages, modeId);
       return messages;
     }
   } catch {
@@ -405,7 +412,7 @@ const fetchMachineConfigHistory = async (): Promise<StoredMessage[] | null> => {
   return null;
 };
 
-const initMachineConfigChat = (messages: StoredMessage[], phase: 'idle' | 'waiting' = 'idle') => {
+const initAIChat = (messages: StoredMessage[], phase: 'idle' | 'waiting' = 'idle') => {
   const state = store.state;
   state.chat = {
     userPrompt: messages[0]?.content ?? '',
@@ -414,7 +421,7 @@ const initMachineConfigChat = (messages: StoredMessage[], phase: 'idle' | 'waiti
     stream: { initialDelayMs: 0, chunkSize: 1, intervalMs: 0 },
     isStreaming: false,
     ctaVisible: false,
-    machineConfig: {
+    aiChat: {
       messages,
       phase,
     },
@@ -443,69 +450,95 @@ const verifyCustomerToken = async (): Promise<boolean> => {
 };
 
 /**
- * Restores a machine config chat session on page load.
+ * Restores an AI chat session on page load.
  * - Shows cached messages instantly (sessionStorage)
- * - Validates customer token against mac-mgmt
+ * - For machine_config: validates customer token against mac-mgmt
  * - Fetches authoritative history from server
  */
-export const restoreMachineConfigSession = (): void => {
+export const restoreAIChatSession = (): void => {
   const state = store.state;
-  if (!state.customerToken) return;
+  const mode = state.activeChatMode;
+
+  // Machine config mode requires customer token
+  if (mode === 'machine_config' && !state.customerToken) return;
+
   // Don't re-init if already active
-  if (state.chat?.machineConfig) return;
+  if (state.chat?.aiChat) return;
 
   // Instant restore from sessionStorage cache
-  const cached = readCachedMachineConfigMessages();
+  const cached = readCachedAIChatMessages(mode);
   if (cached && cached.length > 0) {
-    initMachineConfigChat(cached);
+    initAIChat(cached);
   } else {
     // Show empty chat with greeting immediately (centered empty state)
-    const greeting = state.localeKey === 'de' ? 'Hallo' : 'Hello';
-    initMachineConfigChat([]);
-    store.state.chat!.machineConfig!.pendingGreeting = greeting;
+    const locale = locales[state.localeKey];
+    const greeting = locale.chatModes[mode].greeting;
+    initAIChat([]);
+    store.state.chat!.aiChat!.pendingGreeting = greeting;
     store.notify();
   }
 
   // Validate token + fetch history in parallel, pre-connect EventSource eagerly
   void connectEvents();
 
-  const tokenValid = verifyCustomerToken();
-  const historyFetch = fetchMachineConfigHistory();
+  if (mode === 'machine_config') {
+    const tokenValid = verifyCustomerToken();
+    const historyFetch = fetchAIChatHistory(mode);
 
-  void Promise.all([tokenValid, historyFetch]).then(([valid, serverMessages]) => {
-    if (!valid) {
-      // Token is invalid — tear down machine config UI
-      console.warn('[chat] Customer token invalid, disabling machine config');
-      store.state.customerToken = null;
-      if (store.state.chat?.machineConfig) {
-        store.state.chat.machineConfig = undefined;
-        store.state.heroPhase = 'composer';
+    void Promise.all([tokenValid, historyFetch]).then(([valid, serverMessages]) => {
+      if (!valid) {
+        // Token is invalid — tear down AI chat UI
+        console.warn('[chat] Customer token invalid, disabling machine config');
+        store.state.customerToken = null;
+        if (store.state.chat?.aiChat) {
+          store.state.chat.aiChat = undefined;
+          store.state.heroPhase = 'composer';
+        }
+        clearAIChatMessages(mode);
+        disconnectEvents();
+        store.notify();
+        return;
       }
-      clearMachineConfigMessages();
-      disconnectEvents();
-      store.notify();
-      return;
-    }
 
-    const mc = store.state.chat?.machineConfig;
-    if (!mc) return;
+      const mc = store.state.chat?.aiChat;
+      if (!mc) return;
 
-    if (serverMessages && serverMessages.length > 0) {
-      // Server has history — use it. Fill in cancel label from locale.
-      const cancelLabel = locales[store.state.localeKey].machineConfig.cancelLabel;
-      mc.messages = serverMessages.map((m) =>
-        m.role === 'cancel' ? { ...m, content: m.content || cancelLabel } : m,
-      );
-      mc.pendingGreeting = undefined;
-      mc.phase = 'idle';
-      store.state.chat!.userPrompt = serverMessages[0]?.content ?? '';
-      store.notify();
-    }
-  });
+      if (serverMessages && serverMessages.length > 0) {
+        const cancelLabel = locales[store.state.localeKey].chatModes[mode].cancelLabel;
+        mc.messages = serverMessages.map((m) =>
+          m.role === 'cancel' ? { ...m, content: m.content || cancelLabel } : m,
+        );
+        mc.pendingGreeting = undefined;
+        mc.phase = 'idle';
+        store.state.chat!.userPrompt = serverMessages[0]?.content ?? '';
+        store.notify();
+      }
+    });
+  } else {
+    // Non-machine-config modes: just fetch history
+    void fetchAIChatHistory(mode).then((serverMessages) => {
+      const mc = store.state.chat?.aiChat;
+      if (!mc) return;
+
+      if (serverMessages && serverMessages.length > 0) {
+        const cancelLabel = locales[store.state.localeKey].chatModes[mode].cancelLabel;
+        mc.messages = serverMessages.map((m) =>
+          m.role === 'cancel' ? { ...m, content: m.content || cancelLabel } : m,
+        );
+        mc.pendingGreeting = undefined;
+        mc.phase = 'idle';
+        store.state.chat!.userPrompt = serverMessages[0]?.content ?? '';
+        store.notify();
+      }
+    });
+  }
 };
 
+// Legacy alias
+export const restoreMachineConfigSession = restoreAIChatSession;
+
 // ─────────────────────────────────────────────────────────────────────────────
-// Machine Config State Machine
+// AI Chat State Machine
 //
 // Phases: idle → waiting → streaming → question → waiting → ...
 //                                    → idle (done)
@@ -535,7 +568,7 @@ const TOOL_TRANSITION_DELAY_MS = 500;
  * Always call this instead of setting phase/fields directly.
  */
 const transition = (
-  mc: NonNullable<typeof store.state.chat>['machineConfig'],
+  mc: NonNullable<typeof store.state.chat>['aiChat'],
   phase: 'idle' | 'waiting' | 'streaming' | 'tool' | 'question' | 'error',
 ) => {
   if (!mc) return;
@@ -550,7 +583,7 @@ const transition = (
   if (mc.phase === 'tool' && phase === 'waiting') {
     toolTransitionTimer = setTimeout(() => {
       toolTransitionTimer = null;
-      const cur = store.state.chat?.machineConfig;
+      const cur = store.state.chat?.aiChat;
       if (cur?.phase === 'tool') {
         cur.phase = 'waiting';
         cur.toolName = undefined;
@@ -563,7 +596,7 @@ const transition = (
   // Finalize any pending streaming text before leaving the phase
   if (mc.streamingText?.full) {
     mc.messages.push({ role: 'assistant', content: mc.streamingText.full });
-    cacheMachineConfigMessages(mc.messages);
+    cacheAIChatMessages(mc.messages);
   }
 
   // Clear transient state from any previous phase
@@ -587,7 +620,8 @@ const postMessage = async (payload: { type: string; text: string }) => {
   if (!jwt) return;
 
   const lang = document.documentElement.lang || navigator.language || 'en';
-  const res = await fetch(`/api/chat/message/?lang=${encodeURIComponent(lang)}`, {
+  const mode = store.state.activeChatMode;
+  const res = await fetch(`/api/chat/message/?lang=${encodeURIComponent(lang)}&mode=${encodeURIComponent(mode)}`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${jwt}`,
@@ -603,7 +637,7 @@ const postMessage = async (payload: { type: string; text: string }) => {
 
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
-    const mc = store.state.chat?.machineConfig;
+    const mc = store.state.chat?.aiChat;
     if (mc) {
       transition(mc, 'error');
       mc.error = (data as any).error ?? 'Something went wrong';
@@ -618,9 +652,9 @@ const postMessage = async (payload: { type: string; text: string }) => {
  */
 const handleServerEvent = (type: string, data: Record<string, unknown>) => {
   console.log('[sse-client] Received:', type);
-  const currentMc = store.state.chat?.machineConfig;
+  const currentMc = store.state.chat?.aiChat;
   if (!currentMc) {
-    console.warn('[sse-client] No machineConfig in state, ignoring');
+    console.warn('[sse-client] No aiChat in state, ignoring');
     return;
   }
 
@@ -644,11 +678,11 @@ const handleServerEvent = (type: string, data: Record<string, unknown>) => {
 
     case 'text_done': {
       const content: string = data.content as string;
-      const mc2 = store.state.chat?.machineConfig;
+      const mc2 = store.state.chat?.aiChat;
       if (mc2) {
         mc2.messages.push({ role: 'assistant', content });
         mc2.streamingText = undefined;
-        cacheMachineConfigMessages(mc2.messages);
+        cacheAIChatMessages(mc2.messages);
         store.notify();
       }
       break;
@@ -666,7 +700,7 @@ const handleServerEvent = (type: string, data: Record<string, unknown>) => {
       break;
 
     case 'question': {
-      const mc2 = store.state.chat?.machineConfig;
+      const mc2 = store.state.chat?.aiChat;
       if (!mc2) return;
       // Finalize any pending streaming text before showing question
       if (mc2.streamingText?.full) {
@@ -681,13 +715,13 @@ const handleServerEvent = (type: string, data: Record<string, unknown>) => {
       mc2.phase = 'question';
       mc2.activeQuestion = data.question as any;
       mc2.toolName = undefined;
-      cacheMachineConfigMessages(mc2.messages);
+      cacheAIChatMessages(mc2.messages);
       store.notify();
       break;
     }
 
     case 'done': {
-      const mc2 = store.state.chat?.machineConfig;
+      const mc2 = store.state.chat?.aiChat;
       if (mc2) {
         // Finalize any pending streaming text that wasn't closed by text_done
         if (mc2.streamingText?.full) {
@@ -696,7 +730,7 @@ const handleServerEvent = (type: string, data: Record<string, unknown>) => {
         }
         mc2.phase = 'idle';
         mc2.toolName = undefined;
-        cacheMachineConfigMessages(mc2.messages);
+        cacheAIChatMessages(mc2.messages);
         store.notify();
       }
       break;
@@ -728,7 +762,8 @@ const connectEvents = (): Promise<void> => {
       const jwt = await getJwt();
       if (!jwt) return;
 
-      const es = new EventSource(`/api/chat/events/?token=${encodeURIComponent(jwt)}`);
+      const mode = store.state.activeChatMode;
+      const es = new EventSource(`/api/chat/events/?token=${encodeURIComponent(jwt)}&mode=${encodeURIComponent(mode)}`);
       eventSource = es;
 
       // Register event listeners BEFORE waiting for open — avoids missing
@@ -802,15 +837,15 @@ export const disconnectEvents = () => {
   }
 };
 
-export const sendMachineConfigMessage = async (message: string) => {
+export const sendChatMessage = async (message: string) => {
   const state = store.state;
-  if (!state.chat?.machineConfig || !state.userId) return;
+  if (!state.chat?.aiChat || !state.userId) return;
 
-  const mc = state.chat.machineConfig;
+  const mc = state.chat.aiChat;
 
   // If there's an active question, route as answer
   if (mc.phase === 'question') {
-    answerMachineConfigQuestion(message);
+    answerChatQuestion(message);
     return;
   }
 
@@ -826,34 +861,68 @@ export const sendMachineConfigMessage = async (message: string) => {
   void postMessage({ type: 'message', text: message });
 };
 
+// Legacy alias
+export const sendMachineConfigMessage = sendChatMessage;
+
 /**
  * Sends the user's answer to a pending question via POST.
  */
-export const answerMachineConfigQuestion = async (text: string) => {
-  const mc = store.state.chat?.machineConfig;
+export const answerChatQuestion = async (text: string) => {
+  const mc = store.state.chat?.aiChat;
   if (!mc) return;
 
   transition(mc, 'waiting');
   mc.messages.push({ role: 'user', content: text });
-  cacheMachineConfigMessages(mc.messages);
+  cacheAIChatMessages(mc.messages);
   store.notify();
 
   await connectEvents();
   void postMessage({ type: 'answer', text });
 };
 
-export const cancelMachineConfigQuestion = async () => {
-  const mc = store.state.chat?.machineConfig;
+// Legacy alias
+export const answerMachineConfigQuestion = answerChatQuestion;
+
+export const cancelChatQuestion = async () => {
+  const mc = store.state.chat?.aiChat;
   if (!mc || mc.phase !== 'question') return;
 
-  const cancelLabel = locales[store.state.localeKey].machineConfig.cancelLabel;
+  const mode = store.state.activeChatMode;
+  const cancelLabel = locales[store.state.localeKey].chatModes[mode].cancelLabel;
   transition(mc, 'waiting');
   mc.messages.push({ role: 'cancel', content: cancelLabel });
-  cacheMachineConfigMessages(mc.messages);
+  cacheAIChatMessages(mc.messages);
   store.notify();
 
   await connectEvents();
   void postMessage({ type: 'answer', text: '__cancel__' });
+};
+
+// Legacy alias
+export const cancelMachineConfigQuestion = cancelChatQuestion;
+
+/**
+ * Switches the active chat mode. Disconnects current SSE, saves state,
+ * switches mode, and restores/inits the new mode.
+ */
+export const switchChatMode = (newMode: ClientChatModeId): void => {
+  const state = store.state;
+  if (state.activeChatMode === newMode) return;
+
+  // Machine config requires customer token
+  if (newMode === 'machine_config' && !state.customerToken) return;
+
+  // Disconnect current EventSource
+  disconnectEvents();
+
+  // Clear current chat state
+  state.chat = null;
+  state.heroPhase = 'composer';
+  state.activeChatMode = newMode;
+  store.notify();
+
+  // Restore/init the new mode
+  restoreAIChatSession();
 };
 
 export const startChatFromPrompt = (
@@ -875,12 +944,12 @@ export const startChatFromPrompt = (
       }
     : planPromptConversation(state, locale);
 
-  // ─── Machine Config Mode ───────────────────────────────────────────────
-  if (plan.type === 'machineConfig') {
-    // If already in a machineConfig session (restored from server/cache),
+  // ─── AI Chat Mode (machine config, sales, newsletter) ──────────────────
+  if (plan.type === 'aiChat') {
+    // If already in an aiChat session (restored from server/cache),
     // just send the new message into the existing conversation
-    if (state.chat?.machineConfig) {
-      void sendMachineConfigMessage(prompt);
+    if (state.chat?.aiChat) {
+      void sendChatMessage(prompt);
       return;
     }
 
@@ -891,7 +960,7 @@ export const startChatFromPrompt = (
       stream: { initialDelayMs: 0, chunkSize: 1, intervalMs: 0 },
       isStreaming: false,
       ctaVisible: false,
-      machineConfig: {
+      aiChat: {
         messages: [],
         phase: 'waiting',
       },
@@ -899,7 +968,7 @@ export const startChatFromPrompt = (
     state.heroPhase = 'chat';
     store.notify();
 
-    void sendMachineConfigMessage(prompt);
+    void sendChatMessage(prompt);
     return;
   }
 

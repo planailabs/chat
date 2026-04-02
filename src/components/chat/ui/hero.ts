@@ -48,17 +48,16 @@ export const renderHeroSection = (
     return '';
   }
 
-  // Override labels for machine config users
-  const isMachineConfig = Boolean(state.customerToken);
-  const badgeLabel = isMachineConfig
-    ? locale.machineConfig.heroBadgeLabel
-    : locale.heroBadgeLabel;
-  const heading = isMachineConfig
-    ? locale.machineConfig.heading
-    : locale.composer.heading;
-  const placeholder = isMachineConfig
-    ? locale.machineConfig.placeholder
-    : locale.composer.placeholder;
+  // Override labels for AI chat modes
+  const isAIChatMode = state.isAuthenticated && (
+    state.activeChatMode === 'sales' ||
+    state.activeChatMode === 'newsletter_signup' ||
+    (state.activeChatMode === 'machine_config' && Boolean(state.customerToken))
+  );
+  const modeLocale = isAIChatMode ? locale.chatModes[state.activeChatMode] : null;
+  const badgeLabel = modeLocale ? modeLocale.heroBadgeLabel : locale.heroBadgeLabel;
+  const heading = modeLocale ? modeLocale.heading : locale.composer.heading;
+  const placeholder = modeLocale ? modeLocale.placeholder : locale.composer.placeholder;
 
   const maxChars =
     typeof locale.composer.maxCharacters === 'number'

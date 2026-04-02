@@ -15,10 +15,15 @@ import {
   releaseLock,
   addConnection,
   broadcast,
+  compositeKey,
   clearMemoryRecord,
   type ChatConfig,
   type SSEWriter,
 } from '../src/lib/chat/handler';
+import { getChatModeConfig, type ChatModeId } from '../src/lib/chat/modes';
+import '../src/lib/chat/modes/machine-config';
+import '../src/lib/chat/modes/sales';
+import '../src/lib/chat/modes/newsletter';
 
 export function readDotenv(mode = 'development'): Record<string, string> {
   const cwd = process.cwd();
@@ -82,6 +87,8 @@ export async function startServer(): Promise<{ port: number; close: () => void }
       });
 
       const userId = 'test-user';
+      const modeId = (url.searchParams.get('mode') ?? 'machine_config') as ChatModeId;
+      const connKey = compositeKey(userId, modeId);
 
       const writer: SSEWriter = {
         write(event: string, data: unknown) {
@@ -94,7 +101,7 @@ export async function startServer(): Promise<{ port: number; close: () => void }
         },
       };
 
-      const unsubscribe = addConnection(userId, writer);
+      const unsubscribe = addConnection(connKey, writer);
 
       // Keep-alive
       const pingInterval = setInterval(() => {
@@ -119,8 +126,16 @@ export async function startServer(): Promise<{ port: number; close: () => void }
 
       const userId = 'test-user';
       const lang = url.searchParams.get('lang') ?? 'en';
+      const modeId = (url.searchParams.get('mode') ?? 'machine_config') as ChatModeId;
+      const mode = getChatModeConfig(modeId);
+      if (!mode) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: `Unknown chat mode: ${modeId}` }));
+        return;
+      }
 
-      const lockId = acquireLock(userId);
+      const connKey = compositeKey(userId, modeId);
+      const lockId = acquireLock(connKey);
       if (!lockId) {
         res.writeHead(409, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'A conversation turn is already in progress' }));
@@ -133,15 +148,15 @@ export async function startServer(): Promise<{ port: number; close: () => void }
       // Fire and forget
       void (async () => {
         try {
-          await handleChatMessage(userId, config, lang, body);
+          await handleChatMessage(userId, config, lang, body, mode);
         } catch (err) {
           console.error('[test-server] Handler error:', err);
-          broadcast(userId, 'error', {
+          broadcast(connKey, 'error', {
             type: 'error',
             message: err instanceof Error ? err.message : 'Internal error',
           });
         } finally {
-          releaseLock(userId, lockId);
+          releaseLock(connKey, lockId);
         }
       })();
       return;

@@ -19,7 +19,7 @@ import {
   type StepCta,
   type StreamConfig,
 } from '../content';
-import { STORAGE_KEYS } from '../constants';
+import { STORAGE_KEYS, type ClientChatModeId } from '../constants';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Type Definitions
@@ -88,8 +88,8 @@ export interface ChatState {
     scenarioId: ScenarioId;
     stepId: string;
   };
-  /** Machine config AI chat state */
-  machineConfig?: {
+  /** AI chat state (machine config, sales, newsletter, etc.) */
+  aiChat?: {
     messages: Array<{ id?: string; role: 'user' | 'assistant' | 'cancel'; content: string }>;
     /**
      * State machine phase:
@@ -181,6 +181,8 @@ export interface AppState {
   customerToken: string | null;
 
   // ─── Chat State ────────────────────────────────────────────────────────────
+  /** Active AI chat mode */
+  activeChatMode: ClientChatModeId;
   /** Current chat conversation state (null when not in chat phase) */
   chat: ChatState | null;
 
@@ -338,6 +340,7 @@ export const createInitialState = (): AppState => {
     isAdmin: cachedUser?.isAdmin ?? false,
     customerToken: cachedUser?.customerToken ?? null,
     heroPhase: 'composer',
+    activeChatMode: 'machine_config',
     chat: null,
     newsletterPreference: {
       status: 'unknown',

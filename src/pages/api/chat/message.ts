@@ -10,8 +10,14 @@ export const prerender = false;
 
 import type { APIRoute } from 'astro';
 import { createClient } from '@supabase/supabase-js';
-import { handleChatMessage, acquireLock, releaseLock, broadcast, type ChatConfig } from '@/lib/chat/handler';
+import { handleChatMessage, acquireLock, releaseLock, broadcast, compositeKey, type ChatConfig } from '@/lib/chat/handler';
+import { getChatModeConfig, type ChatModeId } from '@/lib/chat/modes';
 import { env } from '@/lib/env';
+
+// Ensure all modes are registered
+import '@/lib/chat/modes/machine-config';
+import '@/lib/chat/modes/sales';
+import '@/lib/chat/modes/newsletter';
 
 const jsonResponse = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), {
@@ -24,7 +30,7 @@ export const POST: APIRoute = async ({ request }) => {
     return jsonResponse({ error: 'Server not configured' }, 503);
   }
 
-  // ── Auth ────────────────────────────────────────────────────────────────
+  // ── Auth ────────────────────────────────────────���───────────────────────
   const authHeader = request.headers.get('Authorization');
   if (!authHeader?.startsWith('Bearer ')) {
     return jsonResponse({ error: 'Missing Authorization header' }, 401);
@@ -44,7 +50,7 @@ export const POST: APIRoute = async ({ request }) => {
     return jsonResponse({ error: 'Unauthorized' }, 401);
   }
 
-  // ── Parse body ──────────────────────────────────────────────────────────
+  // ── Parse body ───���──────────────────────────────────────────────────────
   let body: { type: string; text: string };
   try {
     body = await request.json();
@@ -56,17 +62,24 @@ export const POST: APIRoute = async ({ request }) => {
     return jsonResponse({ error: 'Invalid body: need { type, text }' }, 400);
   }
 
-  // ── Locale ──────────────────────────────────────────────────────────────
+  // ─��� Mode + Locale ─���────────────────────────────���──────────────────────
   const url = new URL(request.url);
   const locale = url.searchParams.get('lang') ?? 'en';
+  const modeId = (url.searchParams.get('mode') ?? 'machine_config') as ChatModeId;
 
-  // ── Lock ────────────────────────────────────────────────────────────────
-  const lockId = acquireLock(user.id);
+  const mode = getChatModeConfig(modeId);
+  if (!mode) {
+    return jsonResponse({ error: `Unknown chat mode: ${modeId}` }, 400);
+  }
+
+  // ── Lock ─────────────���──────────────────────────────────────────────────
+  const connKey = compositeKey(user.id, modeId);
+  const lockId = acquireLock(connKey);
   if (!lockId) {
     return jsonResponse({ error: 'A conversation turn is already in progress' }, 409);
   }
 
-  // ── Config ──────────────────────────────────────────────────────────────
+  // ── Config ──────��─────────────────────────────────��─────────────────────
   const config: ChatConfig = {
     anthropicApiKey: env.ANTHROPIC_API_KEY,
     macMgmtUrl: env.MAC_MGMT_URL,
@@ -77,15 +90,15 @@ export const POST: APIRoute = async ({ request }) => {
   // ── Fire and forget ─────────────────────────────────────────────────────
   void (async () => {
     try {
-      await handleChatMessage(user.id, config, locale, body);
+      await handleChatMessage(user.id, config, locale, body, mode);
     } catch (err) {
       console.error('[chat/message] Handler error:', err);
-      broadcast(user.id, 'error', {
+      broadcast(connKey, 'error', {
         type: 'error',
         message: err instanceof Error ? err.message : 'Internal error',
       });
     } finally {
-      releaseLock(user.id, lockId);
+      releaseLock(connKey, lockId);
     }
   })();
 

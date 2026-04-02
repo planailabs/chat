@@ -32,11 +32,18 @@ export const STORAGE_KEYS = {
   SUPABASE_AUTH: 'planai-supabase-auth',
   /** Cached user state for instant header render (prevents layout shift) */
   USER_CACHE: 'planai-user-cache',
-  /** Machine config chat conversation history */
+  /** Machine config chat conversation history (legacy, aliased to AI_CHAT with machine_config mode) */
   MACHINE_CONFIG_CHAT: 'planai-machine-config-chat',
 } as const;
 
 export type StorageKey = (typeof STORAGE_KEYS)[keyof typeof STORAGE_KEYS];
+
+/** Per-mode storage key for chat conversation cache */
+export const chatStorageKey = (modeId: string): string =>
+  modeId === 'machine_config' ? STORAGE_KEYS.MACHINE_CONFIG_CHAT : `planai-chat-${modeId}`;
+
+/** Chat mode IDs available on the client */
+export type ClientChatModeId = 'machine_config' | 'sales' | 'newsletter_signup';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Theme Configuration
