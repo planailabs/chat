@@ -81,6 +81,7 @@ import '../../../components/chat/style.css';
             />
           </div>
           <p class="text-xs opacity-40">Token will be validated against mac-mgmt before saving.</p>
+          <div id="modal-error" class="hidden text-xs text-red-400 bg-red-500/10 rounded-lg px-3 py-2"></div>
         </div>
         <div class="p-4 border-t border-white/10 flex justify-end gap-3">
           <button id="modal-cancel" class="px-4 py-2 rounded-lg text-sm hover:bg-white/5 transition-colors">Cancel</button>
@@ -112,6 +113,8 @@ import '../../../components/chat/style.css';
         const modalUserInfo = document.getElementById('modal-user-info')!;
         const modalCancel = document.getElementById('modal-cancel')!;
         const modalSave = document.getElementById('modal-save')!;
+
+        const modalError = document.getElementById('modal-error')!;
 
         let modalUserId = '';
         let modalUserEmail = '';
@@ -248,6 +251,7 @@ import '../../../components/chat/style.css';
           modalUserEmail = email;
           modalUserInfo.textContent = `${email} (${userId.slice(0, 12)}...)`;
           tokenInput.value = '';
+          modalError.classList.add('hidden');
           tokenModal.classList.remove('hidden');
           tokenModal.classList.add('flex');
           tokenInput.focus();
@@ -261,6 +265,9 @@ import '../../../components/chat/style.css';
         modalCancel.addEventListener('click', closeTokenModal);
         tokenModal.addEventListener('click', (e) => {
           if (e.target === tokenModal) closeTokenModal();
+        });
+        document.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape' && !tokenModal.classList.contains('hidden')) closeTokenModal();
         });
 
         modalSave.addEventListener('click', async () => {
@@ -282,6 +289,7 @@ import '../../../components/chat/style.css';
             });
             const data = await res.json();
             if (res.ok) {
+              modalError.classList.add('hidden');
               showStatus(`Token set for ${modalUserEmail}`, 'success');
               closeTokenModal();
               // Update local state and re-render
@@ -292,10 +300,12 @@ import '../../../components/chat/style.css';
               }
               renderUsers(lastSearchResults);
             } else {
-              showStatus(data.error ?? 'Failed to set token', 'error');
+              modalError.textContent = data.error ?? 'Failed to set token';
+              modalError.classList.remove('hidden');
             }
           } catch {
-            showStatus('Network error', 'error');
+            modalError.textContent = 'Network error';
+            modalError.classList.remove('hidden');
           } finally {
             modalSave.textContent = 'Save Token';
             (modalSave as HTMLButtonElement).disabled = false;

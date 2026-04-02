@@ -55,21 +55,35 @@ export const GET: APIRoute = async ({ request }) => {
     return jsonResponse({ error: 'Query too short (min 2 chars)' }, 400);
   }
 
-  // Search auth.users by email using admin API
-  const { data: { users }, error: listError } = await supabase.auth.admin.listUsers({
-    page: 1,
-    perPage: 20,
-  });
-
-  if (listError) {
-    return jsonResponse({ error: 'Failed to search users' }, 500);
-  }
-
-  // Filter by email match (case-insensitive)
+  // Search auth.users by email — paginate through all users since the admin API
+  // doesn't support server-side email filtering
   const lowerQuery = query.toLowerCase();
-  const matchingUsers = (users ?? [])
-    .filter((u) => u.email?.toLowerCase().includes(lowerQuery))
-    .slice(0, 20);
+  const matchingUsers: Array<{ id: string; email?: string; created_at: string }> = [];
+  let page = 1;
+  const perPage = 100;
+
+  while (matchingUsers.length < 20) {
+    const { data: { users: batch }, error: listError } = await supabase.auth.admin.listUsers({
+      page,
+      perPage,
+    });
+
+    if (listError) {
+      return jsonResponse({ error: 'Failed to search users' }, 500);
+    }
+
+    if (!batch || batch.length === 0) break;
+
+    for (const u of batch) {
+      if (u.email?.toLowerCase().includes(lowerQuery)) {
+        matchingUsers.push(u);
+        if (matchingUsers.length >= 20) break;
+      }
+    }
+
+    if (batch.length < perPage) break; // last page
+    page++;
+  }
 
   // Fetch profiles for matching users
   const userIds = matchingUsers.map((u) => u.id);
