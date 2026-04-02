@@ -12,6 +12,7 @@ import type { APIRoute } from 'astro';
 import { createClient } from '@supabase/supabase-js';
 import { handleChatMessage, acquireLock, releaseLock, broadcast, compositeKey, type ChatConfig } from '@/lib/chat/handler';
 import { getChatModeConfig, type ChatModeId } from '@/lib/chat/modes';
+import { resolveEffectiveUser } from '@/lib/admin';
 import { env } from '@/lib/env';
 
 // Ensure all modes are registered
@@ -50,6 +51,9 @@ export const POST: APIRoute = async ({ request }) => {
     return jsonResponse({ error: 'Unauthorized' }, 401);
   }
 
+  // ── Impersonation ─────────────────────────────────────────────────────
+  const { userId: effectiveUserId } = await resolveEffectiveUser(supabase, user.id, request);
+
   // ── Parse body ───���──────────────────────────────────────────────────────
   let body: { type: string; text: string };
   try {
@@ -73,7 +77,7 @@ export const POST: APIRoute = async ({ request }) => {
   }
 
   // ── Lock ─────────────���──────────────────────────────────────────────────
-  const connKey = compositeKey(user.id, modeId);
+  const connKey = compositeKey(effectiveUserId, modeId);
   const lockId = acquireLock(connKey);
   if (!lockId) {
     return jsonResponse({ error: 'A conversation turn is already in progress' }, 409);
@@ -90,7 +94,7 @@ export const POST: APIRoute = async ({ request }) => {
   // ── Fire and forget ─────────────────────────────────────────────────────
   void (async () => {
     try {
-      await handleChatMessage(user.id, config, locale, body, mode);
+      await handleChatMessage(effectiveUserId, config, locale, body, mode);
     } catch (err) {
       console.error('[chat/message] Handler error:', err);
       broadcast(connKey, 'error', {

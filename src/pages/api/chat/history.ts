@@ -12,6 +12,7 @@ export const prerender = false;
 import type { APIRoute } from 'astro';
 import { createClient } from '@supabase/supabase-js';
 import { getChatModeConfig, type ChatModeId } from '@/lib/chat/modes';
+import { resolveEffectiveUser } from '@/lib/admin';
 import { env } from '@/lib/env';
 
 // Ensure all modes are registered
@@ -77,6 +78,9 @@ export const GET: APIRoute = async ({ request }) => {
     return jsonResponse({ error: 'Unauthorized' }, 401);
   }
 
+  // ─── Impersonation ────────────────────────────────────────────────────────
+  const { userId: effectiveUserId } = await resolveEffectiveUser(supabase, user.id, request);
+
   // ─── Mode ─────────────────────────────────────────────────────────────────
   const url = new URL(request.url);
   const modeId = (url.searchParams.get('mode') ?? 'machine_config') as ChatModeId;
@@ -90,13 +94,13 @@ export const GET: APIRoute = async ({ request }) => {
     supabase
       .from(mode.stateTable)
       .select('phase, pending_question')
-      .eq('user_id', user.id)
+      .eq('user_id', effectiveUserId)
       .eq('mode', mode.modeColumn)
       .maybeSingle(),
     supabase
       .from(mode.messagesTable)
       .select('id, role, content, content_blocks')
-      .eq('user_id', user.id)
+      .eq('user_id', effectiveUserId)
       .eq('mode', mode.modeColumn)
       .order('ordinal', { ascending: true }),
   ]);

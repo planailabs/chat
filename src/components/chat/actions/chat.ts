@@ -46,6 +46,25 @@ import {
 import { startCharacterStream } from '../utils/stream';
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Admin Impersonation
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Read ?impersonate= from the page URL (set by admin portal) */
+const getImpersonateParam = (): string | null => {
+  if (typeof window === 'undefined') return null;
+  const params = new URLSearchParams(window.location.search);
+  return params.get('impersonate');
+};
+
+/** Append impersonate param to a URL if active */
+const withImpersonate = (url: string): string => {
+  const id = getImpersonateParam();
+  if (!id) return url;
+  const sep = url.includes('?') ? '&' : '?';
+  return `${url}${sep}impersonate=${encodeURIComponent(id)}`;
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Timer State
 // ─────────────────────────────────────────────────────────────────────────────
 let postLoginDelayTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -395,7 +414,7 @@ const fetchAIChatHistory = async (modeId?: ClientChatModeId): Promise<StoredMess
     if (!jwt) return null;
 
     const mode = modeId ?? store.state.activeChatMode;
-    const response = await fetch(`/api/chat/history/?mode=${encodeURIComponent(mode)}`, {
+    const response = await fetch(withImpersonate(`/api/chat/history/?mode=${encodeURIComponent(mode)}`), {
       headers: { Authorization: `Bearer ${jwt}` },
     });
     if (!response.ok) return null;
@@ -438,7 +457,7 @@ const verifyCustomerToken = async (): Promise<boolean> => {
   try {
     const jwt = await getJwt();
     if (!jwt) return false;
-    const res = await fetch('/api/chat/verify-token/', {
+    const res = await fetch(withImpersonate('/api/chat/verify-token/'), {
       headers: { Authorization: `Bearer ${jwt}` },
     });
     if (!res.ok) return false;
@@ -459,8 +478,9 @@ export const restoreAIChatSession = (): void => {
   const state = store.state;
   const mode = state.activeChatMode;
 
-  // Machine config mode requires customer token
-  if (mode === 'machine_config' && !state.customerToken) return;
+  // Machine config mode requires customer token (skip check when impersonating — server resolves it)
+  const isImpersonating = Boolean(getImpersonateParam());
+  if (mode === 'machine_config' && !state.customerToken && !isImpersonating) return;
 
   // Don't re-init if already active
   if (state.chat?.aiChat) return;
@@ -626,7 +646,7 @@ const postMessage = async (payload: { type: string; text: string }) => {
 
   const lang = document.documentElement.lang || navigator.language || 'en';
   const mode = store.state.activeChatMode;
-  const res = await fetch(`/api/chat/message/?lang=${encodeURIComponent(lang)}&mode=${encodeURIComponent(mode)}`, {
+  const res = await fetch(withImpersonate(`/api/chat/message/?lang=${encodeURIComponent(lang)}&mode=${encodeURIComponent(mode)}`), {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${jwt}`,
@@ -768,7 +788,7 @@ const connectEvents = (): Promise<void> => {
       if (!jwt) return;
 
       const mode = store.state.activeChatMode;
-      const es = new EventSource(`/api/chat/events/?token=${encodeURIComponent(jwt)}&mode=${encodeURIComponent(mode)}`);
+      const es = new EventSource(withImpersonate(`/api/chat/events/?token=${encodeURIComponent(jwt)}&mode=${encodeURIComponent(mode)}`));
       eventSource = es;
 
       // Register event listeners BEFORE waiting for open — avoids missing

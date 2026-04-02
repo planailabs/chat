@@ -9,6 +9,7 @@ export const prerender = false;
 
 import type { APIRoute } from 'astro';
 import { createClient } from '@supabase/supabase-js';
+import { resolveEffectiveUser } from '@/lib/admin';
 import { env } from '@/lib/env';
 
 const jsonResponse = (data: unknown, status = 200) =>
@@ -41,11 +42,14 @@ export const GET: APIRoute = async ({ request }) => {
     return jsonResponse({ valid: false }, 401);
   }
 
+  // ── Impersonation ─────────────────────────────────────────────────────
+  const { userId: effectiveUserId } = await resolveEffectiveUser(supabase, user.id, request);
+
   // Look up customer token from profile
   const { data: profile } = await supabase
     .from('profiles')
     .select('customer_token')
-    .eq('user_id', user.id)
+    .eq('user_id', effectiveUserId)
     .maybeSingle();
 
   const customerToken = profile?.customer_token;

@@ -17,6 +17,7 @@ import type { APIRoute } from 'astro';
 import { createClient } from '@supabase/supabase-js';
 import { addConnection, compositeKey, type SSEWriter } from '@/lib/chat/handler';
 import { getChatModeConfig, type ChatModeId } from '@/lib/chat/modes';
+import { resolveEffectiveUser } from '@/lib/admin';
 import { env } from '@/lib/env';
 
 // Ensure all modes are registered
@@ -75,13 +76,16 @@ export const GET: APIRoute = async ({ request }) => {
     });
   }
 
+  // ── Impersonation ─────────────────────────────────────────────────────
+  const { userId: effectiveUserId } = await resolveEffectiveUser(supabase, user.id, request);
+
   // ── Check for pending question to send on connect ───────────────────────
   let pendingQuestion: unknown = null;
   try {
     const { data } = await supabase
       .from(mode.stateTable)
       .select('phase, pending_question')
-      .eq('user_id', user.id)
+      .eq('user_id', effectiveUserId)
       .eq('mode', mode.modeColumn)
       .maybeSingle();
 
@@ -93,7 +97,7 @@ export const GET: APIRoute = async ({ request }) => {
   }
 
   // ── SSE stream ──────────────────────────────────────────────────────────
-  const connKey = compositeKey(user.id, modeId);
+  const connKey = compositeKey(effectiveUserId, modeId);
 
   const stream = new ReadableStream({
     start(controller) {

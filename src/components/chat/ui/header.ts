@@ -320,8 +320,19 @@ export const renderHeader = ({ locale, state }: HeaderParams): string => {
         ${navigation.loginMenu.labelLoggedOut}
       </button>`;
 
+  // Impersonation banner
+  const impersonateId = typeof window !== 'undefined'
+    ? new URLSearchParams(window.location?.search ?? '').get('impersonate')
+    : null;
+  const impersonateBanner = impersonateId
+    ? `<div class="w-full bg-amber-500/10 border-b border-amber-500/30 text-amber-400 text-xs text-center py-1.5 px-4">
+        Impersonating user <span class="font-mono">${escapeHtml(impersonateId.slice(0, 12))}...</span>
+        <a href="/" class="ml-2 underline hover:text-amber-300">Exit</a>
+      </div>`
+    : '';
+
   // Mobile: px-4 py-4, Desktop: px-8 py-6
-  return `<header class="flex w-full items-center justify-between px-4 py-4 md:px-8 md:py-6">
+  return `${impersonateBanner}<header class="flex w-full items-center justify-between px-4 py-4 md:px-8 md:py-6">
     <a href="/" class="logo-link flex items-center gap-2 text-base font-semibold tracking-tight text-(--text-primary) md:text-lg focus-visible:underline">
       ${LOGO_SVG}
       <span class="flex items-baseline gap-2 leading-none">
