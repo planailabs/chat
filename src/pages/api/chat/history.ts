@@ -17,7 +17,7 @@ import { env } from '@/lib/env';
 // Ensure all modes are registered
 import '@/lib/chat/modes/machine-config';
 import '@/lib/chat/modes/sales';
-import '@/lib/chat/modes/newsletter';
+
 
 const jsonResponse = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), {

@@ -43,7 +43,7 @@ export const chatStorageKey = (modeId: string): string =>
   modeId === 'machine_config' ? STORAGE_KEYS.MACHINE_CONFIG_CHAT : `planai-chat-${modeId}`;
 
 /** Chat mode IDs available on the client */
-export type ClientChatModeId = 'machine_config' | 'sales' | 'newsletter_signup';
+export type ClientChatModeId = 'machine_config' | 'sales';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Theme Configuration

@@ -93,7 +93,7 @@ export interface ChatState {
     messages: Array<{ id?: string; role: 'user' | 'assistant' | 'cancel'; content: string }>;
     /**
      * State machine phase:
-     *   idle      → composer visible (or greeting if pendingGreeting set)
+     *   idle      → composer visible
      *   waiting   → thinking indicator, waiting for server
      *   streaming → word-by-word reveal of assistant text
      *   tool      → executing a server-side tool (spinner indicator)
@@ -104,8 +104,6 @@ export interface ChatState {
     /** Word-by-word streaming reveal of the last assistant message */
     streamingText?: { full: string; visible: string };
     error?: string;
-    /** Pre-filled greeting the user must send to start the conversation */
-    pendingGreeting?: string;
     /** Structured question from Claude's ask_question tool */
     activeQuestion?: {
       type: 'multiple_choice' | 'text';

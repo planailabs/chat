@@ -470,15 +470,20 @@ export const restoreAIChatSession = (): void => {
   if (cached && cached.length > 0) {
     initAIChat(cached);
   } else {
-    // Show empty chat with greeting immediately (centered empty state)
     const locale = locales[state.localeKey];
     const greeting = locale.chatModes[mode].greeting;
     initAIChat([]);
-    store.state.chat!.aiChat!.pendingGreeting = greeting;
-    store.notify();
+    if (greeting) {
+      // Machine config: auto-send the greeting immediately
+      // Use setTimeout to ensure sendChatMessage is available (defined later in file)
+      setTimeout(() => void sendChatMessage(greeting), 0);
+    } else {
+      // Sales: show empty chat with composer (no greeting)
+      store.notify();
+    }
   }
 
-  // Validate token + fetch history in parallel, pre-connect EventSource eagerly
+  // Pre-connect EventSource eagerly
   void connectEvents();
 
   if (mode === 'machine_config') {
@@ -508,7 +513,7 @@ export const restoreAIChatSession = (): void => {
         mc.messages = serverMessages.map((m) =>
           m.role === 'cancel' ? { ...m, content: m.content || cancelLabel } : m,
         );
-        mc.pendingGreeting = undefined;
+
         mc.phase = 'idle';
         store.state.chat!.userPrompt = serverMessages[0]?.content ?? '';
         store.notify();
@@ -525,7 +530,7 @@ export const restoreAIChatSession = (): void => {
         mc.messages = serverMessages.map((m) =>
           m.role === 'cancel' ? { ...m, content: m.content || cancelLabel } : m,
         );
-        mc.pendingGreeting = undefined;
+
         mc.phase = 'idle';
         store.state.chat!.userPrompt = serverMessages[0]?.content ?? '';
         store.notify();
@@ -851,7 +856,6 @@ export const sendChatMessage = async (message: string) => {
 
   transition(mc, 'waiting');
   mc.messages.push({ role: 'user', content: message });
-  mc.pendingGreeting = undefined;
   store.notify();
 
   // Ensure EventSource is connected before posting

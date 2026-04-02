@@ -44,8 +44,8 @@ export const planPromptConversation = (
   if (state.activeChatMode === 'machine_config' && state.customerToken) {
     return { type: 'aiChat' };
   }
-  if (state.activeChatMode === 'sales' || state.activeChatMode === 'newsletter_signup') {
-    return { type: 'aiChat' }; // Reuse the same plan type — routes to AI chat
+  if (state.activeChatMode === 'sales') {
+    return { type: 'aiChat' };
   }
 
   const newsletterStatus = state.newsletterPreference.status;

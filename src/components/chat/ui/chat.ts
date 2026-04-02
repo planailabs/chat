@@ -317,46 +317,42 @@ export const renderChatSection = (
       || (phase === 'question' && activeQ?.type === 'text');
 
     const placeholder = escapeHtml(modeLocale.placeholder);
-    const greeting = mc.pendingGreeting;
-    const hasGreeting = Boolean(greeting);
     const inputField = showComposer
       ? `<div class="composer-card" data-form="machine-config-composer">
           <div class="composer-wrapper">
             <div
-              class="composer-input${hasGreeting ? ' composer-input--readonly' : ''}"
+              class="composer-input"
               role="textbox"
-              contenteditable="${hasGreeting ? 'false' : 'plaintext-only'}"
+              contenteditable="plaintext-only"
               aria-label="${placeholder}"
-              data-empty="${hasGreeting ? 'false' : 'true'}"
+              data-empty="true"
               inputmode="text"
               autocomplete="off"
               autocorrect="off"
               autocapitalize="sentences"
-              data-action="machine-config-input">${hasGreeting ? escapeHtml(greeting!) : ''}</div>
+              data-action="machine-config-input"></div>
             <button
               type="button"
               class="composer-send-button"
               data-action="machine-config-send"
               aria-label="${escapeHtml(locale.composer.submitLabel)}"
-              ${hasGreeting ? '' : 'aria-disabled="true" disabled'}>
+              aria-disabled="true" disabled>
               ${SEND_ICON_SVG}
             </button>
           </div>
         </div>`
       : '';
 
-    // Show headings when conversation hasn't started yet (pending greeting)
-    const isEmptyState = mc.messages.length === 0 && hasGreeting;
-    const heroHeader = isEmptyState
-      ? `<div class="space-y-3 text-center md:space-y-4">
-          <p class="text-[0.65rem] uppercase tracking-[0.35em] text-(--text-muted) md:text-xs md:tracking-[0.4em]">
-            ${escapeHtml(modeLocale.heroBadgeLabel)}
-          </p>
-          <h1 class="text-3xl font-semibold tracking-tight sm:text-4xl md:text-5xl">
-            ${escapeHtml(modeLocale.heading)}
-          </h1>
-        </div>`
-      : '';
+    // Always show hero header on top of chat
+    const isEmptyState = mc.messages.length === 0;
+    const heroHeader = `<div class="space-y-3 text-center md:space-y-4">
+        <p class="text-[0.65rem] uppercase tracking-[0.35em] text-(--text-muted) md:text-xs md:tracking-[0.4em]">
+          ${escapeHtml(modeLocale.heroBadgeLabel)}
+        </p>
+        <h1 class="${isEmptyState ? 'text-3xl font-semibold tracking-tight sm:text-4xl md:text-5xl' : 'text-xl font-semibold tracking-tight sm:text-2xl md:text-3xl'}">
+          ${escapeHtml(modeLocale.heading)}
+        </h1>
+      </div>`;
 
     const sectionClasses = isEmptyState
       ? 'flex w-full max-w-3xl flex-col gap-4 text-center md:gap-6'

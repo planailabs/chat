@@ -23,7 +23,7 @@ import {
 import { getChatModeConfig, type ChatModeId } from '../src/lib/chat/modes';
 import '../src/lib/chat/modes/machine-config';
 import '../src/lib/chat/modes/sales';
-import '../src/lib/chat/modes/newsletter';
+
 
 export function readDotenv(mode = 'development'): Record<string, string> {
   const cwd = process.cwd();

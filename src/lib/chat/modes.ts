@@ -12,7 +12,7 @@ import type { ChatConfig } from './handler';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
-export type ChatModeId = 'machine_config' | 'sales' | 'newsletter_signup';
+export type ChatModeId = 'machine_config' | 'sales';
 
 /** Opaque per-mode context returned by prepare() and passed to executeTool()/injectContext() */
 export interface ModeContext {

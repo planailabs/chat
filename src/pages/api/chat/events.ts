@@ -22,7 +22,7 @@ import { env } from '@/lib/env';
 // Ensure all modes are registered
 import '@/lib/chat/modes/machine-config';
 import '@/lib/chat/modes/sales';
-import '@/lib/chat/modes/newsletter';
+
 
 export const GET: APIRoute = async ({ request }) => {
   if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_ROLE_KEY) {

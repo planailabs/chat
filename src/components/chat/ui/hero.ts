@@ -51,7 +51,6 @@ export const renderHeroSection = (
   // Override labels for AI chat modes
   const isAIChatMode = state.isAuthenticated && (
     state.activeChatMode === 'sales' ||
-    state.activeChatMode === 'newsletter_signup' ||
     (state.activeChatMode === 'machine_config' && Boolean(state.customerToken))
   );
   const modeLocale = isAIChatMode ? locale.chatModes[state.activeChatMode] : null;

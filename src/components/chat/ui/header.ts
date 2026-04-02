@@ -164,7 +164,6 @@ interface ChatModeOption {
 const getModeOptions = (locale: LocaleContent): ChatModeOption[] => [
   { id: 'machine_config', label: locale.chatModes.machine_config.heroBadgeLabel, requiresToken: true },
   { id: 'sales', label: locale.chatModes.sales.heroBadgeLabel, requiresToken: false },
-  { id: 'newsletter_signup', label: locale.chatModes.newsletter_signup.heroBadgeLabel, requiresToken: false },
 ];
 
 const renderModeSwitcher = (locale: LocaleContent, state: AppState): string => {

@@ -78,14 +78,12 @@ const initApp = () => {
     // 2. Update Main Region (Hero or Chat)
     if (mainRegion) {
       const isChat = state.heroPhase === 'chat';
-      const isMachineConfigEmpty =
-        isChat &&
-        state.chat?.aiChat?.messages.length === 0 &&
-        Boolean(state.chat?.aiChat?.pendingGreeting);
-      // Hero / empty machine config: use justify-center to vertically center content
+      const isChatEmpty =
+        isChat && state.chat?.aiChat?.messages.length === 0;
+      // Empty chat (e.g. sales initial): use justify-center to vertically center content
       // Chat with messages: use pt-10 and start from top with scrollable content
       const mainClasses =
-        !isChat || isMachineConfigEmpty
+        !isChat || isChatEmpty
           ? 'flex min-h-0 flex-1 flex-col items-center justify-center px-6 py-6'
           : 'flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-6 pt-10 pb-6';
 

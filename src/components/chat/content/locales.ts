@@ -1,6 +1,6 @@
 export type LocaleKey = 'en' | 'de';
 type OAuthProviderName = 'google' | 'apple' | 'microsoft' | 'github';
-type ChatModeKey = 'machine_config' | 'sales' | 'newsletter_signup';
+type ChatModeKey = 'machine_config' | 'sales';
 
 export type ScenarioId = 'anonymousInvite' | 'postLoginNewsletter';
 
@@ -244,15 +244,7 @@ const en: LocaleContent = {
       placeholder: 'Tell us about your Mac fleet...',
       cancelLabel: 'Skip',
       configuringLabel: 'Thinking…',
-      greeting: 'Hello',
-    },
-    newsletter_signup: {
-      heroBadgeLabel: 'Newsletter',
-      heading: 'Stay in the loop',
-      placeholder: 'Ask about our newsletter...',
-      cancelLabel: 'Skip',
-      configuringLabel: 'Thinking…',
-      greeting: 'Hello',
+      greeting: '',
     },
   },
   conversationScenarios: {
@@ -421,15 +413,7 @@ const de: LocaleContent = {
       placeholder: 'Erzähl uns von deiner Mac-Flotte...',
       cancelLabel: 'Überspringen',
       configuringLabel: 'Denke nach…',
-      greeting: 'Hallo',
-    },
-    newsletter_signup: {
-      heroBadgeLabel: 'Newsletter',
-      heading: 'Bleib auf dem Laufenden',
-      placeholder: 'Frag nach unserem Newsletter...',
-      cancelLabel: 'Überspringen',
-      configuringLabel: 'Denke nach…',
-      greeting: 'Hallo',
+      greeting: '',
     },
   },
   conversationScenarios: {
