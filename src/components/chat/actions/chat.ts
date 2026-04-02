@@ -10,7 +10,7 @@
  */
 
 import { store } from '../app/store';
-import { chatStorageKey, type ClientChatModeId } from '../constants';
+import { chatStorageKey, STORAGE_KEYS, type ClientChatModeId } from '../constants';
 import {
   locales,
   type LocaleContent,
@@ -382,6 +382,34 @@ const cacheMachineConfigMessages = cacheAIChatMessages;
 const readCachedMachineConfigMessages = readCachedAIChatMessages;
 export const clearMachineConfigMessages = () => clearAIChatMessages('machine_config');
 
+// ─── Pending Sales Prompt (anonymous → post-login send) ─────────────────────
+
+const savePendingSalesPrompt = (prompt: string) => {
+  try {
+    sessionStorage.setItem(STORAGE_KEYS.PENDING_SALES_PROMPT, prompt);
+  } catch { /* ignore */ }
+};
+
+const readPendingSalesPrompt = (): string | null => {
+  try {
+    return sessionStorage.getItem(STORAGE_KEYS.PENDING_SALES_PROMPT);
+  } catch {
+    return null;
+  }
+};
+
+export const consumePendingSalesPrompt = (): string | null => {
+  try {
+    const prompt = sessionStorage.getItem(STORAGE_KEYS.PENDING_SALES_PROMPT);
+    if (prompt) {
+      sessionStorage.removeItem(STORAGE_KEYS.PENDING_SALES_PROMPT);
+    }
+    return prompt;
+  } catch {
+    return null;
+  }
+};
+
 let cachedJwt: { token: string; expiresAt: number } | null = null;
 
 const getJwt = async (): Promise<string | null> => {
@@ -485,9 +513,11 @@ export const restoreAIChatSession = (): void => {
   // Don't re-init if already active
   if (state.chat?.aiChat) return;
 
-  // Anonymous users in sales mode: show empty chat UI but skip server interaction
+  // Anonymous users in sales mode: show chat UI with pending prompt (if any)
   if (!state.isAuthenticated) {
-    initAIChat([]);
+    const pending = readPendingSalesPrompt();
+    const msgs: StoredMessage[] = pending ? [{ role: 'user', content: pending }] : [];
+    initAIChat(msgs);
     store.notify();
     return;
   }
@@ -1049,6 +1079,8 @@ export const sendChatMessage = async (message: string) => {
   // Anonymous user: trigger sign-in invite via conversation planner
   if (!state.isAuthenticated || !state.userId) {
     const currentLocale = locales[state.localeKey];
+    // Save the prompt for post-login send to sales bot
+    savePendingSalesPrompt(message);
     // Cache the prompt for post-auth restoration
     appendPromptToCache(message, state.localeKey);
     // Transition out of aiChat and into the conversation planner sign-in flow

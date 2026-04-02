@@ -32,6 +32,8 @@ export const STORAGE_KEYS = {
   SUPABASE_AUTH: 'planai-supabase-auth',
   /** Cached user state for instant header render (prevents layout shift) */
   USER_CACHE: 'planai-user-cache',
+  /** Anonymous sales prompt saved for post-login send */
+  PENDING_SALES_PROMPT: 'planai-pending-sales-prompt',
   /** Machine config chat conversation history (legacy, aliased to AI_CHAT with machine_config mode) */
   MACHINE_CONFIG_CHAT: 'planai-machine-config-chat',
 } as const;

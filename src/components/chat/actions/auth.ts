@@ -28,6 +28,9 @@ import {
   setShouldRunPostLoginSequence,
   clearMachineConfigMessages,
   disconnectEvents,
+  consumePendingSalesPrompt,
+  restoreAIChatSession,
+  sendChatMessage,
 } from './chat';
 import {
   USER_METADATA_NAME_KEYS,
@@ -256,9 +259,21 @@ export const applySessionToState = (session: Session | null) => {
     syncCachedPromptsToSupabase();
     const maybePromise = loadProfilePreferences(locales[state.localeKey]);
 
-    // Only trigger post-login sequence if we are restoring AND it hasn't started yet.
-    // check if postLogin state is already active/populated to avoid double-triggering
-    if (state.chat?.restoredFromChatCta && !state.chat.postLogin) {
+    // Check for a pending sales prompt saved before sign-in
+    const pendingSalesPrompt = consumePendingSalesPrompt();
+    if (pendingSalesPrompt) {
+      // Switch to sales AI chat and send the saved prompt
+      state.activeChatMode = 'sales';
+      state.chat = null;
+      state.heroPhase = 'composer';
+      store.notify();
+      restoreAIChatSession();
+      // Send the prompt once the AI chat is initialized
+      setTimeout(() => {
+        void sendChatMessage(pendingSalesPrompt);
+      }, 0);
+    } else if (state.chat?.restoredFromChatCta && !state.chat.postLogin) {
+      // Only trigger post-login sequence if we are restoring AND it hasn't started yet.
       setShouldRunPostLoginSequence(true);
 
       // We must wait for profile preferences to load (newsletter status) before starting.
