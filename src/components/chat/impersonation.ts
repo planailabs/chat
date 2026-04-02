@@ -6,19 +6,10 @@
  * all write operations to the user's profile are suppressed.
  */
 
-/** Cached value — URL doesn't change during a session */
-let cachedImpersonateId: string | null | undefined;
-
-/** Read ?impersonate= from the page URL */
+/** Read ?impersonate= from the page URL (always reads live — no caching) */
 export const getImpersonateId = (): string | null => {
-  if (cachedImpersonateId !== undefined) return cachedImpersonateId;
-  if (typeof window === 'undefined') {
-    cachedImpersonateId = null;
-    return null;
-  }
-  const params = new URLSearchParams(window.location.search);
-  cachedImpersonateId = params.get('impersonate');
-  return cachedImpersonateId;
+  if (typeof window === 'undefined') return null;
+  return new URLSearchParams(window.location.search).get('impersonate');
 };
 
 /** True when admin is impersonating another user */
