@@ -460,9 +460,10 @@ export const restoreAIChatSession = (): void => {
   const state = store.state;
   const mode = state.activeChatMode;
 
-  // Machine config mode requires customer token (skip check when impersonating — server resolves it)
-  const isImpersonating = isImpersonating();
-  if (mode === 'machine_config' && !state.customerToken && !isImpersonating) return;
+  // Machine config mode requires customer token.
+  // When impersonating, the token will arrive async via loadProfilePreferences,
+  // which calls restoreMachineConfigSession() once customerToken is set.
+  if (mode === 'machine_config' && !state.customerToken) return;
 
   // Don't re-init if already active
   if (state.chat?.aiChat) return;
