@@ -49,16 +49,15 @@ type StoredMessage =
   | { id?: string; role: 'user'; content: Anthropic.ToolResultBlockParam[] }
   | { id?: string; role: 'cancel'; content: string };
 
-interface QuestionInput {
-  type: 'multiple_choice' | 'text';
-  question: string;
-  options?: string[];
+interface ClientToolPrompt {
+  toolName: string;
+  input: Record<string, unknown>;
 }
 
 /** In-memory state for skipPersistence mode */
 interface MemoryState {
   phase: Phase;
-  pendingQuestion: QuestionInput | null;
+  pendingQuestion: ClientToolPrompt | null;
   messages: StoredMessage[];
 }
 
@@ -131,7 +130,7 @@ async function loadState(
   userId: string,
   stateTable: string,
   modeColumn: string,
-): Promise<{ phase: Phase; pendingQuestion: QuestionInput | null }> {
+): Promise<{ phase: Phase; pendingQuestion: ClientToolPrompt | null }> {
   const { data } = await supabase
     .from(stateTable)
     .select('phase, pending_question')
@@ -140,7 +139,7 @@ async function loadState(
     .maybeSingle();
 
   if (!data) return { phase: 'idle', pendingQuestion: null };
-  return { phase: data.phase as Phase, pendingQuestion: data.pending_question as QuestionInput | null };
+  return { phase: data.phase as Phase, pendingQuestion: data.pending_question as ClientToolPrompt | null };
 }
 
 async function loadMessages(
@@ -182,7 +181,7 @@ async function upsertState(
   supabase: SupabaseClient,
   userId: string,
   phase: Phase,
-  pendingQuestion: QuestionInput | null,
+  pendingQuestion: ClientToolPrompt | null,
   stateTable: string,
   modeColumn: string,
 ): Promise<void> {
@@ -433,7 +432,7 @@ const extractDisplayText = (msg: StoredMessage): string => {
 // ─── Persistence Adapter ────────────────────────────────────────────────────
 
 interface PersistenceAdapter {
-  setPhase(phase: Phase, pendingQuestion?: QuestionInput | null): Promise<void>;
+  setPhase(phase: Phase, pendingQuestion?: ClientToolPrompt | null): Promise<void>;
   appendMsg(msg: StoredMessage): Promise<void>;
 }
 
@@ -513,7 +512,7 @@ export async function handleChatMessage(
 
   // ── Per-request state ─────────────────────────────────────────────────────
   let phase: Phase = 'idle';
-  let pendingQuestion: QuestionInput | null = null;
+  let pendingQuestion: ClientToolPrompt | null = null;
   let messages: StoredMessage[] = [];
   let modeContext: ModeContext = {};
 
@@ -566,7 +565,7 @@ export async function handleChatMessage(
     ? createMemoryAdapter(connKey, messages)
     : createDbAdapter(supabase, userId, messages, ordinalRef, mode.stateTable, mode.messagesTable, mode.modeColumn);
 
-  const setPhase = async (p: Phase, pq?: QuestionInput | null) => {
+  const setPhase = async (p: Phase, pq?: ClientToolPrompt | null) => {
     phase = p;
     pendingQuestion = pq ?? null;
     await adapter.setPhase(p, pq);
@@ -658,7 +657,7 @@ async function runToolLoop(
   modeContext: ModeContext,
   locale: string,
   connKey: string,
-  setPhase: (phase: Phase, pendingQuestion?: QuestionInput | null) => Promise<void>,
+  setPhase: (phase: Phase, pendingQuestion?: ClientToolPrompt | null) => Promise<void>,
   appendMsg: (msg: StoredMessage) => Promise<void>,
   supabase: SupabaseClient | null,
 ): Promise<void> {
@@ -769,11 +768,14 @@ async function runToolLoop(
     if (clientToolBlock) {
       rounds--;
 
-      const questionInput = clientToolBlock.input as QuestionInput;
+      const clientPrompt: ClientToolPrompt = {
+        toolName: clientToolBlock.name,
+        input: (clientToolBlock.input ?? {}) as Record<string, unknown>,
+      };
 
       // Persist phase BEFORE sending question — resumable checkpoint
-      await setPhase('waiting_for_answer', questionInput);
-      broadcast(connKey, 'question', { type: 'question', question: questionInput });
+      await setPhase('waiting_for_answer', clientPrompt);
+      broadcast(connKey, 'question', { type: 'question', toolName: clientToolBlock.name, input: clientPrompt.input });
 
       // Return — the next POST will resume with an answer
       // Record tokens before returning

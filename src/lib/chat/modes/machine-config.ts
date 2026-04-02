@@ -12,7 +12,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { registerChatMode, type ChatModeConfig, type ModeContext } from '../modes';
 import type { ChatConfig } from '../handler';
 import { buildSystemPrompt } from '../prompt';
-import { buildToolDefinitions, executeTool } from '../tools';
+import { buildToolDefinitions, executeTool, PROMPT_PREFERENCE_TOOL } from '../tools';
 import type Anthropic from '@anthropic-ai/sdk';
 
 export const machineConfigMode: ChatModeConfig = {
@@ -29,7 +29,7 @@ export const machineConfigMode: ChatModeConfig = {
   },
 
   buildToolDefinitions(): Anthropic.Tool[] {
-    return buildToolDefinitions();
+    return [...buildToolDefinitions(), PROMPT_PREFERENCE_TOOL];
   },
 
   executeTool: async (name: string, input: Record<string, unknown>, context: ModeContext): Promise<string> => {

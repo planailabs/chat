@@ -32,6 +32,7 @@ import {
   answerChatQuestion,
   cancelChatQuestion,
   switchChatMode,
+  answerPreferencePrompt,
 } from './actions/chat';
 import type { ClientChatModeId } from './constants';
 import { persistLanguagePreference } from './actions/profile';
@@ -394,6 +395,20 @@ const initApp = () => {
       (event) => {
         event.stopPropagation();
         cancelChatQuestion();
+      },
+    );
+
+    // Chat: Preference Prompt Choice (Yes/No from prompt_preference tool)
+    delegateEvent(
+      app,
+      'click',
+      '[data-action="preference-choice"]',
+      (event, target) => {
+        event.stopPropagation();
+        const choice = target.getAttribute('data-choice');
+        if (choice === 'yes' || choice === 'no') {
+          answerPreferencePrompt(choice);
+        }
       },
     );
 

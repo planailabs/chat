@@ -270,22 +270,25 @@ export const renderChatSection = (
       : '';
 
     // ── Question UI ───────────────────────────────────────────────────
-    const activeQ = phase === 'question' ? mc.activeQuestion : undefined;
-
-    const questionLabel = activeQ
-      ? `<div class="flex justify-start">
-          <p class="max-w-[min(100%,640px)] text-sm leading-relaxed text-(--text-muted)">
-            ${escapeHtml(activeQ.question)}
-          </p>
-        </div>`
-      : '';
+    const prompt = phase === 'question' ? mc.clientPrompt : undefined;
 
     const skipLabel = escapeHtml(modeLocale.cancelLabel);
 
-    const questionButtons =
-      activeQ?.type === 'multiple_choice' && activeQ.options
-        ? `<div class="flex flex-wrap gap-3 text-sm text-(--text-primary)">
-            ${activeQ.options
+    // ask_question rendering
+    let questionLabel = '';
+    let questionButtons = '';
+    if (prompt?.toolName === 'ask_question') {
+      const aqInput = prompt.input as { type?: string; question?: string; options?: string[] };
+      if (aqInput.question) {
+        questionLabel = `<div class="flex justify-start">
+          <p class="max-w-[min(100%,640px)] text-sm leading-relaxed text-(--text-muted)">
+            ${escapeHtml(aqInput.question)}
+          </p>
+        </div>`;
+      }
+      if (aqInput.type === 'multiple_choice' && aqInput.options) {
+        questionButtons = `<div class="flex flex-wrap gap-3 text-sm text-(--text-primary)">
+            ${aqInput.options
               .map(
                 (opt) => `
               <button
@@ -301,15 +304,87 @@ export const renderChatSection = (
             <button type="button" class="chat-cta-button chat-cta-button--cancel" data-action="mc-question-cancel">
               ${skipLabel}
             </button>
-          </div>`
+          </div>`;
+      }
+    }
+
+    // prompt_preference rendering
+    let preferenceBlock = '';
+    if (prompt?.toolName === 'prompt_preference' && prompt.preference) {
+      const pref = prompt.preference;
+      const streamingIndicatorPref = pref.subPhase === 'streaming_question'
+        ? '<span class="ml-1 inline-block h-4 w-1.5 rounded-full bg-(--text-muted) animate-pulse"></span>'
         : '';
+      preferenceBlock += `<div class="flex justify-start">
+        <p class="max-w-[min(100%,640px)] text-base leading-relaxed text-(--text-primary)">
+          ${escapeHtml(pref.visibleQuestionText)}${streamingIndicatorPref}
+        </p>
+      </div>`;
+
+      if (pref.subPhase === 'awaiting_choice' || pref.subPhase === 'persisting' || pref.subPhase === 'streaming_followup' || pref.subPhase === 'done') {
+        const prefId = prompt.input.preference_id as string;
+        const prefLocale = locale.preferencePrompts[prefId];
+        const isLocked = pref.ctaLocked ?? false;
+        preferenceBlock += `<div class="flex flex-wrap gap-3 text-sm text-(--text-primary)">
+          <button
+            type="button"
+            class="chat-cta-button ${isLocked ? 'is-disabled' : ''} ${pref.choice === 'yes' ? 'is-selected' : ''}"
+            data-action="preference-choice"
+            data-choice="yes"
+            ${isLocked ? 'disabled' : ''}
+            aria-disabled="${isLocked}"
+            aria-pressed="${pref.choice === 'yes'}"
+          >
+            ${escapeHtml(prefLocale?.ctaYesLabel ?? 'Yes')}
+          </button>
+          <button
+            type="button"
+            class="chat-cta-button ${isLocked ? 'is-disabled' : ''} ${pref.choice === 'no' ? 'is-selected' : ''}"
+            data-action="preference-choice"
+            data-choice="no"
+            ${isLocked ? 'disabled' : ''}
+            aria-disabled="${isLocked}"
+            aria-pressed="${pref.choice === 'no'}"
+          >
+            ${escapeHtml(prefLocale?.ctaNoLabel ?? 'No')}
+          </button>
+        </div>`;
+      }
+
+      // Response bubble (user's choice)
+      if (pref.choice) {
+        const prefId = prompt.input.preference_id as string;
+        const prefLocale = locale.preferencePrompts[prefId];
+        const choiceLabel = pref.choice === 'yes' ? prefLocale?.ctaYesLabel : prefLocale?.ctaNoLabel;
+        if (choiceLabel) {
+          preferenceBlock += `<div class="flex justify-end">
+            <p class="max-w-[min(100%,640px)] rounded-3xl bg-(--surface-elevated) px-5 py-3 text-base text-(--text-primary)">
+              ${escapeHtml(choiceLabel)}
+            </p>
+          </div>`;
+        }
+      }
+
+      // Follow-up streaming text
+      if (pref.visibleFollowupText) {
+        const followupStreamIndicator = pref.subPhase === 'streaming_followup'
+          ? '<span class="ml-1 inline-block h-4 w-1.5 rounded-full bg-(--text-muted) animate-pulse"></span>'
+          : '';
+        preferenceBlock += `<div class="flex justify-start">
+          <p class="max-w-[min(100%,640px)] text-base leading-relaxed text-(--text-primary)">
+            ${escapeHtml(pref.visibleFollowupText)}${followupStreamIndicator}
+          </p>
+        </div>`;
+      }
+    }
 
     // Show composer in idle, error, or text-type question phases
-    const isTextQuestion = phase === 'question' && activeQ?.type === 'text';
+    const aqInput = prompt?.toolName === 'ask_question' ? prompt.input as { type?: string; question?: string } : undefined;
+    const isTextQuestion = phase === 'question' && aqInput?.type === 'text';
     const showComposer = phase === 'idle' || phase === 'error' || isTextQuestion;
 
     const placeholder = escapeHtml(
-      isTextQuestion ? activeQ!.question : modeLocale.placeholder,
+      isTextQuestion ? (aqInput!.question ?? modeLocale.placeholder) : modeLocale.placeholder,
     );
     const inputField = showComposer
       ? `<div class="composer-card" data-form="machine-config-composer">
@@ -369,6 +444,7 @@ export const renderChatSection = (
         ${errorMessage}
         ${questionLabel}
         ${questionButtons}
+        ${preferenceBlock}
         ${inputField}
       </section>
     `;

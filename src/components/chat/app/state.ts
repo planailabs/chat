@@ -84,11 +84,20 @@ export interface ChatState {
     /** Word-by-word streaming reveal of the last assistant message */
     streamingText?: { full: string; visible: string };
     error?: string;
-    /** Structured question from Claude's ask_question tool */
-    activeQuestion?: {
-      type: 'multiple_choice' | 'text';
-      question: string;
-      options?: string[];
+    /** Active client-side tool prompt (waiting for user input) */
+    clientPrompt?: {
+      toolName: string;
+      input: Record<string, unknown>;
+      preference?: {
+        subPhase: 'streaming_question' | 'awaiting_choice' | 'persisting' | 'streaming_followup' | 'done';
+        questionText: string;
+        visibleQuestionText: string;
+        followupText?: string;
+        visibleFollowupText?: string;
+        stream: StreamConfig;
+        choice?: 'yes' | 'no';
+        ctaLocked?: boolean;
+      };
     };
     /** Name of currently executing tool (set during 'tool' phase) */
     toolName?: string;

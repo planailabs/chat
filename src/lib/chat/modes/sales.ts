@@ -7,7 +7,7 @@
 
 import ISO6391 from 'iso-639-1';
 import { registerChatMode, type ChatModeConfig } from '../modes';
-import { ASK_QUESTION_TOOL } from '../tools';
+import { ASK_QUESTION_TOOL, PROMPT_PREFERENCE_TOOL } from '../tools';
 import type Anthropic from '@anthropic-ai/sdk';
 
 export const salesMode: ChatModeConfig = {
@@ -44,7 +44,7 @@ Guidelines:
   },
 
   buildToolDefinitions(): Anthropic.Tool[] {
-    return [ASK_QUESTION_TOOL];
+    return [ASK_QUESTION_TOOL, PROMPT_PREFERENCE_TOOL];
   },
 
   executeTool: null,

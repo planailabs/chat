@@ -314,6 +314,23 @@ export const ASK_QUESTION_TOOL: ToolDef = {
   },
 };
 
+export const PROMPT_PREFERENCE_TOOL: ToolDef = {
+  name: 'prompt_preference',
+  description:
+    'Prompt the user about a preference (e.g. newsletter subscription). The client renders the question and Yes/No buttons. Returns "subscribed" or "declined".',
+  input_schema: {
+    type: 'object',
+    properties: {
+      preference_id: {
+        type: 'string',
+        enum: ['newsletter'],
+        description: 'Which preference to prompt for.',
+      },
+    },
+    required: ['preference_id'],
+  },
+};
+
 const UPDATE_CONFIG_TOOL: ToolDef = {
   name: 'update_config',
   description:
@@ -329,7 +346,7 @@ const UPDATE_CONFIG_TOOL: ToolDef = {
   },
 };
 
-const CLIENT_SIDE_TOOLS = new Set(['ask_question']);
+const CLIENT_SIDE_TOOLS = new Set(['ask_question', 'prompt_preference']);
 
 /** Returns true if the tool is handled client-side (no API call). */
 export const isClientSideTool = (name: string): boolean =>

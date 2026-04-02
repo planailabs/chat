@@ -128,6 +128,14 @@ export interface LocaleContent {
   };
   chatModes: Record<ChatModeKey, ChatModeLocale>;
   conversationScenarios: Record<ScenarioId, ConversationScenario>;
+  preferencePrompts: Record<string, {
+    question: string;
+    ctaYesLabel: string;
+    ctaNoLabel: string;
+    confirmText: string;
+    declineText: string;
+    stream: StreamConfig;
+  }>;
 }
 
 const defaultStream: StreamConfig = {
@@ -304,6 +312,16 @@ const en: LocaleContent = {
       },
     },
   },
+  preferencePrompts: {
+    newsletter: {
+      question: 'Would you like to subscribe to our newsletter to stay updated on new features and upgrades?',
+      ctaYesLabel: 'Yes, please',
+      ctaNoLabel: 'No, thank you',
+      confirmText: 'Great, you\'re on the list! We\'ll keep you updated.',
+      declineText: 'No problem. You can always subscribe later in settings.',
+      stream: defaultStream,
+    },
+  },
 };
 
 const de: LocaleContent = {
@@ -471,6 +489,16 @@ const de: LocaleContent = {
           stream: defaultStream,
         },
       },
+    },
+  },
+  preferencePrompts: {
+    newsletter: {
+      question: 'Möchtest du unseren Newsletter abonnieren, um über neue Features und Upgrades informiert zu bleiben?',
+      ctaYesLabel: 'Ja, bitte',
+      ctaNoLabel: 'Nein, danke',
+      confirmText: 'Super, du bist dabei! Wir halten dich auf dem Laufenden.',
+      declineText: 'Kein Problem. Du kannst jederzeit in den Einstellungen abonnieren.',
+      stream: defaultStream,
     },
   },
 };

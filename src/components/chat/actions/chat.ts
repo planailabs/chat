@@ -65,6 +65,12 @@ const clearPostLoginTimers = () => {
 
 export const clearChatTimers = clearPostLoginTimers;
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Preference Prompt Timers (for prompt_preference tool)
+// ─────────────────────────────────────────────────────────────────────────────
+let preferenceQuestionStreamCancel: (() => void) | null = null;
+let preferenceFollowupStreamCancel: (() => void) | null = null;
+
 const startNewsletterQuestionStream = () => {
   const newsletterState = store.state.chat?.postLogin?.newsletter;
   if (!newsletterState) {
@@ -390,11 +396,7 @@ const getJwt = async (): Promise<string | null> => {
 interface ChatHistoryResult {
   messages: StoredMessage[];
   phase?: string;
-  pendingQuestion?: {
-    type: 'multiple_choice' | 'text';
-    question: string;
-    options?: string[];
-  };
+  pendingQuestion?: Record<string, unknown>;
 }
 
 /**
@@ -510,7 +512,27 @@ export const restoreAIChatSession = (): void => {
       // Restore pending question if server is waiting for an answer
       if (result.phase === 'waiting_for_answer' && result.pendingQuestion) {
         mc.phase = 'question';
-        mc.activeQuestion = result.pendingQuestion;
+        // Backwards compat: old format has { type, question, options }, new has { toolName, input }
+        const pq = result.pendingQuestion;
+        if (pq.toolName) {
+          mc.clientPrompt = { toolName: pq.toolName as string, input: (pq.input ?? {}) as Record<string, unknown> };
+        } else {
+          mc.clientPrompt = { toolName: 'ask_question', input: pq };
+        }
+        // For prompt_preference: restore with subPhase 'awaiting_choice' (skip streaming)
+        if (mc.clientPrompt.toolName === 'prompt_preference') {
+          const prefId = mc.clientPrompt.input.preference_id as string;
+          const locale = locales[store.state.localeKey];
+          const prefContent = locale.preferencePrompts[prefId];
+          if (prefContent) {
+            mc.clientPrompt.preference = {
+              subPhase: 'awaiting_choice',
+              questionText: prefContent.question,
+              visibleQuestionText: prefContent.question,
+              stream: prefContent.stream,
+            };
+          }
+        }
       } else {
         mc.phase = 'idle';
       }
@@ -617,9 +639,19 @@ const transition = (
 
   // Clear transient state from any previous phase
   mc.streamingText = undefined;
-  mc.activeQuestion = undefined;
+  mc.clientPrompt = undefined;
   mc.error = undefined;
   mc.toolName = undefined;
+
+  // Cancel any preference streaming timers
+  if (preferenceQuestionStreamCancel) {
+    preferenceQuestionStreamCancel();
+    preferenceQuestionStreamCancel = null;
+  }
+  if (preferenceFollowupStreamCancel) {
+    preferenceFollowupStreamCancel();
+    preferenceFollowupStreamCancel = null;
+  }
 
   mc.phase = phase;
 };
@@ -723,14 +755,39 @@ const handleServerEvent = (type: string, data: Record<string, unknown>) => {
         mc2.messages.push({ role: 'assistant', content: mc2.streamingText.full });
       }
       mc2.streamingText = undefined;
-      const lastMsg = mc2.messages[mc2.messages.length - 1];
-      const alreadyDisplayed = lastMsg?.role === 'assistant' && lastMsg.content === (data.question as any)?.question;
-      if (!alreadyDisplayed) {
-        mc2.messages.push({ role: 'assistant', content: (data.question as any).question });
-      }
+
+      const toolName = data.toolName as string;
+      const input = data.input as Record<string, unknown>;
+
+      // Generic: store the prompt
       mc2.phase = 'question';
-      mc2.activeQuestion = data.question as any;
+      mc2.clientPrompt = { toolName, input };
       mc2.toolName = undefined;
+
+      // Tool-specific initialization
+      if (toolName === 'ask_question') {
+        // Backwards compat: add question text to messages (existing behavior)
+        const q = input as { question: string };
+        const lastMsg = mc2.messages[mc2.messages.length - 1];
+        if (!(lastMsg?.role === 'assistant' && lastMsg.content === q.question)) {
+          mc2.messages.push({ role: 'assistant', content: q.question });
+        }
+      } else if (toolName === 'prompt_preference') {
+        const prefId = input.preference_id as string;
+        const locale = locales[store.state.localeKey];
+        const prefContent = locale.preferencePrompts[prefId];
+        if (prefContent) {
+          mc2.clientPrompt.preference = {
+            subPhase: 'streaming_question',
+            questionText: prefContent.question,
+            visibleQuestionText: '',
+            stream: prefContent.stream,
+          };
+          // Start streaming after notify
+          setTimeout(() => startPreferenceQuestionStream(), 0);
+        }
+      }
+
       cacheAIChatMessages(mc2.messages);
       store.notify();
       break;
@@ -851,6 +908,131 @@ export const disconnectEvents = () => {
     eventSource.close();
     eventSource = null;
   }
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Preference Prompt Helpers (prompt_preference tool)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const startPreferenceQuestionStream = () => {
+  const pref = store.state.chat?.aiChat?.clientPrompt?.preference;
+  if (!pref) return;
+
+  if (preferenceQuestionStreamCancel) {
+    preferenceQuestionStreamCancel();
+    preferenceQuestionStreamCancel = null;
+  }
+
+  const totalLength = pref.questionText.length;
+  preferenceQuestionStreamCancel = startCharacterStream(
+    totalLength,
+    pref.stream.chunkSize,
+    pref.stream.intervalMs,
+    (index) => {
+      const curPref = store.state.chat?.aiChat?.clientPrompt?.preference;
+      if (!curPref) return;
+      curPref.visibleQuestionText = curPref.questionText.slice(0, index);
+      store.notify();
+    },
+    () => {
+      preferenceQuestionStreamCancel = null;
+      const curPref = store.state.chat?.aiChat?.clientPrompt?.preference;
+      if (!curPref) return;
+      curPref.visibleQuestionText = curPref.questionText;
+      curPref.subPhase = 'awaiting_choice';
+      store.notify();
+    },
+  );
+};
+
+const startPreferenceFollowupStream = () => {
+  const pref = store.state.chat?.aiChat?.clientPrompt?.preference;
+  if (!pref || !pref.followupText) return;
+
+  if (preferenceFollowupStreamCancel) {
+    preferenceFollowupStreamCancel();
+    preferenceFollowupStreamCancel = null;
+  }
+
+  const totalLength = pref.followupText.length;
+  preferenceFollowupStreamCancel = startCharacterStream(
+    totalLength,
+    pref.stream.chunkSize,
+    pref.stream.intervalMs,
+    (index) => {
+      const curPref = store.state.chat?.aiChat?.clientPrompt?.preference;
+      if (!curPref || !curPref.followupText) return;
+      curPref.visibleFollowupText = curPref.followupText.slice(0, index);
+      store.notify();
+    },
+    () => {
+      preferenceFollowupStreamCancel = null;
+      const curPref = store.state.chat?.aiChat?.clientPrompt?.preference;
+      if (!curPref) return;
+      curPref.visibleFollowupText = curPref.followupText;
+      curPref.subPhase = 'done';
+      store.notify();
+
+      // After follow-up completes, add exchange to messages and send answer to server
+      const mc = store.state.chat?.aiChat;
+      if (!mc || !curPref) return;
+      mc.messages.push({ role: 'assistant', content: curPref.questionText });
+      const choiceLabel = curPref.choice === 'yes' ? locale().newsletter.ctaYesLabel : locale().newsletter.ctaNoLabel;
+      mc.messages.push({ role: 'user', content: choiceLabel });
+      mc.messages.push({ role: 'assistant', content: curPref.followupText! });
+      cacheAIChatMessages(mc.messages);
+
+      const answerText = curPref.choice === 'yes' ? 'subscribed' : 'declined';
+      void answerChatQuestion(answerText);
+    },
+  );
+};
+
+const locale = () => locales[store.state.localeKey];
+
+export const answerPreferencePrompt = (choice: 'yes' | 'no') => {
+  const pref = store.state.chat?.aiChat?.clientPrompt?.preference;
+  if (!pref || pref.subPhase !== 'awaiting_choice') return;
+
+  // Lock buttons and set choice
+  pref.ctaLocked = true;
+  pref.choice = choice;
+  pref.subPhase = 'persisting';
+  store.notify();
+
+  // Persist newsletter preference
+  const userId = store.state.userId;
+  if (!userId) return;
+
+  const subscribe = choice === 'yes';
+  void (async () => {
+    try {
+      const { persistNewsletterPreference } = await import('../supabase/newsletter');
+      await persistNewsletterPreference({
+        userId,
+        localeKey: store.state.localeKey,
+        subscribe,
+        source: 'chat_flow',
+      });
+    } catch (err) {
+      console.warn('[chat] Failed to persist newsletter preference:', err);
+    }
+
+    // Stream follow-up text
+    const curPref = store.state.chat?.aiChat?.clientPrompt?.preference;
+    if (!curPref) return;
+
+    const prefId = store.state.chat?.aiChat?.clientPrompt?.input.preference_id as string;
+    const prefContent = locale().preferencePrompts[prefId];
+    if (!prefContent) return;
+
+    curPref.followupText = choice === 'yes' ? prefContent.confirmText : prefContent.declineText;
+    curPref.visibleFollowupText = '';
+    curPref.subPhase = 'streaming_followup';
+    store.notify();
+
+    setTimeout(() => startPreferenceFollowupStream(), curPref.stream.initialDelayMs);
+  })();
 };
 
 export const sendChatMessage = async (message: string) => {
