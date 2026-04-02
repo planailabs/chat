@@ -29,10 +29,6 @@ const stripInstalled = (val: unknown): unknown => {
 
 const CATALOG_ENDPOINTS: Record<string, string> = {
   catalog: '/api/setting/catalog',
-  skills: '/api/setting/skills',
-  bundles: '/api/setting/bundles',
-  mcp_servers: '/api/setting/mcp-servers',
-  mcp_bundles: '/api/setting/mcp-bundles',
   available_skills: '/api/setting/available/skill-channels',
   available_bundles: '/api/setting/available/bundles',
   available_mcp_servers: '/api/setting/available/mcp-servers',
