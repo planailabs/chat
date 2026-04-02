@@ -715,17 +715,23 @@ const transition = (
     toolTransitionTimer = null;
   }
 
-  // Delay tool → waiting so the spinner doesn't flash to dots immediately
+  // Delay tool → waiting so the spinner shows for at least 500ms
   if (mc.phase === 'tool' && phase === 'waiting') {
     toolTransitionTimer = setTimeout(() => {
       toolTransitionTimer = null;
       const cur = store.state.chat?.aiChat;
+      // Only transition if still in tool phase (another event may have moved us)
       if (cur?.phase === 'tool') {
         cur.phase = 'waiting';
         cur.toolName = undefined;
         store.notify();
       }
     }, TOOL_TRANSITION_DELAY_MS);
+    return;
+  }
+
+  // tool → tool: new tool starting while still showing previous — just update name
+  if (mc.phase === 'tool' && phase === 'tool') {
     return;
   }
 
