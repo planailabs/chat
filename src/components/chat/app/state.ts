@@ -20,6 +20,7 @@ import {
   type StreamConfig,
 } from '../content';
 import { STORAGE_KEYS, type ClientChatModeId } from '../constants';
+import { createProfileState, type ProfileState } from './profileState';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Type Definitions
@@ -28,29 +29,8 @@ import { STORAGE_KEYS, type ClientChatModeId } from '../constants';
 /** Phases of the hero/composer section */
 export type HeroPhase = 'composer' | 'fading' | 'chat';
 
-/** Newsletter subscription status */
-export type NewsletterStatus = 'unknown' | 'subscribed' | 'unsubscribed';
-
 /** Theme mode preference */
 export type ThemeMode = 'system' | 'light' | 'dark';
-
-/** Newsletter subscription preference state */
-export interface NewsletterPreferenceState {
-  /** Current known subscription status */
-  status: NewsletterStatus;
-  /** Whether a sync operation is in progress */
-  isSyncing: boolean;
-  /** Timestamp of last successful update */
-  lastUpdatedAt: number | null;
-}
-
-/** Account deletion request state */
-export interface AccountDeletionState {
-  /** Whether a deletion is scheduled */
-  pending: boolean;
-  /** Timestamp when deletion was requested */
-  requestedAt: number | null;
-}
 
 /**
  * Chat conversation state.
@@ -138,9 +118,6 @@ export interface ChatState {
   };
 }
 
-/** Data export operation status */
-export type DataExportStatus = 'idle' | 'started' | 'done';
-
 /**
  * Root application state interface.
  * Contains all UI, user, and preference state.
@@ -184,15 +161,9 @@ export interface AppState {
   /** Current chat conversation state (null when not in chat phase) */
   chat: ChatState | null;
 
-  // ─── Newsletter & Privacy ──────────────────────────────────────────────────
-  /** Newsletter subscription preference */
-  newsletterPreference: NewsletterPreferenceState;
-  /** Account deletion request state */
-  accountDeletion: AccountDeletionState;
-  /** Whether a data export is in progress */
-  isDataExportInFlight: boolean;
-  /** Current data export status */
-  dataExportStatus: DataExportStatus;
+  // ─── Profile State Machine ─────────────────────────────────────────────────
+  /** Profile preferences lifecycle (idle → loading → ready | error) */
+  profile: ProfileState;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -340,17 +311,7 @@ export const createInitialState = (): AppState => {
     heroPhase: 'composer',
     activeChatMode: 'machine_config',
     chat: null,
-    newsletterPreference: {
-      status: 'unknown',
-      isSyncing: false,
-      lastUpdatedAt: null,
-    },
-    accountDeletion: {
-      pending: false,
-      requestedAt: null,
-    },
-    isDataExportInFlight: false,
-    dataExportStatus: 'idle',
+    profile: createProfileState(),
   };
 };
 

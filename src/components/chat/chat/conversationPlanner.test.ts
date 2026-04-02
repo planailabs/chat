@@ -25,7 +25,7 @@ describe('planPromptConversation', () => {
   it('returns subscribed plan when newsletter status is subscribed', () => {
     const state = createInitialState();
     state.isAuthenticated = true;
-    state.newsletterPreference.status = 'subscribed';
+    state.profile.newsletterStatus = 'subscribed';
     const plan = planPromptConversation(state, locale);
     expect(plan.type).toBe('signedInSubscribed');
     expect(plan).toHaveProperty(
@@ -37,7 +37,7 @@ describe('planPromptConversation', () => {
   it('returns unsubscribed plan when newsletter status is not subscribed', () => {
     const state = createInitialState();
     state.isAuthenticated = true;
-    state.newsletterPreference.status = 'unsubscribed';
+    state.profile.newsletterStatus = 'unsubscribed';
     const plan = planPromptConversation(state, locale);
     expect(plan.type).toBe('signedInUnsubscribed');
     expect(plan).toHaveProperty('followup', 'newsletter-reconsider');
@@ -47,13 +47,13 @@ describe('planPromptConversation', () => {
 describe('planPostLoginQuestion', () => {
   it('prefers already-subscribed variant when user subscribed', () => {
     const state = createInitialState();
-    state.newsletterPreference.status = 'subscribed';
+    state.profile.newsletterStatus = 'subscribed';
     expect(planPostLoginQuestion(state)).toBe('alreadySubscribed');
   });
 
   it('defaults to standard question otherwise', () => {
     const state = createInitialState();
-    state.newsletterPreference.status = 'unsubscribed';
+    state.profile.newsletterStatus = 'unsubscribed';
     expect(planPostLoginQuestion(state)).toBe('default');
   });
 });

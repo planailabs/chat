@@ -224,7 +224,7 @@ export const tryStartPostLoginSequence = () => {
   // the profile fetch might return null, resulting in an 'unknown' status.
   // In this case, we default to treating them as unsubscribed and ask the question.
   // We strictly block only if we know a sync is actively in progress to avoid jumping the gun.
-  if (state.newsletterPreference.isSyncing) {
+  if (state.profile.newsletterSyncing) {
     return;
   }
   if (

@@ -60,31 +60,31 @@ export const renderSettingsOverlay = (params: {
   const profileSection = locale.settings.sections.profile;
   const privacySection = locale.settings.sections.privacy;
   const newsletterField = profileSection.fields.newsletter;
+  const { profile } = state;
   const newsletterChecked =
-    state.newsletterPreference.status === 'subscribed' && state.isAuthenticated;
+    profile.newsletterStatus === 'subscribed' && state.isAuthenticated;
   const newsletterDisabled =
-    !state.isAuthenticated || state.newsletterPreference.isSyncing;
-  const profileStatusLabel = state.newsletterPreference.isSyncing
+    !state.isAuthenticated || profile.newsletterSyncing;
+  const profileStatusLabel = profile.newsletterSyncing
     ? `${locale.settings.savedLabel.replace('Saved', 'Saving')}…`
     : '';
-  const dataExportStatus = state.dataExportStatus;
   const dataExportDisabled =
     !state.isAuthenticated ||
-    state.isDataExportInFlight ||
-    dataExportStatus !== 'idle';
+    profile.dataExportInFlight ||
+    profile.dataExportStatus !== 'idle';
   const requestDataLabel =
-    dataExportStatus === 'started'
+    profile.dataExportStatus === 'started'
       ? privacySection.requestDataStarted
-      : dataExportStatus === 'done'
+      : profile.dataExportStatus === 'done'
         ? privacySection.requestDataDone
         : privacySection.requestData;
   const deletionDisabled =
-    !state.isAuthenticated || state.accountDeletion.pending;
+    !state.isAuthenticated || profile.deletionPending;
   const formattedDeletionDate = getLocaleDateString(
-    state.accountDeletion.requestedAt,
+    profile.deletionRequestedAt,
     state.localeKey,
   );
-  const deletionNotice = state.accountDeletion.pending
+  const deletionNotice = profile.deletionPending
     ? privacySection.deleteScheduledInfo.replace(
         '{{date}}',
         formattedDeletionDate ?? '30 days',

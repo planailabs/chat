@@ -16,6 +16,7 @@ import {
   clearCachedUserState,
   type AppState,
 } from './state';
+import { createProfileState } from './profileState';
 
 /** Listener callback type for store subscriptions */
 type StoreListener = () => void;
@@ -101,6 +102,7 @@ class Store {
       ...createInitialState(),
       localeKey: currentLocale,
       themeMode: currentTheme,
+      profile: createProfileState(),
       // Explicitly clear user state (in case cache wasn't cleared)
       isAuthenticated: false,
       userId: null,

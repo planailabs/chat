@@ -48,7 +48,7 @@ export const planPromptConversation = (
     return { type: 'aiChat' };
   }
 
-  const newsletterStatus = state.newsletterPreference.status;
+  const newsletterStatus = state.profile.newsletterStatus;
   if (newsletterStatus === 'subscribed') {
     return {
       type: 'signedInSubscribed',
@@ -66,7 +66,7 @@ export const planPromptConversation = (
 export const planPostLoginQuestion = (
   state: AppState,
 ): PostLoginQuestionPlan => {
-  return state.newsletterPreference.status === 'subscribed'
+  return state.profile.newsletterStatus === 'subscribed'
     ? 'alreadySubscribed'
     : 'default';
 };

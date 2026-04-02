@@ -19,8 +19,8 @@ export const closeSettingsOverlay = (options?: { fromHistory?: boolean }) => {
   if (!state.isSettingsOverlayOpen) {
     return;
   }
+  store.state.profile.dataExportStatus = 'idle';
   store.setState({
-    dataExportStatus: 'idle',
     isSettingsOverlayOpen: false,
   });
 

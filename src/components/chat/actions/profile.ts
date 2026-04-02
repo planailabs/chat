@@ -1,3 +1,11 @@
+/**
+ * Profile Actions
+ *
+ * Drives the profile state machine (idle → loading → ready | error).
+ * Loads preferences from Supabase, applies them to app state, and
+ * provides persist functions for theme/language changes.
+ */
+
 import { store } from '../app/store';
 import {
   fetchProfilePreferences,
@@ -5,12 +13,24 @@ import {
 } from '../supabase/profile';
 import { isSupabaseConfigured } from '../supabase/client';
 import { setThemeMode } from './theme';
-import { cacheUserState, persistLocaleSelection, type NewsletterStatus } from '../app/state';
+import { cacheUserState, persistLocaleSelection } from '../app/state';
+import type { NewsletterStatus } from '../app/profileState';
+import {
+  profileStartLoading,
+  profileLoadSuccess,
+  profileLoadError,
+  profileSetNewsletter,
+  profileSetNewsletterSyncing,
+  profileSetDeletion,
+  type ProfileData,
+} from '../app/profileState';
 import type { LocaleContent, LocaleKey } from '../content';
 import { getLocaleDateString } from '../utils/date';
 import { signOut } from '../auth/controller';
 import { clearPreAuthState } from '../auth/preAuthCache';
 import { isImpersonating, getImpersonateId } from '../impersonation';
+
+// ─── Deletion Sign-Out ──────────────────────────────────────────────────────
 
 export const handlePendingDeletionSignOut = (
   locale: LocaleContent,
@@ -24,162 +44,147 @@ export const handlePendingDeletionSignOut = (
   );
   alert(message);
 
-  // Perform sign out
   clearPreAuthState();
   signOut().catch((e) => console.error(e));
   store.reset();
 };
 
-const setNewsletterStatus = (status: NewsletterStatus) => {
-  const state = store.state;
-  if (state.newsletterPreference.status === status) {
-    return;
+/** Sync profile state machine outputs to AppState top-level fields */
+const applyProfileToState = () => {
+  const { profile } = store.state;
+  store.state.customerToken = profile.customerToken;
+
+  if (getImpersonateId() && profile.email) {
+    store.state.userEmail = profile.email;
+    store.state.userDisplayName = profile.displayName;
+    store.state.userAvatarUrl = profile.avatarUrl;
   }
-  state.newsletterPreference.status = status;
-  state.newsletterPreference.lastUpdatedAt =
-    status === 'unknown' ? null : Date.now();
-  store.notify();
 };
 
-const setAccountDeletionState = (
-  pending: boolean,
-  requestedAt: number | null,
-) => {
-  store.state.accountDeletion.pending = pending;
-  store.state.accountDeletion.requestedAt = requestedAt;
-};
+// ─── Load Profile ───────────────────────────────────────────────────────────
 
-const setNewsletterSyncing = (value: boolean) => {
-  if (store.state.newsletterPreference.isSyncing === value) {
-    return;
-  }
-  store.state.newsletterPreference.isSyncing = value;
-  store.notify();
-};
-
-let profileSyncPromise: Promise<void> | null = null;
+let loadPromise: Promise<void> | null = null;
 
 export const loadProfilePreferences = (
   locale: LocaleContent,
 ): Promise<void> | void => {
   const state = store.state;
-  if (!state.userId || !isSupabaseConfigured) {
-    return;
-  }
-  if (profileSyncPromise) {
-    return profileSyncPromise;
-  }
+  if (!state.userId || !isSupabaseConfigured) return;
+  if (loadPromise) return loadPromise;
 
-  // When impersonating, fetch the impersonated user's profile (for customerToken)
-  // but skip applying their personal preferences (theme, language, newsletter, deletion).
   const impersonatedId = getImpersonateId();
   const targetUserId = impersonatedId ?? state.userId;
+  const ps = state.profile;
 
-  setNewsletterSyncing(true);
-  profileSyncPromise = fetchProfilePreferences({
-    userId: targetUserId,
-  })
+  profileStartLoading(ps);
+  profileSetNewsletterSyncing(ps, true);
+  applyProfileToState();
+  store.notify();
+
+  loadPromise = fetchProfilePreferences({ userId: targetUserId })
     .then((preferences) => {
-      if (!state.userId) {
+      if (!state.userId) return;
+
+      const data: ProfileData = {
+        language: preferences?.language ?? null,
+        themePreference: preferences?.themePreference ?? null,
+        newsletterOptIn: preferences?.newsletterOptIn ?? null,
+        customerToken: preferences?.customerToken ?? null,
+        pendingDeletion: preferences?.pendingDeletion ?? false,
+        deletionRequestedAt: preferences?.deletionRequestedAt ?? null,
+        providerIdentity: preferences?.providerIdentity ?? {},
+      };
+
+      profileLoadSuccess(ps, data, Boolean(impersonatedId));
+      applyProfileToState();
+
+      // Apply language
+      if (data.language && data.language !== state.localeKey) {
+        state.localeKey = data.language;
+        persistLocaleSelection(data.language);
+      }
+
+      // Apply theme
+      if (data.themePreference && data.themePreference !== store.state.themeMode) {
+        setThemeMode(data.themePreference);
+      }
+
+      // Cache user state (only for own profile, not when impersonating)
+      if (!impersonatedId) {
+        cacheUserState({
+          isAuthenticated: state.isAuthenticated,
+          userId: state.userId,
+          userEmail: state.userEmail,
+          userAvatarUrl: state.userAvatarUrl,
+          userDisplayName: state.userDisplayName,
+          isAdmin: state.isAdmin,
+          customerToken: data.customerToken,
+        });
+      }
+
+      // If customer token just became available, initialize machine config chat
+      if (data.customerToken && !store.state.chat?.aiChat) {
+        import('./chat').then(({ restoreMachineConfigSession }) => {
+          restoreMachineConfigSession();
+        });
+      }
+
+      // Handle pending deletion (skip when impersonating)
+      if (data.pendingDeletion && !impersonatedId) {
+        handlePendingDeletionSignOut(locale, ps.deletionRequestedAt);
         return;
       }
 
-      // When impersonating, override the admin's display identity with the target user's
-      if (impersonatedId && preferences?.providerIdentity) {
-        const pi = preferences.providerIdentity;
-        state.userEmail = (pi.email as string) ?? state.userEmail;
-        state.userDisplayName = (pi.name as string) ?? state.userDisplayName;
-        state.userAvatarUrl = (pi.avatar_url as string) ?? state.userAvatarUrl;
-        store.notify();
-      }
-
-      if (preferences?.language && preferences.language !== state.localeKey) {
-        state.localeKey = preferences.language;
-        persistLocaleSelection(preferences.language);
-        store.notify();
-      }
-      if (
-        preferences?.themePreference &&
-        preferences.themePreference !== store.state.themeMode
-      ) {
-        setThemeMode(preferences.themePreference);
-      }
-      if (preferences?.customerToken !== undefined) {
-        const hadToken = Boolean(state.customerToken);
-        state.customerToken = preferences.customerToken;
-        if (!impersonatedId) {
-          cacheUserState({
-            isAuthenticated: state.isAuthenticated,
-            userId: state.userId,
-            userEmail: state.userEmail,
-            userAvatarUrl: state.userAvatarUrl,
-            userDisplayName: state.userDisplayName,
-            isAdmin: state.isAdmin,
-            customerToken: preferences.customerToken,
-          });
-        }
-        store.notify();
-        if (!hadToken && preferences.customerToken) {
-          import('./chat').then(({ restoreMachineConfigSession }) => {
-            restoreMachineConfigSession();
-          });
-        }
-      }
-      if (typeof preferences?.newsletterOptIn === 'boolean') {
-        setNewsletterStatus(
-          preferences.newsletterOptIn ? 'subscribed' : 'unsubscribed',
-        );
-      } else {
-        setNewsletterStatus('unknown');
-      }
-      // Skip deletion sign-out when impersonating — don't kick out the admin
-      if (preferences?.pendingDeletion && !impersonatedId) {
-        const parsed = preferences.deletionRequestedAt
-          ? Date.parse(preferences.deletionRequestedAt)
-          : null;
-        const timestamp = Number.isNaN(parsed ?? NaN) ? null : parsed;
-        setAccountDeletionState(true, timestamp);
-        handlePendingDeletionSignOut(locale, timestamp);
-        return;
-      }
-      setAccountDeletionState(false, null);
+      store.notify();
     })
     .catch((error) => {
-      console.error('[supabase] Failed to load profile preferences', error);
+      console.error('[profile] Failed to load preferences', error);
+      profileLoadError(ps, error instanceof Error ? error.message : 'Unknown error');
+      applyProfileToState();
+      store.notify();
     })
     .finally(() => {
-      setNewsletterSyncing(false);
-      profileSyncPromise = null;
+      profileSetNewsletterSyncing(ps, false);
+      applyProfileToState();
+      loadPromise = null;
+      store.notify();
     });
 
-  return profileSyncPromise;
+  return loadPromise;
 };
+
+// ─── Persist Helpers ────────────────────────────────────────────────────────
 
 export const persistThemePreference = () => {
   if (isImpersonating()) return;
   const state = store.state;
-  if (!state.isAuthenticated || !state.userId || !isSupabaseConfigured) {
-    return;
-  }
-  const currentTheme = state.themeMode;
+  if (!state.isAuthenticated || !state.userId || !isSupabaseConfigured) return;
   void persistProfilePreferences({
     userId: state.userId,
-    themePreference: currentTheme,
+    themePreference: state.themeMode,
   }).catch((error) => {
-    console.error('[supabase] Failed to persist theme preference', error);
+    console.error('[profile] Failed to persist theme', error);
   });
 };
 
 export const persistLanguagePreference = (localeKey: LocaleKey) => {
   if (isImpersonating()) return;
   const state = store.state;
-  if (!state.isAuthenticated || !state.userId || !isSupabaseConfigured) {
-    return;
-  }
+  if (!state.isAuthenticated || !state.userId || !isSupabaseConfigured) return;
   void persistProfilePreferences({
     userId: state.userId,
     language: localeKey,
   }).catch((error) => {
-    console.error('[supabase] Failed to persist language preference', error);
+    console.error('[profile] Failed to persist language', error);
   });
+};
+
+// ─── Newsletter Status (used by settings and chat actions) ──────────────────
+
+export const setNewsletterStatus = (status: NewsletterStatus) => {
+  const ps = store.state.profile;
+  if (ps.newsletterStatus === status) return;
+  profileSetNewsletter(ps, status);
+  applyProfileToState();
+  store.notify();
 };
