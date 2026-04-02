@@ -142,7 +142,7 @@ import '../../../components/chat/style.css';
 
           try {
             const jwt = await getJwt();
-            const res = await fetch(`/api/admin/search-users?q=${encodeURIComponent(q)}`, {
+            const res = await fetch(`/api/admin/search-users/?q=${encodeURIComponent(q)}`, {
               headers: { Authorization: `Bearer ${jwt}` },
             });
             const data = await res.json();
@@ -217,7 +217,7 @@ import '../../../components/chat/style.css';
 
               try {
                 const jwt = await getJwt();
-                const res = await fetch('/api/admin/customer-token', {
+                const res = await fetch('/api/admin/customer-token/', {
                   method: 'DELETE',
                   headers: {
                     Authorization: `Bearer ${jwt}`,
@@ -279,7 +279,7 @@ import '../../../components/chat/style.css';
 
           try {
             const jwt = await getJwt();
-            const res = await fetch('/api/admin/customer-token', {
+            const res = await fetch('/api/admin/customer-token/', {
               method: 'PUT',
               headers: {
                 Authorization: `Bearer ${jwt}`,

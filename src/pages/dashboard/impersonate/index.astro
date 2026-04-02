@@ -93,7 +93,7 @@ import '../../../components/chat/style.css';
 
           try {
             const jwt = await getJwt();
-            const res = await fetch(`/api/admin/search-users?q=${encodeURIComponent(q)}`, {
+            const res = await fetch(`/api/admin/search-users/?q=${encodeURIComponent(q)}`, {
               headers: { Authorization: `Bearer ${jwt}` },
             });
             const data = await res.json();
