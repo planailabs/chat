@@ -280,13 +280,7 @@ export const renderChatSection = (
         </div>`
       : '';
 
-    const cancelButton = `<button
-              type="button"
-              class="chat-cta-button chat-cta-button--cancel"
-              data-action="mc-question-cancel"
-            >
-              ${escapeHtml(modeLocale.cancelLabel)}
-            </button>`;
+    const skipLabel = escapeHtml(modeLocale.cancelLabel);
 
     const questionButtons =
       activeQ?.type === 'multiple_choice' && activeQ.options
@@ -304,22 +298,29 @@ export const renderChatSection = (
               </button>`,
               )
               .join('')}
-            ${cancelButton}
+            <button type="button" class="chat-cta-button chat-cta-button--cancel" data-action="mc-question-cancel">
+              ${skipLabel}
+            </button>
           </div>`
         : '';
 
-    const textQuestionCancel = activeQ?.type === 'text'
-      ? `<div class="flex justify-start text-sm">${cancelButton}</div>`
-      : '';
-
     // Show composer in idle, error, or text-type question phases
-    const showComposer = phase === 'idle' || phase === 'error'
-      || (phase === 'question' && activeQ?.type === 'text');
+    const isTextQuestion = phase === 'question' && activeQ?.type === 'text';
+    const showComposer = phase === 'idle' || phase === 'error' || isTextQuestion;
 
-    const placeholder = escapeHtml(modeLocale.placeholder);
+    const placeholder = escapeHtml(
+      isTextQuestion ? activeQ!.question : modeLocale.placeholder,
+    );
     const inputField = showComposer
       ? `<div class="composer-card" data-form="machine-config-composer">
           <div class="composer-wrapper">
+            ${isTextQuestion
+              ? `<button
+                  type="button"
+                  class="composer-skip-button"
+                  data-action="mc-question-cancel"
+                >${skipLabel}</button>`
+              : ''}
             <div
               class="composer-input"
               role="textbox"
@@ -369,7 +370,6 @@ export const renderChatSection = (
         ${questionLabel}
         ${questionButtons}
         ${inputField}
-        ${textQuestionCancel}
       </section>
     `;
   }
