@@ -189,7 +189,7 @@ import '../../../components/chat/style.css';
                 <button class="set-token-btn px-3 py-1.5 text-xs bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg transition-colors" data-user-id="${u.userId}" data-email="${escapeHtml(u.email ?? '')}">
                   ${Boolean(u.customerToken) ? 'Change Token' : 'Set Token'}
                 </button>
-                ${Boolean(u.customerToken) ? `<button class="remove-token-btn px-3 py-1.5 text-xs text-red-400 hover:bg-red-500/10 border border-red-500/20 rounded-lg transition-colors" data-user-id="${u.userId}" data-email="${escapeHtml(u.email ?? '')}">Remove</button>` : ''}
+                ${Boolean(u.customerToken) ? `<button class="remove-token-btn px-3 py-1.5 text-xs text-red-400 hover:bg-red-500/10 border border-red-500/20 rounded-lg transition-colors" data-user-id="${u.userId}" data-email="${escapeHtml(u.email ?? '')}">Remove token</button>` : ''}
               </div>
             `;
             userCards.appendChild(card);
