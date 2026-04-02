@@ -1138,6 +1138,53 @@ export const answerPreferencePrompt = (choice: 'yes' | 'no') => {
   })();
 };
 
+/**
+ * Sends a pending sales prompt after login. Handles the full lifecycle:
+ * inits sales chat → fetches history → cancels any pending question → sends prompt.
+ */
+export const sendPendingSalesPrompt = async (prompt: string): Promise<void> => {
+  const state = store.state;
+
+  // Switch to sales mode and init empty chat
+  state.activeChatMode = 'sales';
+  state.chat = null;
+  state.heroPhase = 'composer';
+  store.notify();
+
+  // Init the AI chat UI immediately (shows empty state)
+  initAIChat([], 'idle');
+  store.notify();
+
+  // Connect SSE and fetch server history
+  await connectEvents();
+  const result = await fetchAIChatHistory('sales');
+
+  const mc = store.state.chat?.aiChat;
+  if (!mc) return;
+
+  // Apply server history
+  if (result && result.messages.length > 0) {
+    const cancelLabel = locales[state.localeKey].chatModes.sales.cancelLabel;
+    mc.messages = result.messages.map((m) =>
+      m.role === 'cancel' ? { ...m, content: m.content || cancelLabel } : m,
+    );
+  }
+
+  // If server is waiting for an answer, cancel it first
+  if (result?.phase === 'waiting_for_answer') {
+    mc.phase = 'idle';
+    store.notify();
+    await postMessage({ type: 'answer', text: '__cancel__' });
+    // Brief wait for server to process cancellation
+    await new Promise((r) => setTimeout(r, 500));
+  }
+
+  // Now send the actual prompt
+  mc.phase = 'idle';
+  store.notify();
+  void sendChatMessage(prompt);
+};
+
 export const sendChatMessage = async (message: string) => {
   const state = store.state;
   if (!state.chat?.aiChat) return;

@@ -29,8 +29,7 @@ import {
   clearMachineConfigMessages,
   disconnectEvents,
   consumePendingSalesPrompt,
-  restoreAIChatSession,
-  sendChatMessage,
+  sendPendingSalesPrompt,
 } from './chat';
 import {
   USER_METADATA_NAME_KEYS,
@@ -262,16 +261,8 @@ export const applySessionToState = (session: Session | null) => {
     // Check for a pending sales prompt saved before sign-in
     const pendingSalesPrompt = consumePendingSalesPrompt();
     if (pendingSalesPrompt) {
-      // Switch to sales AI chat and send the saved prompt
-      state.activeChatMode = 'sales';
-      state.chat = null;
-      state.heroPhase = 'composer';
-      store.notify();
-      restoreAIChatSession();
-      // Send the prompt once the AI chat is initialized
-      setTimeout(() => {
-        void sendChatMessage(pendingSalesPrompt);
-      }, 0);
+      // Init sales chat, cancel any pending question, then send the prompt
+      void sendPendingSalesPrompt(pendingSalesPrompt);
     } else if (state.chat?.restoredFromChatCta && !state.chat.postLogin) {
       // Only trigger post-login sequence if we are restoring AND it hasn't started yet.
       setShouldRunPostLoginSequence(true);
