@@ -331,6 +331,23 @@ export const PROMPT_PREFERENCE_TOOL: ToolDef = {
   },
 };
 
+export const GET_PRODUCT_INFO_TOOL: ToolDef = {
+  name: 'get_product_info',
+  description:
+    'Retrieve product documentation about plan.ai. Use this to answer questions about the product, its features, architecture, use cases, pricing, or how to get started. Always call this tool before answering product-related questions.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      topic: {
+        type: 'string',
+        enum: ['overview', 'departments', 'architecture', 'use-cases', 'getting-started', 'faq'],
+        description: 'The documentation topic to retrieve.',
+      },
+    },
+    required: ['topic'],
+  },
+};
+
 const UPDATE_CONFIG_TOOL: ToolDef = {
   name: 'update_config',
   description:
