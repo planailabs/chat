@@ -468,26 +468,40 @@ export const restoreAIChatSession = (): void => {
   // Don't re-init if already active
   if (state.chat?.aiChat) return;
 
-  // Instant restore from sessionStorage cache
+  // Instant restore from sessionStorage cache (show immediately while server loads)
   const cached = readCachedAIChatMessages(mode);
   if (cached && cached.length > 0) {
     initAIChat(cached);
   } else {
-    const locale = locales[state.localeKey];
-    const greeting = locale.chatModes[mode].greeting;
     initAIChat([]);
-    if (greeting) {
-      // Machine config: auto-send the greeting immediately
-      // Use setTimeout to ensure sendChatMessage is available (defined later in file)
-      setTimeout(() => void sendChatMessage(greeting), 0);
-    } else {
-      // Sales: show empty chat with composer (no greeting)
-      store.notify();
-    }
+    store.notify();
   }
 
   // Pre-connect EventSource eagerly
   void connectEvents();
+
+  // Fetch authoritative history from server — then decide whether to auto-send greeting
+  const applyServerMessages = (serverMessages: StoredMessage[] | null) => {
+    const mc = store.state.chat?.aiChat;
+    if (!mc) return;
+
+    if (serverMessages && serverMessages.length > 0) {
+      const cancelLabel = locales[store.state.localeKey].chatModes[mode].cancelLabel;
+      mc.messages = serverMessages.map((m) =>
+        m.role === 'cancel' ? { ...m, content: m.content || cancelLabel } : m,
+      );
+      mc.phase = 'idle';
+      store.state.chat!.userPrompt = serverMessages[0]?.content ?? '';
+      store.notify();
+    } else {
+      // Server has no history — auto-send greeting if the mode has one
+      const locale = locales[store.state.localeKey];
+      const greeting = locale.chatModes[mode].greeting;
+      if (greeting) {
+        void sendChatMessage(greeting);
+      }
+    }
+  };
 
   if (mode === 'machine_config') {
     const tokenValid = verifyCustomerToken();
@@ -495,7 +509,6 @@ export const restoreAIChatSession = (): void => {
 
     void Promise.all([tokenValid, historyFetch]).then(([valid, serverMessages]) => {
       if (!valid) {
-        // Token is invalid — tear down AI chat UI
         console.warn('[chat] Customer token invalid, disabling machine config');
         store.state.customerToken = null;
         if (store.state.chat?.aiChat) {
@@ -507,38 +520,10 @@ export const restoreAIChatSession = (): void => {
         store.notify();
         return;
       }
-
-      const mc = store.state.chat?.aiChat;
-      if (!mc) return;
-
-      if (serverMessages && serverMessages.length > 0) {
-        const cancelLabel = locales[store.state.localeKey].chatModes[mode].cancelLabel;
-        mc.messages = serverMessages.map((m) =>
-          m.role === 'cancel' ? { ...m, content: m.content || cancelLabel } : m,
-        );
-
-        mc.phase = 'idle';
-        store.state.chat!.userPrompt = serverMessages[0]?.content ?? '';
-        store.notify();
-      }
+      applyServerMessages(serverMessages);
     });
   } else {
-    // Non-machine-config modes: just fetch history
-    void fetchAIChatHistory(mode).then((serverMessages) => {
-      const mc = store.state.chat?.aiChat;
-      if (!mc) return;
-
-      if (serverMessages && serverMessages.length > 0) {
-        const cancelLabel = locales[store.state.localeKey].chatModes[mode].cancelLabel;
-        mc.messages = serverMessages.map((m) =>
-          m.role === 'cancel' ? { ...m, content: m.content || cancelLabel } : m,
-        );
-
-        mc.phase = 'idle';
-        store.state.chat!.userPrompt = serverMessages[0]?.content ?? '';
-        store.notify();
-      }
-    });
+    void fetchAIChatHistory(mode).then(applyServerMessages);
   }
 };
 

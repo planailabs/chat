@@ -169,13 +169,20 @@ export const applySessionToState = (session: Session | null) => {
     nextIsAdmin = true;
   }
 
-  // Update state
+  // Update state — when impersonating, defer identity to profile load
   state.isAuthenticated = nextAuthenticated;
   state.userId = nextUserId;
-  state.userEmail = nextEmail;
-  state.userAvatarUrl = nextAvatar;
-  state.userDisplayName = nextDisplayName;
   state.isAdmin = nextIsAdmin;
+  if (isImpersonating()) {
+    // Keep identity null until impersonated user's profile loads
+    state.userEmail = null;
+    state.userAvatarUrl = null;
+    state.userDisplayName = null;
+  } else {
+    state.userEmail = nextEmail;
+    state.userAvatarUrl = nextAvatar;
+    state.userDisplayName = nextDisplayName;
+  }
 
   // Cache user state for instant header render on page reload
   // Preserve existing customerToken — it's set later by loadProfilePreferences
