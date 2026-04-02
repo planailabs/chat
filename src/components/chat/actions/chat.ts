@@ -485,6 +485,13 @@ export const restoreAIChatSession = (): void => {
   // Don't re-init if already active
   if (state.chat?.aiChat) return;
 
+  // Anonymous users in sales mode: show empty chat UI but skip server interaction
+  if (!state.isAuthenticated) {
+    initAIChat([]);
+    store.notify();
+    return;
+  }
+
   // Instant restore from sessionStorage cache (show immediately while server loads)
   const cached = readCachedAIChatMessages(mode);
   if (cached && cached.length > 0) {
@@ -1037,7 +1044,20 @@ export const answerPreferencePrompt = (choice: 'yes' | 'no') => {
 
 export const sendChatMessage = async (message: string) => {
   const state = store.state;
-  if (!state.chat?.aiChat || !state.userId) return;
+  if (!state.chat?.aiChat) return;
+
+  // Anonymous user: trigger sign-in invite via conversation planner
+  if (!state.isAuthenticated || !state.userId) {
+    const currentLocale = locales[state.localeKey];
+    // Cache the prompt for post-auth restoration
+    appendPromptToCache(message, state.localeKey);
+    // Transition out of aiChat and into the conversation planner sign-in flow
+    state.chat.aiChat = undefined;
+    state.heroPhase = 'composer';
+    store.notify();
+    startChatFromPrompt(message, currentLocale, { animateHeroTransition: true });
+    return;
+  }
 
   const mc = state.chat.aiChat;
 

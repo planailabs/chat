@@ -318,7 +318,7 @@ export const createInitialState = (): AppState => {
     isAdmin: cachedUser?.isAdmin ?? false,
     customerToken: cachedUser?.customerToken ?? null,
     heroPhase: 'composer',
-    activeChatMode: 'machine_config',
+    activeChatMode: cachedUser?.isAuthenticated && cachedUser?.customerToken ? 'machine_config' : 'sales',
     chat: null,
     profile: createProfileState(),
   };

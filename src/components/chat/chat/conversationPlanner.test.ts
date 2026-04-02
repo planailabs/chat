@@ -22,9 +22,18 @@ describe('planPromptConversation', () => {
     });
   });
 
-  it('returns subscribed plan when newsletter status is subscribed', () => {
+  it('returns aiChat plan for authenticated sales users', () => {
     const state = createInitialState();
     state.isAuthenticated = true;
+    state.activeChatMode = 'sales';
+    const plan = planPromptConversation(state, locale);
+    expect(plan.type).toBe('aiChat');
+  });
+
+  it('returns subscribed plan when newsletter status is subscribed (non-AI mode)', () => {
+    const state = createInitialState();
+    state.isAuthenticated = true;
+    state.activeChatMode = 'machine_config';
     state.profile.newsletterStatus = 'subscribed';
     const plan = planPromptConversation(state, locale);
     expect(plan.type).toBe('signedInSubscribed');
@@ -34,9 +43,10 @@ describe('planPromptConversation', () => {
     );
   });
 
-  it('returns unsubscribed plan when newsletter status is not subscribed', () => {
+  it('returns unsubscribed plan when newsletter status is not subscribed (non-AI mode)', () => {
     const state = createInitialState();
     state.isAuthenticated = true;
+    state.activeChatMode = 'machine_config';
     state.profile.newsletterStatus = 'unsubscribed';
     const plan = planPromptConversation(state, locale);
     expect(plan.type).toBe('signedInUnsubscribed');
