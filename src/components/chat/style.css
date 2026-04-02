@@ -1081,15 +1081,39 @@ html.is-first-visit #app {
   .chat-markdown ul,
   .chat-markdown ol {
     margin: 0.5em 0;
-    padding-left: 1.5em;
+    padding-left: 0;
+    list-style: none;
+  }
+
+  .chat-markdown ol {
+    counter-reset: ol-counter;
   }
 
   .chat-markdown li {
     margin: 0.25em 0;
+    padding-left: 1.25em;
+    position: relative;
   }
 
-  .chat-markdown li::marker {
-    color: var(--text-muted);
+  .chat-markdown ul > li::before {
+    content: '→';
+    position: absolute;
+    left: 0;
+    color: var(--accent);
+    font-size: 0.85em;
+  }
+
+  .chat-markdown ol > li {
+    counter-increment: ol-counter;
+  }
+
+  .chat-markdown ol > li::before {
+    content: counter(ol-counter);
+    position: absolute;
+    left: 0;
+    color: var(--accent);
+    font-size: 0.8em;
+    font-weight: 600;
   }
 
   .chat-markdown strong {
