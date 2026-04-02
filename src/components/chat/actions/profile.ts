@@ -84,6 +84,15 @@ export const loadProfilePreferences = (
         return;
       }
 
+      // When impersonating, override the admin's display identity with the target user's
+      if (impersonatedId && preferences?.providerIdentity) {
+        const pi = preferences.providerIdentity;
+        state.userEmail = (pi.email as string) ?? state.userEmail;
+        state.userDisplayName = (pi.name as string) ?? state.userDisplayName;
+        state.userAvatarUrl = (pi.avatar_url as string) ?? state.userAvatarUrl;
+        store.notify();
+      }
+
       if (preferences?.language && preferences.language !== state.localeKey) {
         state.localeKey = preferences.language;
         persistLocaleSelection(preferences.language);

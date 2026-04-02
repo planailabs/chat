@@ -321,11 +321,14 @@ export const renderHeader = ({ locale, state }: HeaderParams): string => {
         ${navigation.loginMenu.labelLoggedOut}
       </button>`;
 
-  // Impersonation banner
+  // Impersonation banner — show email if loaded, fall back to truncated ID
   const impersonateId = getImpersonateId();
+  const impersonateLabel = impersonateId
+    ? (state.userEmail ?? `${impersonateId.slice(0, 12)}...`)
+    : '';
   const impersonateBanner = impersonateId
     ? `<div class="w-full bg-amber-500/10 border-b border-amber-500/30 text-amber-400 text-xs text-center py-1.5 px-4">
-        Impersonating user <span class="font-mono">${escapeHtml(impersonateId.slice(0, 12))}...</span>
+        Impersonating <span class="font-medium">${escapeHtml(impersonateLabel)}</span>
         <a href="/" class="ml-2 underline hover:text-amber-300">Exit</a>
       </div>`
     : '';
