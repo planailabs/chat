@@ -6,6 +6,7 @@ import {
   type CachedPrompt,
 } from '../auth/preAuthCache';
 import type { LocaleKey } from '../content';
+import { isImpersonating } from '../impersonation';
 
 const normalizePromptLocales = (
   prompts: CachedPrompt[],
@@ -20,6 +21,7 @@ export const persistPromptsToSupabase = async (
   prompts: CachedPrompt[],
   fallbackLocale: LocaleKey,
 ): Promise<boolean> => {
+  if (isImpersonating()) return true; // Don't write prompts for impersonated users
   const state = store.state;
   if (!state.userId || prompts.length === 0) {
     return false;

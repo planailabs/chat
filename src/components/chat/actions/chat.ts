@@ -44,25 +44,7 @@ import {
   syncCachedPromptsToSupabase,
 } from './messages';
 import { startCharacterStream } from '../utils/stream';
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Admin Impersonation
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** Read ?impersonate= from the page URL (set by admin portal) */
-const getImpersonateParam = (): string | null => {
-  if (typeof window === 'undefined') return null;
-  const params = new URLSearchParams(window.location.search);
-  return params.get('impersonate');
-};
-
-/** Append impersonate param to a URL if active */
-const withImpersonate = (url: string): string => {
-  const id = getImpersonateParam();
-  if (!id) return url;
-  const sep = url.includes('?') ? '&' : '?';
-  return `${url}${sep}impersonate=${encodeURIComponent(id)}`;
-};
+import { getImpersonateId, isImpersonating, withImpersonate } from '../impersonation';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Timer State
@@ -479,7 +461,7 @@ export const restoreAIChatSession = (): void => {
   const mode = state.activeChatMode;
 
   // Machine config mode requires customer token (skip check when impersonating — server resolves it)
-  const isImpersonating = Boolean(getImpersonateParam());
+  const isImpersonating = isImpersonating();
   if (mode === 'machine_config' && !state.customerToken && !isImpersonating) return;
 
   // Don't re-init if already active

@@ -10,6 +10,7 @@ import type { LocaleContent, LocaleKey } from '../content';
 import { getLocaleDateString } from '../utils/date';
 import { signOut } from '../auth/controller';
 import { clearPreAuthState } from '../auth/preAuthCache';
+import { isImpersonating } from '../impersonation';
 
 export const handlePendingDeletionSignOut = (
   locale: LocaleContent,
@@ -138,6 +139,7 @@ export const loadProfilePreferences = (
 };
 
 export const persistThemePreference = () => {
+  if (isImpersonating()) return;
   const state = store.state;
   if (!state.isAuthenticated || !state.userId || !isSupabaseConfigured) {
     return;
@@ -152,6 +154,7 @@ export const persistThemePreference = () => {
 };
 
 export const persistLanguagePreference = (localeKey: LocaleKey) => {
+  if (isImpersonating()) return;
   const state = store.state;
   if (!state.isAuthenticated || !state.userId || !isSupabaseConfigured) {
     return;

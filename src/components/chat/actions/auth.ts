@@ -33,6 +33,7 @@ import {
   USER_METADATA_NAME_KEYS,
   USER_METADATA_AVATAR_KEYS,
 } from '../constants';
+import { isImpersonating } from '../impersonation';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // OAuth Flow
@@ -211,7 +212,7 @@ export const applySessionToState = (session: Session | null) => {
     });
   }
 
-  if (nextAuthenticated && nextUserId) {
+  if (nextAuthenticated && nextUserId && !isImpersonating()) {
     const providerIdentity = buildProviderIdentity(
       session,
       nextDisplayName,

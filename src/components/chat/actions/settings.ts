@@ -19,6 +19,7 @@ import { getLocaleDateString } from '../utils/date';
 import { handleSignOut } from './auth';
 import { tryStartPostLoginSequence } from './chat';
 import type { LocaleContent } from '../content';
+import { isImpersonating } from '../impersonation';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // State Update Helpers
@@ -73,6 +74,7 @@ const setNewsletterStatus = (
 };
 
 export const requestAccountDeletion = async (locale: LocaleContent) => {
+  if (isImpersonating()) return;
   const state = store.state;
   if (!state.userId || !state.isAuthenticated) {
     return;
@@ -142,6 +144,7 @@ export const persistNewsletterChoice = async (
   choice: 'yes' | 'no',
   source: NewsletterSource,
 ): Promise<boolean> => {
+  if (isImpersonating()) return true; // Pretend success, don't write
   const subscribe = choice === 'yes';
   const state = store.state;
   if (!state.userId) {

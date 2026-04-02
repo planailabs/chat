@@ -19,6 +19,7 @@ import { getOAuthIcon } from './oauthIcons';
 import { escapeHtml } from '../utils/html';
 import { store } from '../app/store';
 import { APP_VERSION, type ClientChatModeId } from '../constants';
+import { getImpersonateId } from '../impersonation';
 
 /**
  * Counter for unique SVG mask IDs to prevent DOM conflicts.
@@ -321,9 +322,7 @@ export const renderHeader = ({ locale, state }: HeaderParams): string => {
       </button>`;
 
   // Impersonation banner
-  const impersonateId = typeof window !== 'undefined'
-    ? new URLSearchParams(window.location?.search ?? '').get('impersonate')
-    : null;
+  const impersonateId = getImpersonateId();
   const impersonateBanner = impersonateId
     ? `<div class="w-full bg-amber-500/10 border-b border-amber-500/30 text-amber-400 text-xs text-center py-1.5 px-4">
         Impersonating user <span class="font-mono">${escapeHtml(impersonateId.slice(0, 12))}...</span>
