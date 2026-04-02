@@ -387,10 +387,21 @@ const getJwt = async (): Promise<string | null> => {
   return token;
 };
 
+interface ChatHistoryResult {
+  messages: StoredMessage[];
+  phase?: string;
+  pendingQuestion?: {
+    type: 'multiple_choice' | 'text';
+    question: string;
+    options?: string[];
+  };
+}
+
 /**
  * Fetches chat history from the server and populates state + sessionStorage cache.
+ * Returns messages, phase, and pendingQuestion (if waiting_for_answer).
  */
-const fetchAIChatHistory = async (modeId?: ClientChatModeId): Promise<StoredMessage[] | null> => {
+const fetchAIChatHistory = async (modeId?: ClientChatModeId): Promise<ChatHistoryResult | null> => {
   try {
     const jwt = await getJwt();
     if (!jwt) return null;
@@ -402,11 +413,15 @@ const fetchAIChatHistory = async (modeId?: ClientChatModeId): Promise<StoredMess
     if (!response.ok) return null;
 
     const data = await response.json();
-    const messages = data.messages as StoredMessage[];
-    if (Array.isArray(messages) && messages.length > 0) {
+    const messages = (data.messages ?? []) as StoredMessage[];
+    if (messages.length > 0) {
       cacheAIChatMessages(messages, modeId);
-      return messages;
     }
+    return {
+      messages,
+      phase: data.phase,
+      pendingQuestion: data.pendingQuestion,
+    };
   } catch {
     // Network error — fall through
   }
@@ -481,17 +496,25 @@ export const restoreAIChatSession = (): void => {
   void connectEvents();
 
   // Fetch authoritative history from server — then decide whether to auto-send greeting
-  const applyServerMessages = (serverMessages: StoredMessage[] | null) => {
+  const applyHistory = (result: ChatHistoryResult | null) => {
     const mc = store.state.chat?.aiChat;
     if (!mc) return;
 
-    if (serverMessages && serverMessages.length > 0) {
+    if (result && result.messages.length > 0) {
       const cancelLabel = locales[store.state.localeKey].chatModes[mode].cancelLabel;
-      mc.messages = serverMessages.map((m) =>
+      mc.messages = result.messages.map((m) =>
         m.role === 'cancel' ? { ...m, content: m.content || cancelLabel } : m,
       );
-      mc.phase = 'idle';
-      store.state.chat!.userPrompt = serverMessages[0]?.content ?? '';
+      store.state.chat!.userPrompt = result.messages[0]?.content ?? '';
+
+      // Restore pending question if server is waiting for an answer
+      if (result.phase === 'waiting_for_answer' && result.pendingQuestion) {
+        mc.phase = 'question';
+        mc.activeQuestion = result.pendingQuestion;
+      } else {
+        mc.phase = 'idle';
+      }
+
       store.notify();
     } else {
       // Server has no history — auto-send greeting if the mode has one
@@ -507,7 +530,7 @@ export const restoreAIChatSession = (): void => {
     const tokenValid = verifyCustomerToken();
     const historyFetch = fetchAIChatHistory(mode);
 
-    void Promise.all([tokenValid, historyFetch]).then(([valid, serverMessages]) => {
+    void Promise.all([tokenValid, historyFetch]).then(([valid, result]) => {
       if (!valid) {
         console.warn('[chat] Customer token invalid, disabling machine config');
         store.state.customerToken = null;
@@ -520,10 +543,10 @@ export const restoreAIChatSession = (): void => {
         store.notify();
         return;
       }
-      applyServerMessages(serverMessages);
+      applyHistory(result);
     });
   } else {
-    void fetchAIChatHistory(mode).then(applyServerMessages);
+    void fetchAIChatHistory(mode).then(applyHistory);
   }
 };
 
