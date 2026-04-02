@@ -1,8 +1,8 @@
 /**
  * GET /api/admin/search-users?q=email@example.com
  *
- * Admin-only endpoint. Searches profiles by email (from provider_identity).
- * Returns matching users with their profile data.
+ * Admin-only endpoint. Searches users by email.
+ * Returns generic user data — each admin portal uses what it needs.
  */
 
 export const prerender = false;
@@ -55,8 +55,7 @@ export const GET: APIRoute = async ({ request }) => {
     return jsonResponse({ error: 'Query too short (min 2 chars)' }, 400);
   }
 
-  // Search auth.users by email — paginate through all users since the admin API
-  // doesn't support server-side email filtering
+  // Paginate through auth.users, filter by email client-side
   const lowerQuery = query.toLowerCase();
   const matchingUsers: Array<{ id: string; email?: string; created_at: string }> = [];
   let page = 1;
@@ -81,26 +80,34 @@ export const GET: APIRoute = async ({ request }) => {
       }
     }
 
-    if (batch.length < perPage) break; // last page
+    if (batch.length < perPage) break;
     page++;
   }
 
   // Fetch profiles for matching users
   const userIds = matchingUsers.map((u) => u.id);
   const { data: profiles } = userIds.length > 0
-    ? await supabase.from('profiles').select('user_id, customer_token, provider_identity').in('user_id', userIds)
+    ? await supabase
+        .from('profiles')
+        .select('user_id, customer_token, provider_identity, language, newsletter_opt_in, pending_deletion')
+        .in('user_id', userIds)
     : { data: [] };
 
   const profileMap = new Map((profiles ?? []).map((p: any) => [p.user_id, p]));
 
   const results = matchingUsers.map((u) => {
     const profile = profileMap.get(u.id) as any;
+    const pi = profile?.provider_identity ?? {};
     return {
       userId: u.id,
       email: u.email,
       createdAt: u.created_at,
+      displayName: pi.name ?? null,
+      avatarUrl: pi.avatar_url ?? null,
+      language: profile?.language ?? null,
+      newsletterOptIn: profile?.newsletter_opt_in ?? null,
       customerToken: profile?.customer_token ?? null,
-      hasCustomerToken: Boolean(profile?.customer_token),
+      pendingDeletion: profile?.pending_deletion ?? false,
     };
   });
 
