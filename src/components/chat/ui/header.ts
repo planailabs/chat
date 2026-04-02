@@ -290,8 +290,8 @@ export const renderHeader = ({ locale, state }: HeaderParams): string => {
                    </a>`
                 : ''
             }
-            <button type="button" class="dropdown-option" data-action="sign-out">
-              <span>${navigation.loginMenu.signOutLabel}</span>
+            <button type="button" class="dropdown-option" data-action="${getImpersonateId() ? 'stop-impersonation' : 'sign-out'}">
+              <span>${getImpersonateId() ? 'Stop impersonation' : navigation.loginMenu.signOutLabel}</span>
             </button>
           </div>
         </div>`

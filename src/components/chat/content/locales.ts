@@ -263,7 +263,7 @@ const en: LocaleContent = {
         'invite-intro': {
           id: 'invite-intro',
           role: 'assistant',
-          text: 'Please sign in, so we can send you the plan as soon as possible by mail.',
+          text: 'Please sign in to chat with our assistant.',
           stream: defaultStream,
           cta: {
             type: 'oauth_providers',
@@ -442,7 +442,7 @@ const de: LocaleContent = {
         'invite-intro': {
           id: 'invite-intro',
           role: 'assistant',
-          text: 'Melde dich an und wir senden dir deinen Plan sobald wie möglich per Mail zu.',
+          text: 'Bitte melde dich an, um mit unserem Assistenten zu chatten.',
           stream: defaultStream,
           cta: {
             type: 'oauth_providers',

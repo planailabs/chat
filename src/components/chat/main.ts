@@ -236,6 +236,13 @@ const initApp = () => {
       void handleSignOut();
     });
 
+    // Header: Stop Impersonation (navigates to home, removing ?impersonate param)
+    delegateEvent(app, 'click', '[data-action="stop-impersonation"]', (event) => {
+      event.stopPropagation();
+      store.setState({ isAuthMenuOpen: false });
+      window.location.href = '/';
+    });
+
     // Global: Close Menus on click outside
     document.addEventListener('click', (event) => {
       const target = event.target as Node | null;
