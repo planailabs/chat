@@ -880,6 +880,6 @@ async function runToolLoop(
 
   // Record accumulated token usage after loop completes
   if (supabase && (totalInputTokens > 0 || totalOutputTokens > 0)) {
-    await recordTokenUsage(supabase, userId, mode.id, totalInputTokens, totalOutputTokens);
+    await recordTokenUsage(supabase, userId, mode.id, totalInputTokens, totalOutputTokens, totalCacheCreationInputTokens, totalCacheReadInputTokens);
   }
 }

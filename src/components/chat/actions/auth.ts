@@ -155,6 +155,7 @@ const buildProviderIdentity = (
 
 export const applySessionToState = (session: Session | null) => {
   const state = store.state;
+  const wasAuthenticated = state.isAuthenticated;
   const nextAuthenticated = Boolean(session?.user);
   const nextEmail = session?.user?.email ?? null;
   const nextUserId = session?.user?.id ?? null;
@@ -277,8 +278,8 @@ export const applySessionToState = (session: Session | null) => {
         // If no promise (already loaded or not needed), try immediately.
         tryStartPostLoginSequence();
       }
-    } else {
-      // Normal login (no pending prompt, no CTA restoration).
+    } else if (!wasAuthenticated) {
+      // Newly authenticated (was anonymous before).
       // Re-init AI chat to load server-side history now that we're authenticated.
       // Reset the anonymous chat state so restoreAIChatSession can re-run.
       if (state.chat?.aiChat) {
