@@ -1476,3 +1476,25 @@ export const restoreChatSession = () => {
     tryStartPostLoginSequence();
   }
 };
+
+/**
+ * Dev-only: deletes all chat messages for the current user & mode via /api/chat/nuke/,
+ * clears the local cache, and reloads the page.
+ */
+export const nukeChat = async (): Promise<void> => {
+  const jwt = await getJwt();
+  if (!jwt) return;
+
+  const mode = store.state.activeChatMode;
+  try {
+    await fetch(withImpersonate(`/api/chat/nuke/?mode=${encodeURIComponent(mode)}`), {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${jwt}` },
+    });
+  } catch {
+    // ignore network errors
+  }
+
+  clearAIChatMessages(mode);
+  window.location.reload();
+};

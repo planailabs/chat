@@ -33,6 +33,7 @@ import {
   cancelChatQuestion,
   switchChatMode,
   answerPreferencePrompt,
+  nukeChat,
 } from './actions/chat';
 import type { ClientChatModeId } from './constants';
 import { persistLanguagePreference } from './actions/profile';
@@ -236,6 +237,13 @@ const initApp = () => {
       void handleSignOut();
     });
 
+    // Header: Nuke Chat (dev only)
+    delegateEvent(app, 'click', '[data-action="nuke-chat"]', (event) => {
+      event.stopPropagation();
+      store.setState({ isAuthMenuOpen: false });
+      void nukeChat();
+    });
+
     // Header: Stop Impersonation (navigates to home, removing ?impersonate param)
     delegateEvent(app, 'click', '[data-action="stop-impersonation"]', (event) => {
       event.stopPropagation();
@@ -352,7 +360,7 @@ const initApp = () => {
       },
     );
 
-    // Chat: Machine Config Enter Key
+    // Chat: Machine Config Enter Key (Shift+Enter inserts newline)
     delegateEvent(
       app,
       'keydown',
@@ -360,6 +368,7 @@ const initApp = () => {
       (event) => {
         const keyEvent = event as KeyboardEvent;
         if (keyEvent.key !== 'Enter') return;
+        if (keyEvent.shiftKey) return; // allow default newline insertion
         keyEvent.preventDefault();
         const input = keyEvent.target as HTMLElement;
         const value = getMachineConfigValue(input);

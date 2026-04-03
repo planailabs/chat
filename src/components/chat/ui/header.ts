@@ -290,6 +290,9 @@ export const renderHeader = ({ locale, state }: HeaderParams): string => {
                    </a>`
                 : ''
             }
+            ${import.meta.env.DEV ? `<button type="button" class="dropdown-option text-red-500" data-action="nuke-chat">
+                <span>Nuke</span>
+              </button>` : ''}
             <button type="button" class="dropdown-option" data-action="${getImpersonateId() ? 'stop-impersonation' : 'sign-out'}">
               <span>${getImpersonateId() ? 'Stop impersonation' : navigation.loginMenu.signOutLabel}</span>
             </button>
