@@ -30,6 +30,7 @@ import {
   disconnectEvents,
   consumePendingSalesPrompt,
   sendPendingSalesPrompt,
+  restoreAIChatSession,
 } from './chat';
 import {
   USER_METADATA_NAME_KEYS,
@@ -276,6 +277,14 @@ export const applySessionToState = (session: Session | null) => {
         // If no promise (already loaded or not needed), try immediately.
         tryStartPostLoginSequence();
       }
+    } else {
+      // Normal login (no pending prompt, no CTA restoration).
+      // Re-init AI chat to load server-side history now that we're authenticated.
+      // Reset the anonymous chat state so restoreAIChatSession can re-run.
+      if (state.chat?.aiChat) {
+        state.chat.aiChat = undefined;
+      }
+      restoreAIChatSession();
     }
   }
 

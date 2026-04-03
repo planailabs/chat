@@ -12,7 +12,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { registerChatMode, fetchUserProfile, injectUserProfile, type ChatModeConfig, type ModeContext } from '../modes';
 import type { ChatConfig } from '../handler';
 import { buildSystemPrompt } from '../prompt';
-import { buildToolDefinitions, executeTool, PROMPT_PREFERENCE_TOOL } from '../tools';
+import { buildToolDefinitions, executeTool, PROMPT_PREFERENCE_TOOL, SEND_STAFF_PING_TOOL, executeStaffPing } from '../tools';
 import type Anthropic from '@anthropic-ai/sdk';
 
 export const machineConfigMode: ChatModeConfig = {
@@ -29,10 +29,13 @@ export const machineConfigMode: ChatModeConfig = {
   },
 
   buildToolDefinitions(): Anthropic.Tool[] {
-    return [...buildToolDefinitions(), PROMPT_PREFERENCE_TOOL];
+    return [...buildToolDefinitions(), PROMPT_PREFERENCE_TOOL, SEND_STAFF_PING_TOOL];
   },
 
   executeTool: async (name: string, input: Record<string, unknown>, context: ModeContext): Promise<string> => {
+    if (name === 'send_staff_ping') {
+      return executeStaffPing(input, context.userId as string, context.supabaseUrl as string, context.supabaseServiceKey as string);
+    }
     const customerToken = context.customerToken as string;
     const macMgmtUrl = context.macMgmtUrl as string;
     return executeTool(name, input, customerToken, macMgmtUrl);
@@ -79,6 +82,9 @@ export const machineConfigMode: ChatModeConfig = {
       configSchema: schema,
       currentConfig,
       userProfile,
+      userId,
+      supabaseUrl: config.supabaseUrl,
+      supabaseServiceKey: config.supabaseServiceKey,
     };
   },
 

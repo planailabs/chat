@@ -9,7 +9,7 @@ import ISO6391 from 'iso-639-1';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { registerChatMode, fetchUserProfile, injectUserProfile, type ChatModeConfig, type ModeContext } from '../modes';
 import type { ChatConfig } from '../handler';
-import { ASK_QUESTION_TOOL, PROMPT_PREFERENCE_TOOL, GET_PRODUCT_INFO_TOOL } from '../tools';
+import { ASK_QUESTION_TOOL, PROMPT_PREFERENCE_TOOL, GET_PRODUCT_INFO_TOOL, SEND_STAFF_PING_TOOL, executeStaffPing } from '../tools';
 import { lookupProductDoc, DOC_IDS } from '../content';
 import type Anthropic from '@anthropic-ai/sdk';
 
@@ -109,6 +109,7 @@ CRITICAL RULES:
 - ALWAYS use the \`get_product_info\` tool to retrieve product documentation BEFORE answering product-related questions. Do not make up information.
 - ALWAYS use the \`ask_question\` tool when asking the user a question. Never put questions in plain text.
 - Use \`get_catalog\` when the prospect asks about available skills, tools, MCP servers, or integrations. Use endpoint "catalog" for a full overview.
+- Use \`send_staff_ping\` when the prospect wants to schedule a demo, requests a callback, or needs human follow-up (e.g. custom pricing, enterprise plans). Send the ping, then confirm to the user that the team will follow up.
 - Available topics for \`get_product_info\`: ${DOC_IDS.join(', ')}
 
 Guidelines:
@@ -120,19 +121,24 @@ Guidelines:
   },
 
   buildToolDefinitions(): Anthropic.Tool[] {
-    return [ASK_QUESTION_TOOL, PROMPT_PREFERENCE_TOOL, GET_PRODUCT_INFO_TOOL, GET_CATALOG_TOOL];
+    return [ASK_QUESTION_TOOL, PROMPT_PREFERENCE_TOOL, GET_PRODUCT_INFO_TOOL, GET_CATALOG_TOOL, SEND_STAFF_PING_TOOL];
   },
 
   async prepare(_userId: string, _config: ChatConfig, supabase: SupabaseClient | null): Promise<ModeContext | null> {
     const userProfile = supabase ? await fetchUserProfile(supabase, _userId) : undefined;
-    return { userProfile };
+    return {
+      userProfile,
+      userId: _userId,
+      supabaseUrl: _config.supabaseUrl,
+      supabaseServiceKey: _config.supabaseServiceKey,
+    };
   },
 
   injectContext(messages: Anthropic.MessageParam[], context: ModeContext): void {
     injectUserProfile(messages, context.userProfile as any);
   },
 
-  executeTool: async (name: string, input: Record<string, unknown>, _context: ModeContext): Promise<string> => {
+  executeTool: async (name: string, input: Record<string, unknown>, context: ModeContext): Promise<string> => {
     if (name === 'get_product_info') {
       const topic = input.topic as string;
       const doc = lookupProductDoc(topic);
@@ -143,6 +149,9 @@ Guidelines:
     }
     if (name === 'get_catalog') {
       return fetchCatalogEndpoint(input.endpoint as string);
+    }
+    if (name === 'send_staff_ping') {
+      return executeStaffPing(input, context.userId as string, context.supabaseUrl as string, context.supabaseServiceKey as string);
     }
     return JSON.stringify({ error: `Unknown tool: ${name}` });
   },

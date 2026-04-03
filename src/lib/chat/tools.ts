@@ -331,6 +331,7 @@ export const PROMPT_PREFERENCE_TOOL: ToolDef = {
   },
 };
 
+import { createClient } from '@supabase/supabase-js';
 import { DOC_IDS } from './content';
 
 export const GET_PRODUCT_INFO_TOOL: ToolDef = {
@@ -364,6 +365,47 @@ const UPDATE_CONFIG_TOOL: ToolDef = {
     required: ['section', 'key', 'value'],
   },
 };
+
+export const SEND_STAFF_PING_TOOL: ToolDef = {
+  name: 'send_staff_ping',
+  description:
+    'Send an internal notification to staff. Use when the user wants to schedule a demo, requests a callback, or needs human follow-up. The user will NOT see this message.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      reason: {
+        type: 'string',
+        enum: ['demo_request', 'callback_request', 'support_escalation', 'other'],
+        description: 'Category of the ping.',
+      },
+      message: {
+        type: 'string',
+        description: 'Concise message for staff describing what action is needed and relevant context.',
+      },
+    },
+    required: ['reason', 'message'],
+  },
+};
+
+/** Insert a staff ping using a service-role Supabase client. */
+export async function executeStaffPing(
+  input: Record<string, unknown>,
+  userId: string,
+  supabaseUrl: string,
+  supabaseServiceKey: string,
+): Promise<string> {
+  const { reason, message } = input as { reason: string; message: string };
+  try {
+    const sb = createClient(supabaseUrl, supabaseServiceKey);
+    const { error } = await sb
+      .from('staff_pings')
+      .insert({ user_id: userId, reason, message });
+    if (error) return JSON.stringify({ error: error.message });
+    return JSON.stringify({ success: true });
+  } catch (err) {
+    return JSON.stringify({ error: err instanceof Error ? err.message : String(err) });
+  }
+}
 
 const CLIENT_SIDE_TOOLS = new Set(['ask_question', 'prompt_preference']);
 
