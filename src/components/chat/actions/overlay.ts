@@ -1,21 +1,15 @@
 import { store } from '../app/store';
 import { profileSetDataExport } from '../app/profileState';
 
-let settingsOverlayHistoryActive = false;
-
 export const openSettingsOverlay = () => {
   const state = store.state;
   if (state.isSettingsOverlayOpen) {
     return;
   }
   store.setState({ isSettingsOverlayOpen: true });
-  if (typeof window !== 'undefined' && window.history) {
-    window.history.pushState({ overlay: 'settings' }, '');
-    settingsOverlayHistoryActive = true;
-  }
 };
 
-export const closeSettingsOverlay = (options?: { fromHistory?: boolean }) => {
+export const closeSettingsOverlay = () => {
   const state = store.state;
   if (!state.isSettingsOverlayOpen) {
     return;
@@ -24,22 +18,6 @@ export const closeSettingsOverlay = (options?: { fromHistory?: boolean }) => {
   store.setState({
     isSettingsOverlayOpen: false,
   });
-
-  if (!options?.fromHistory && settingsOverlayHistoryActive) {
-    settingsOverlayHistoryActive = false;
-    if (typeof window !== 'undefined' && window.history) {
-      window.history.back();
-    }
-  }
-  if (options?.fromHistory) {
-    settingsOverlayHistoryActive = false;
-  }
-};
-
-export const handleGlobalPopState = () => {
-  if (store.state.isSettingsOverlayOpen) {
-    closeSettingsOverlay({ fromHistory: true });
-  }
 };
 
 export const handleGlobalKeyDown = (event: KeyboardEvent) => {
@@ -51,6 +29,5 @@ export const handleGlobalKeyDown = (event: KeyboardEvent) => {
 
 // Initialize global listeners
 if (typeof window !== 'undefined') {
-  window.addEventListener('popstate', handleGlobalPopState);
   window.addEventListener('keydown', handleGlobalKeyDown);
 }
