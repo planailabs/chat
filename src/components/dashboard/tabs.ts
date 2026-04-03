@@ -15,7 +15,10 @@ function getTabFromPath(): TabName {
 function activateTab(tab: TabName) {
   // Update tab buttons
   document.querySelectorAll<HTMLElement>('[data-tab]').forEach((btn) => {
-    btn.toggleAttribute('data-active', btn.dataset.tab === tab);
+    const isActive = btn.dataset.tab === tab;
+    btn.classList.toggle('border-white/40', isActive);
+    btn.classList.toggle('bg-white/10', isActive);
+    btn.classList.toggle('border-transparent', !isActive);
   });
 
   // Show/hide panels
