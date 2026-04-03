@@ -6,7 +6,9 @@
  */
 
 import ISO6391 from 'iso-639-1';
-import { registerChatMode, type ChatModeConfig, type ModeContext } from '../modes';
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { registerChatMode, fetchUserProfile, injectUserProfile, type ChatModeConfig, type ModeContext } from '../modes';
+import type { ChatConfig } from '../handler';
 import { ASK_QUESTION_TOOL, PROMPT_PREFERENCE_TOOL, GET_PRODUCT_INFO_TOOL } from '../tools';
 import { lookupProductDoc, DOC_IDS } from '../content';
 import type Anthropic from '@anthropic-ai/sdk';
@@ -119,6 +121,15 @@ Guidelines:
 
   buildToolDefinitions(): Anthropic.Tool[] {
     return [ASK_QUESTION_TOOL, PROMPT_PREFERENCE_TOOL, GET_PRODUCT_INFO_TOOL, GET_CATALOG_TOOL];
+  },
+
+  async prepare(_userId: string, _config: ChatConfig, supabase: SupabaseClient | null): Promise<ModeContext | null> {
+    const userProfile = supabase ? await fetchUserProfile(supabase, _userId) : undefined;
+    return { userProfile };
+  },
+
+  injectContext(messages: Anthropic.MessageParam[], context: ModeContext): void {
+    injectUserProfile(messages, context.userProfile as any);
   },
 
   executeTool: async (name: string, input: Record<string, unknown>, _context: ModeContext): Promise<string> => {

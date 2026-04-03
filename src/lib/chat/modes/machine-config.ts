@@ -9,7 +9,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { registerChatMode, type ChatModeConfig, type ModeContext } from '../modes';
+import { registerChatMode, fetchUserProfile, injectUserProfile, type ChatModeConfig, type ModeContext } from '../modes';
 import type { ChatConfig } from '../handler';
 import { buildSystemPrompt } from '../prompt';
 import { buildToolDefinitions, executeTool, PROMPT_PREFERENCE_TOOL } from '../tools';
@@ -39,26 +39,27 @@ export const machineConfigMode: ChatModeConfig = {
   },
 
   async prepare(userId: string, config: ChatConfig, supabase: SupabaseClient | null): Promise<ModeContext | null> {
-    // Resolve customer token
-    let customerToken: string | null = null;
+    if (!supabase && !config.customerToken) return null;
 
-    if (config.customerToken) {
-      customerToken = config.customerToken;
-    } else if (supabase) {
-      const { data: profile, error: profileError } = await supabase
+    // Fetch profile (for user context + customer token)
+    const userProfile = supabase ? await fetchUserProfile(supabase, userId) : undefined;
+
+    // Resolve customer token
+    let customerToken: string | null = config.customerToken ?? null;
+    if (!customerToken && supabase) {
+      const { data } = await supabase
         .from('profiles')
         .select('customer_token')
         .eq('user_id', userId)
         .maybeSingle();
 
-      if (profileError || !profile?.customer_token) {
-        console.warn('[chat] No customer token for user', userId, profileError?.message);
-        return null; // Signal: cannot proceed
+      if (!data?.customer_token) {
+        console.warn('[chat] No customer token for user', userId);
+        return null;
       }
-      customerToken = profile.customer_token as string;
-    } else {
-      return null;
+      customerToken = data.customer_token as string;
     }
+    if (!customerToken) return null;
 
     // Fetch config schema and current config in parallel
     const authHeaders = { Authorization: `Bearer ${customerToken}`, Accept: 'application/json' };
@@ -77,10 +78,14 @@ export const machineConfigMode: ChatModeConfig = {
       macMgmtUrl: config.macMgmtUrl,
       configSchema: schema,
       currentConfig,
+      userProfile,
     };
   },
 
   injectContext(messages: Anthropic.MessageParam[], context: ModeContext): void {
+    // Inject user profile first (appears before config in the first message)
+    injectUserProfile(messages, context.userProfile as any);
+
     const currentConfig = context.currentConfig as string | undefined;
     if (!currentConfig || messages.length === 0 || messages[0].role !== 'user') return;
 

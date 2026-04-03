@@ -51,6 +51,62 @@ export interface ChatModeConfig {
   injectContext?: (messages: Anthropic.MessageParam[], context: ModeContext) => void;
 }
 
+// ─── Shared: User Profile ───────────────────────────────────────────────────
+
+export interface UserProfile {
+  email?: string;
+  name?: string;
+  language: string;
+}
+
+/**
+ * Fetch the user profile from the profiles table.
+ * Returns null if the profile doesn't exist (caller decides whether that's fatal).
+ */
+export async function fetchUserProfile(
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<UserProfile | null> {
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('language, provider_identity, customer_token')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (error || !data) return null;
+
+  const pi = (data.provider_identity ?? {}) as Record<string, unknown>;
+  return {
+    email: typeof pi.email === 'string' ? pi.email : undefined,
+    name: typeof pi.name === 'string' ? pi.name : typeof pi.displayName === 'string' ? pi.displayName : undefined,
+    language: (data.language as string) ?? 'en',
+  };
+}
+
+/**
+ * Inject a "[User profile]" block into the first user message so Claude
+ * knows who it's talking to. Shared by all modes.
+ */
+export function injectUserProfile(
+  messages: Anthropic.MessageParam[],
+  profile: UserProfile | undefined,
+): void {
+  if (!profile || messages.length === 0 || messages[0].role !== 'user') return;
+
+  const lines: string[] = [];
+  if (profile.name) lines.push(`Name: ${profile.name}`);
+  if (profile.email) lines.push(`Email: ${profile.email}`);
+  lines.push(`Language: ${profile.language}`);
+
+  const block = `[User profile]\n${lines.join('\n')}`;
+  const first = messages[0];
+  if (typeof first.content === 'string') {
+    first.content = block + '\n\n' + first.content;
+  } else {
+    (first.content as Anthropic.ContentBlockParam[]).unshift({ type: 'text' as const, text: block });
+  }
+}
+
 // ─── Registry ───────────────────────────────────────────────────────────────
 
 const registry = new Map<ChatModeId, ChatModeConfig>();
