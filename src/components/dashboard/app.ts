@@ -1,5 +1,5 @@
 import { getSupabaseClientOrThrow } from '../chat/supabase/client';
-import { initCharts, updateCharts } from './charts';
+import { updateCharts } from './charts';
 
 // --- Types ---
 export type Message = {
@@ -22,7 +22,7 @@ type ProviderIdentity = {
 export type Profile = {
   user_id: string;
   provider_identity?: ProviderIdentity;
-  email?: string; // from provider_identity or auth metadata if we had access (we only have profiles table)
+  email?: string;
 };
 
 // --- State ---
@@ -33,27 +33,31 @@ let isLive = false;
 let pendingUpdates: Message[] = [];
 let hasPending = false;
 
-// --- Elements ---
-const tableBody = document.getElementById('messages-table-body');
-const liveToggle = document.getElementById('live-toggle');
-const liveDot = document.getElementById('live-dot');
-const liveText = document.getElementById('live-text');
-const limitSelect = document.getElementById('rows-limit') as HTMLSelectElement;
+// --- Elements (resolved lazily inside initDashboard) ---
+let tableBody: HTMLElement | null = null;
+let liveToggle: HTMLElement | null = null;
+let liveDot: HTMLElement | null = null;
+let liveText: HTMLElement | null = null;
+let limitSelect: HTMLSelectElement | null = null;
 
 // --- Init ---
 export async function initDashboard() {
   console.log('Dashboard: Init');
 
-  // 1. Charts
-  initCharts();
+  // Resolve DOM elements now (Messages tab is visible)
+  tableBody = document.getElementById('messages-table-body');
+  liveToggle = document.getElementById('live-toggle');
+  liveDot = document.getElementById('live-dot');
+  liveText = document.getElementById('live-text');
+  limitSelect = document.getElementById('rows-limit') as HTMLSelectElement;
 
-  // 2. Initial Fetch
+  // 1. Initial Fetch
   await reloadData();
 
-  // 3. Realtime
+  // 2. Realtime
   setupRealtime();
 
-  // 4. Bind Events
+  // 3. Bind Events
   if (limitSelect) {
     limitSelect.addEventListener('change', async (e) => {
       rowLimit = parseInt((e.target as HTMLSelectElement).value);
@@ -71,13 +75,11 @@ export async function initDashboard() {
     const originalContent = btn.innerHTML;
     const isIconOnly = btn.classList.contains('copy-email-btn');
 
-    // Green checkmark icon
     const checkIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="${isIconOnly ? 12 : 16}" height="${isIconOnly ? 12 : 16}" viewBox="0 0 24 24" fill="none" stroke="#4ade80" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>`;
 
     if (isIconOnly) {
       btn.innerHTML = checkIcon;
     } else {
-      // For text button (Modal main copy) - Keep it single line
       btn.innerHTML = `${checkIcon} <span class="text-green-400 font-medium">Copied!</span>`;
       btn.classList.add('border-green-500/50', 'bg-green-500/10');
     }
@@ -115,14 +117,12 @@ export async function initDashboard() {
 }
 
 async function reloadData() {
-  // Show Loading?
   if (tableBody)
     tableBody.innerHTML =
       '<tr class="animate-pulse"><td class="p-4 opacity-50" colspan="3">Refetching...</td></tr>';
 
   const supabase = getSupabaseClientOrThrow();
 
-  // Fetch Messages
   const { data: msgs, error } = await supabase
     .from('messages')
     .select('*')
@@ -139,7 +139,6 @@ async function reloadData() {
 
   messages = msgs as Message[];
 
-  // Fetch Profiles for these users
   const userIds = Array.from(new Set(messages.map((m) => m.user_id)));
   if (userIds.length > 0) {
     const { data: profs, error: profError } = await supabase
@@ -155,7 +154,6 @@ async function reloadData() {
   render();
   updateCharts({ messages, profiles: Array.from(profiles.values()) });
 
-  // Clear pending if any (implied by reload)
   pendingUpdates = [];
   hasPending = false;
   updateLiveUI();
@@ -170,10 +168,8 @@ function render() {
     tr.className =
       'hover:bg-white/5 transition-colors cursor-pointer group relative';
 
-    // Date
     const dateStr = new Date(msg.created_at).toLocaleString();
 
-    // User
     const profile = profiles.get(msg.user_id);
     const email =
       profile?.provider_identity?.identity_data?.email ||
@@ -191,10 +187,8 @@ function render() {
             </div>
             <div class="text-xs opacity-50 font-mono">${msg.user_id.slice(0, 8)}...</div>`;
 
-    // Content Preview
     const preview =
       msg.content.slice(0, 60) + (msg.content.length > 60 ? '...' : '');
-    // Safe text injection
 
     tr.innerHTML = `
             <td class="p-4 text-xs opacity-70 whitespace-nowrap">${dateStr}</td>
@@ -202,18 +196,15 @@ function render() {
             <td class="p-4 text-opacity-80 font-mono text-xs overflow-hidden text-ellipsis whitespace-nowrap max-w-[400px]"></td>
         `;
 
-    // Inject secure text
     const contentCell = tr.lastElementChild as HTMLElement;
     if (contentCell) contentCell.textContent = preview;
 
-    // Click Logic
     tr.addEventListener('click', (e) => {
-      // fast exit if clicked copy button
       if ((e.target as HTMLElement).closest('.copy-email-btn')) return;
       openModal(msg, email);
     });
 
-    tableBody.appendChild(tr);
+    tableBody!.appendChild(tr);
   });
 }
 
@@ -287,14 +278,8 @@ function setupRealtime() {
 function toggleLive() {
   isLive = !isLive;
   if (isLive) {
-    // Turning ON
-    // Apply pending
     if (pendingUpdates.length > 0) {
-      messages = [...pendingUpdates.reverse(), ...messages]; // reverse because push adds to end, need newest first?
-      // Wait, payload gives newest. push adds to end. unshift adds to front.
-      // When not live: push to pending.
-      // When applying: pending (newest at end? or start?)
-      // Just reloadData is simpler and consistent.
+      messages = [...pendingUpdates.reverse(), ...messages];
       reloadData();
     }
   }
@@ -317,7 +302,7 @@ function updateLiveUI() {
 
     if (hasPending) {
       liveDot.classList.remove('bg-neutral-500');
-      liveDot.classList.add('bg-green-500'); // Green dot for notification
+      liveDot.classList.add('bg-green-500');
     } else {
       liveDot.classList.remove('bg-green-500');
       liveDot.classList.add('bg-neutral-500');

@@ -1,5 +1,17 @@
 import { getSupabaseClientOrThrow } from '../chat/supabase/client';
 
+export function escapeHtml(str: string): string {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+export async function getJwt(): Promise<string> {
+  const supabase = getSupabaseClientOrThrow();
+  const { data } = await supabase.auth.getSession();
+  return data.session?.access_token ?? '';
+}
+
 export type DashboardState = {
   isAdmin: boolean;
   checking: boolean;

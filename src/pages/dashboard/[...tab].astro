@@ -1,0 +1,9 @@
+---
+// Catch-all route: serves the same dashboard page for all sub-paths
+// (e.g. /dashboard/messages/, /dashboard/impersonate/, /dashboard/pings/, etc.)
+// Client-side tabs.ts reads location.pathname to determine the active tab.
+export const prerender = false;
+import DashboardPage from '../../components/dashboard/DashboardPage.astro';
+---
+
+<DashboardPage />
