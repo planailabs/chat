@@ -286,7 +286,7 @@ const toClaudeMessages = (msgs: StoredMessage[]): Anthropic.MessageParam[] => {
         : [{ type: 'text' as const, text: prev.content as string }];
       const curArr = typeof m.content === 'string'
         ? [{ type: 'text' as const, text: m.content }]
-        : (m.content as Anthropic.ContentBlockParam[]);
+        : JSON.parse(JSON.stringify(m.content)) as Anthropic.ContentBlockParam[];
       const merged = [...prevArr, ...curArr];
       const toolResults = merged.filter((b) => (b as any).type === 'tool_result');
       const rest = merged.filter((b) => (b as any).type !== 'tool_result');
@@ -295,7 +295,12 @@ const toClaudeMessages = (msgs: StoredMessage[]): Anthropic.MessageParam[] => {
     }
 
     if (role === 'user') {
-      result.push({ role, content: m.content });
+      // Deep-clone user content to prevent cache_control from leaking back
+      // into the stored messages array when addConversationCacheBreakpoint mutates it.
+      const cloned = typeof m.content === 'string'
+        ? m.content
+        : JSON.parse(JSON.stringify(m.content));
+      result.push({ role, content: cloned });
     } else {
       const cleaned = (m.content as any[]).map((block) => {
         if (block.type === 'tool_use') {
