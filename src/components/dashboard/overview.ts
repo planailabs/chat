@@ -20,7 +20,7 @@ export async function initOverview(container: HTMLElement) {
     supabase.from('messages').select('*', { count: 'exact', head: true }).gte('created_at', todayStart.toISOString()),
     supabase.from('messages').select('user_id', { count: 'exact', head: false }).gte('created_at', todayStart.toISOString()),
     supabase.from('staff_pings').select('*', { count: 'exact', head: true }).eq('resolved', false),
-    supabase.from('customer_tokens').select('*', { count: 'exact', head: true }),
+    supabase.from('profiles').select('*', { count: 'exact', head: true }).not('customer_token', 'is', null),
   ]);
 
   // Count distinct users today
