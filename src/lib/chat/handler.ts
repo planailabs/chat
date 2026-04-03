@@ -221,12 +221,13 @@ async function appendMessage(
 
 // ─── Token Rate Limiting ─────────────────────────────────────────────────────
 
-const TOKEN_BUDGET_PER_HOUR = 1_000_000;
+const INPUT_TOKEN_BUDGET_PER_HOUR = 100_000;
+const OUTPUT_TOKEN_BUDGET_PER_HOUR = 20_000;
 
 export async function checkTokenBudget(
   supabase: SupabaseClient,
   userId: string,
-): Promise<{ allowed: boolean; used: number }> {
+): Promise<{ allowed: boolean; inputUsed: number; outputUsed: number }> {
   const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
 
   const { data } = await supabase
@@ -235,12 +236,15 @@ export async function checkTokenBudget(
     .eq('user_id', userId)
     .gte('created_at', oneHourAgo);
 
-  const used = (data ?? []).reduce(
-    (sum, row) => sum + (row.input_tokens ?? 0) + (row.output_tokens ?? 0),
-    0,
-  );
+  const rows = data ?? [];
+  const inputUsed = rows.reduce((sum, row) => sum + (row.input_tokens ?? 0), 0);
+  const outputUsed = rows.reduce((sum, row) => sum + (row.output_tokens ?? 0), 0);
 
-  return { allowed: used < TOKEN_BUDGET_PER_HOUR, used };
+  return {
+    allowed: inputUsed < INPUT_TOKEN_BUDGET_PER_HOUR && outputUsed < OUTPUT_TOKEN_BUDGET_PER_HOUR,
+    inputUsed,
+    outputUsed,
+  };
 }
 
 async function recordTokenUsage(
@@ -249,12 +253,16 @@ async function recordTokenUsage(
   mode: string,
   inputTokens: number,
   outputTokens: number,
+  cacheCreationInputTokens: number = 0,
+  cacheReadInputTokens: number = 0,
 ): Promise<void> {
   await supabase.from('chat_token_usage').insert({
     user_id: userId,
     mode,
     input_tokens: inputTokens,
     output_tokens: outputTokens,
+    cache_creation_input_tokens: cacheCreationInputTokens,
+    cache_read_input_tokens: cacheReadInputTokens,
   });
 }
 
@@ -429,6 +437,30 @@ const extractDisplayText = (msg: StoredMessage): string => {
   return '';
 };
 
+// ─── Prompt Caching ─────────────────────────────────────────────────────────
+
+/**
+ * Add a cache breakpoint on the second-to-last user message so that the
+ * entire conversation history except the latest turn is cached.
+ */
+function addConversationCacheBreakpoint(msgs: Anthropic.MessageParam[]): void {
+  let userCount = 0;
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    if (msgs[i].role === 'user') {
+      userCount++;
+      if (userCount === 2) {
+        const msg = msgs[i];
+        if (typeof msg.content === 'string') {
+          msg.content = [{ type: 'text', text: msg.content, cache_control: { type: 'ephemeral' } } as any];
+        } else if (Array.isArray(msg.content) && msg.content.length > 0) {
+          (msg.content[msg.content.length - 1] as any).cache_control = { type: 'ephemeral' };
+        }
+        break;
+      }
+    }
+  }
+}
+
 // ─── Persistence Adapter ────────────────────────────────────────────────────
 
 interface PersistenceAdapter {
@@ -500,11 +532,18 @@ export async function handleChatMessage(
 
   // ── Token rate limiting ──────────────────────────────────────────────────
   if (supabase) {
-    const { allowed, used } = await checkTokenBudget(supabase, userId);
+    const { allowed, inputUsed, outputUsed } = await checkTokenBudget(supabase, userId);
     if (!allowed) {
+      const parts: string[] = [];
+      if (inputUsed >= INPUT_TOKEN_BUDGET_PER_HOUR) {
+        parts.push(`input: ${inputUsed.toLocaleString()}/${INPUT_TOKEN_BUDGET_PER_HOUR.toLocaleString()}`);
+      }
+      if (outputUsed >= OUTPUT_TOKEN_BUDGET_PER_HOUR) {
+        parts.push(`output: ${outputUsed.toLocaleString()}/${OUTPUT_TOKEN_BUDGET_PER_HOUR.toLocaleString()}`);
+      }
       broadcast(connKey, 'error', {
         type: 'error',
-        message: `Token rate limit exceeded (${used.toLocaleString()} tokens used in the last hour, limit is ${TOKEN_BUDGET_PER_HOUR.toLocaleString()})`,
+        message: `Token rate limit exceeded (${parts.join(', ')}) in the last hour`,
       });
       return;
     }
@@ -669,9 +708,24 @@ async function runToolLoop(
   const systemPrompt = mode.buildSystemPrompt(locale, extraContext);
   const tools = mode.buildToolDefinitions();
 
+  // Cache breakpoint on system prompt
+  const systemBlocks: Anthropic.TextBlockParam[] = [
+    { type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } } as any,
+  ];
+
+  // Cache breakpoint on last tool definition
+  if (tools.length > 0) {
+    tools[tools.length - 1] = {
+      ...tools[tools.length - 1],
+      cache_control: { type: 'ephemeral' },
+    } as any;
+  }
+
   // Token usage accumulator
   let totalInputTokens = 0;
   let totalOutputTokens = 0;
+  let totalCacheCreationInputTokens = 0;
+  let totalCacheReadInputTokens = 0;
 
   // ── Pre-step: resume from tool_pending ──────────────────────────────────
 
@@ -713,6 +767,9 @@ async function runToolLoop(
       mode.injectContext(claudeMessages, modeContext);
     }
 
+    // Cache breakpoint on conversation history prefix
+    addConversationCacheBreakpoint(claudeMessages);
+
     console.log(`[chat] Round ${rounds}/${MAX_TOOL_ROUNDS}, ${claudeMessages.length} msgs`);
 
     broadcast(connKey, 'thinking', { type: 'thinking' });
@@ -722,7 +779,7 @@ async function runToolLoop(
     const stream = anthropic.messages.stream({
       model: mode.model,
       max_tokens: mode.maxTokens,
-      system: systemPrompt,
+      system: systemBlocks as any,
       tools,
       messages: claudeMessages,
     });
@@ -737,6 +794,8 @@ async function runToolLoop(
     if (response.usage) {
       totalInputTokens += response.usage.input_tokens ?? 0;
       totalOutputTokens += response.usage.output_tokens ?? 0;
+      totalCacheCreationInputTokens += (response.usage as any).cache_creation_input_tokens ?? 0;
+      totalCacheReadInputTokens += (response.usage as any).cache_read_input_tokens ?? 0;
     }
 
     const toolUseBlocks = response.content.filter((b) => b.type === 'tool_use') as Anthropic.ToolUseBlock[];
@@ -780,7 +839,7 @@ async function runToolLoop(
       // Return — the next POST will resume with an answer
       // Record tokens before returning
       if (supabase && (totalInputTokens > 0 || totalOutputTokens > 0)) {
-        await recordTokenUsage(supabase, userId, mode.id, totalInputTokens, totalOutputTokens);
+        await recordTokenUsage(supabase, userId, mode.id, totalInputTokens, totalOutputTokens, totalCacheCreationInputTokens, totalCacheReadInputTokens);
       }
       return;
     }
