@@ -52,7 +52,7 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'get_config',
       description:
-        'Get the current JSON configuration for this customer. Returns the full config file contents.',
+        'Get the current JSON configuration for this customer. Returns the full config object.',
       input_schema: obj(),
     },
     endpoint: { method: 'GET', path: '/api/setting/config' },
@@ -76,7 +76,7 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'list_skills',
       description:
-        'List all skills currently assigned to this customer. Returns id, skill_slug, channel, installed, installed_bundle, and customer_skill_id (only present for direct assignments) for each.',
+        'List all skills currently assigned to this customer. Returns id, skill_slug, skill_name, skill_description, channel, installed, installed_bundle, and customer_skill_id (only present for direct assignments) for each.',
       input_schema: obj(),
     },
     endpoint: { method: 'GET', path: '/api/setting/skills' },
@@ -85,13 +85,32 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'add_skill',
       description:
-        'Add a skill to this customer by skill channel ID (UUID). Use available_skill_channels to find the ID first.',
+        'Add a single skill to this customer by skill channel ID (UUID). Use available_skill_channels to find the ID first. Prefer batch_add_skills when adding multiple skills.',
       input_schema: obj(
         { skill_channel_id: { type: 'string', description: 'The UUID of the skill channel to add.' } },
         ['skill_channel_id'],
       ),
     },
     endpoint: { method: 'POST', path: '/api/setting/skills', jsonBody: true },
+  },
+  {
+    tool: {
+      name: 'batch_add_skills',
+      description:
+        'Add multiple skills at once by their skill channel IDs (UUIDs). Already-assigned skills are silently skipped. Prefer this over multiple add_skill calls.',
+      input_schema: {
+        type: 'object' as const,
+        properties: {
+          skill_channel_ids: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Array of skill channel UUIDs to add.',
+          },
+        },
+        required: ['skill_channel_ids'],
+      },
+    },
+    endpoint: { method: 'POST', path: '/api/setting/skills/batch', jsonBody: true },
   },
   {
     tool: {
@@ -109,7 +128,7 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'available_skill_channels',
       description:
-        'List all available skill channels that can be added. Returns id, skill_slug, channel, installed, and installed_bundle for each.',
+        'List all available skill channels that can be added. Returns id, skill_slug, skill_name, skill_description, channel, installed, installed_bundle, and customer_skill_id for each.',
       input_schema: obj(),
     },
     endpoint: { method: 'GET', path: '/api/setting/available/skill-channels' },
@@ -120,7 +139,7 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'list_bundles',
       description:
-        'List all application bundles currently assigned to this customer. Returns customer_bundle_id, bundle_slug, and bundle_name.',
+        'List all application bundles currently assigned to this customer. Returns customer_bundle_id, bundle_slug, bundle_name, and bundle_description.',
       input_schema: obj(),
     },
     endpoint: { method: 'GET', path: '/api/setting/bundles' },
@@ -129,13 +148,32 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'add_bundle',
       description:
-        'Add an application bundle to this customer by bundle ID (UUID). Use available_bundles to find the ID first.',
+        'Add a single application bundle to this customer by bundle ID (UUID). Use available_bundles to find the ID first. Prefer batch_add_bundles when adding multiple bundles.',
       input_schema: obj(
         { bundle_id: { type: 'string', description: 'The UUID of the bundle to add.' } },
         ['bundle_id'],
       ),
     },
     endpoint: { method: 'POST', path: '/api/setting/bundles', jsonBody: true },
+  },
+  {
+    tool: {
+      name: 'batch_add_bundles',
+      description:
+        'Add multiple application bundles at once by their bundle IDs (UUIDs). Already-assigned bundles are silently skipped. Prefer this over multiple add_bundle calls.',
+      input_schema: {
+        type: 'object' as const,
+        properties: {
+          bundle_ids: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Array of bundle UUIDs to add.',
+          },
+        },
+        required: ['bundle_ids'],
+      },
+    },
+    endpoint: { method: 'POST', path: '/api/setting/bundles/batch', jsonBody: true },
   },
   {
     tool: {
@@ -153,7 +191,7 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'available_bundles',
       description:
-        'List all available application bundles that can be added. Returns id, slug, name, and installed boolean for each.',
+        'List all available application bundles that can be added. Returns id, slug, name, description, and installed boolean for each.',
       input_schema: obj(),
     },
     endpoint: { method: 'GET', path: '/api/setting/available/bundles' },
@@ -164,7 +202,7 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'list_mcp_servers',
       description:
-        'List all MCP servers currently assigned to this customer. Returns id, slug, name, installed, installed_bundle, installed_transitive, and customer_mcp_server_id (only present for direct assignments) for each.',
+        'List all MCP servers currently assigned to this customer. Returns id, slug, name, description, installed, installed_bundle, installed_transitive, and customer_mcp_server_id (only present for direct assignments) for each.',
       input_schema: obj(),
     },
     endpoint: { method: 'GET', path: '/api/setting/mcp-servers' },
@@ -173,13 +211,32 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'add_mcp_server',
       description:
-        'Add an MCP server to this customer by server ID (UUID). Use available_mcp_servers to find the ID first.',
+        'Add a single MCP server to this customer by server ID (UUID). Use available_mcp_servers to find the ID first. Prefer batch_add_mcp_servers when adding multiple servers.',
       input_schema: obj(
         { mcp_server_id: { type: 'string', description: 'The UUID of the MCP server to add.' } },
         ['mcp_server_id'],
       ),
     },
     endpoint: { method: 'POST', path: '/api/setting/mcp-servers', jsonBody: true },
+  },
+  {
+    tool: {
+      name: 'batch_add_mcp_servers',
+      description:
+        'Add multiple MCP servers at once by their server IDs (UUIDs). Already-assigned servers are silently skipped. Prefer this over multiple add_mcp_server calls.',
+      input_schema: {
+        type: 'object' as const,
+        properties: {
+          mcp_server_ids: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Array of MCP server UUIDs to add.',
+          },
+        },
+        required: ['mcp_server_ids'],
+      },
+    },
+    endpoint: { method: 'POST', path: '/api/setting/mcp-servers/batch', jsonBody: true },
   },
   {
     tool: {
@@ -197,7 +254,7 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'available_mcp_servers',
       description:
-        'List all available MCP servers that can be added. Returns id, slug, name, installed, installed_bundle, and installed_transitive for each.',
+        'List all available MCP servers that can be added. Returns id, slug, name, description, installed, installed_bundle, installed_transitive, and customer_mcp_server_id for each.',
       input_schema: obj(),
     },
     endpoint: { method: 'GET', path: '/api/setting/available/mcp-servers' },
@@ -208,7 +265,7 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'list_mcp_bundles',
       description:
-        'List all MCP bundles currently assigned to this customer. Returns customer_mcp_bundle_id, bundle_slug, and bundle_name.',
+        'List all MCP bundles currently assigned to this customer. Returns customer_mcp_bundle_id, bundle_slug, bundle_name, and bundle_description.',
       input_schema: obj(),
     },
     endpoint: { method: 'GET', path: '/api/setting/mcp-bundles' },
@@ -217,13 +274,32 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'add_mcp_bundle',
       description:
-        'Add an MCP bundle to this customer by bundle ID (UUID). Use available_mcp_bundles to find the ID first.',
+        'Add a single MCP bundle to this customer by bundle ID (UUID). Use available_mcp_bundles to find the ID first. Prefer batch_add_mcp_bundles when adding multiple bundles.',
       input_schema: obj(
         { bundle_id: { type: 'string', description: 'The UUID of the MCP bundle to add.' } },
         ['bundle_id'],
       ),
     },
     endpoint: { method: 'POST', path: '/api/setting/mcp-bundles', jsonBody: true },
+  },
+  {
+    tool: {
+      name: 'batch_add_mcp_bundles',
+      description:
+        'Add multiple MCP bundles at once by their bundle IDs (UUIDs). Already-assigned bundles are silently skipped. Prefer this over multiple add_mcp_bundle calls.',
+      input_schema: {
+        type: 'object' as const,
+        properties: {
+          bundle_ids: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Array of MCP bundle UUIDs to add.',
+          },
+        },
+        required: ['bundle_ids'],
+      },
+    },
+    endpoint: { method: 'POST', path: '/api/setting/mcp-bundles/batch', jsonBody: true },
   },
   {
     tool: {
@@ -241,7 +317,7 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'available_mcp_bundles',
       description:
-        'List all available MCP bundles that can be added. Returns id, slug, name, and installed boolean for each.',
+        'List all available MCP bundles that can be added. Returns id, slug, name, description, and installed boolean for each.',
       input_schema: obj(),
     },
     endpoint: { method: 'GET', path: '/api/setting/available/mcp-bundles' },
@@ -252,7 +328,7 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'list_bundle_skills',
       description:
-        'List the skill channels included in a specific bundle. Returns id, skill_slug, and channel for each skill in the bundle.',
+        'List the skill channels included in a specific bundle. Returns id, skill_slug, skill_name, skill_description, and channel for each skill in the bundle.',
       input_schema: obj(
         { bundle_id: { type: 'string', description: 'The UUID of the bundle.' } },
         ['bundle_id'],
@@ -264,7 +340,7 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'list_mcp_bundle_servers',
       description:
-        'List the MCP servers included in a specific MCP bundle. Returns id, slug, and name for each server in the bundle.',
+        'List the MCP servers included in a specific MCP bundle. Returns id, slug, name, and description for each server in the bundle.',
       input_schema: obj(
         { bundle_id: { type: 'string', description: 'The UUID of the MCP bundle.' } },
         ['bundle_id'],
@@ -273,12 +349,47 @@ export const TOOLS: ToolEntry[] = [
     endpoint: { method: 'GET', path: '/api/setting/available/mcp-bundles', pathParam: 'bundle_id', pathSuffix: '/mcp-servers' },
   },
 
+  // ── SSH Keys ────────────────────────────────────────────────────────
+  {
+    tool: {
+      name: 'list_ssh_keys',
+      description:
+        'List all SSH keys for this customer. Returns id, fingerprint (SHA256), comment, and created_at for each.',
+      input_schema: obj(),
+    },
+    endpoint: { method: 'GET', path: '/api/setting/ssh-keys' },
+  },
+  {
+    tool: {
+      name: 'add_ssh_key',
+      description:
+        'Add an SSH public key for this customer. The API parses the key to extract the fingerprint and comment.',
+      input_schema: obj(
+        { public_key: { type: 'string', description: 'The full SSH public key string.' } },
+        ['public_key'],
+      ),
+    },
+    endpoint: { method: 'POST', path: '/api/setting/ssh-keys', jsonBody: true },
+  },
+  {
+    tool: {
+      name: 'remove_ssh_key',
+      description:
+        'Remove an SSH key by its ID (UUID). Use list_ssh_keys to find the ID.',
+      input_schema: obj(
+        { id: { type: 'string', description: 'The UUID of the SSH key to remove.' } },
+        ['id'],
+      ),
+    },
+    endpoint: { method: 'DELETE', path: '/api/setting/ssh-keys', pathParam: 'id' },
+  },
+
   // ── Catalog (combined view) ─────────────────────────────────────────
   {
     tool: {
       name: 'list_catalog',
       description:
-        'List ALL available bundles, skills, MCP bundles, and MCP servers in a single call. Returns { skill_channels, bundles, mcp_servers, mcp_bundles }. Bundles and MCP bundles include their nested skills/servers. Items include installed, installed_bundle, and installed_transitive flags where applicable.',
+        'List ALL available bundles, skills, MCP bundles, and MCP servers in a single call. Returns { skill_channels, bundles, mcp_servers, mcp_bundles }. Bundles and MCP bundles include their nested skills/servers with full details. Items include installed, installed_bundle, and installed_transitive flags where applicable.',
       input_schema: obj(),
     },
     endpoint: { method: 'GET', path: '/api/setting/catalog' },

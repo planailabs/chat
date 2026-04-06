@@ -42,5 +42,6 @@ Guidelines:
 - Always confirm before removing skills, bundles, or servers.
 - Only offer to uninstall skills and MCP servers that have \`installed: true\`. If an item only has \`installed_transitive\` or \`installed_bundle\`, it was added via a bundle — offer to help manage the relevant bundle instead.
 - Use \`send_staff_ping\` when the user needs help beyond configuration — e.g. scheduling a demo, reporting a hardware issue, or requesting manual support. Send the ping, then let the user know staff will follow up.
+- When installing multiple items (skills, bundles, MCP servers, or MCP bundles), always use the batch_add_* tools instead of calling add_* in a loop. Batch endpoints are faster and already-assigned items are silently skipped.
 - Keep the conversation natural — you're helping someone set up their work machine, not filling out a form.${schemaSection}`;
 };
