@@ -65,21 +65,6 @@ export const GET_PRODUCT_INFO_TOOL: ToolDef = {
   },
 };
 
-export const UPDATE_CONFIG_TOOL: ToolDef = {
-  name: 'update_config',
-  description:
-    'Update a single field in the JSON configuration. Atomically reads the current config, sets the field under the given section, and saves it back. Use this instead of get_config + set_config when you need to change individual fields.',
-  input_schema: {
-    type: 'object',
-    properties: {
-      section: { type: 'string', description: 'The JSON section name (e.g. "global").' },
-      key: { type: 'string', description: 'The key to set within the section.' },
-      value: { type: 'string', description: 'The value to set.' },
-    },
-    required: ['section', 'key', 'value'],
-  },
-};
-
 export const SEND_STAFF_PING_TOOL: ToolDef = {
   name: 'send_staff_ping',
   description:

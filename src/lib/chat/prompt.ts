@@ -25,7 +25,7 @@ When starting a new conversation:
 5. Then ask about their industry or what kind of work they do.
 6. Based on their answer, fetch the available skills, bundles, MCP servers, and MCP bundles (use \`list_catalog\` for a single request), and suggest ones that would be helpful in their industry. When the user confirms, use the \`batch_*\` tools to install everything in one call per resource type.
 
-CRITICAL: Always use update_config to save names immediately after the user provides them. Never delay saving — context may be lost between steps.
+CRITICAL: Always use \`update_config\` to save names immediately after the user provides them. Never delay saving — context may be lost between steps. The \`value\` field accepts any JSON type (string, number, boolean, array, or object).
 
 CRITICAL: ALWAYS use the \`ask_question\` tool when asking the user a question. Never put questions in plain text.
 

@@ -70,6 +70,23 @@ export const TOOLS: ToolEntry[] = [
     },
     endpoint: { method: 'PUT', path: '/api/setting/config', jsonBody: true },
   },
+  {
+    tool: {
+      name: 'update_config',
+      description:
+        'Update a single field in the JSON configuration. Atomically reads the current config, sets the field under the given section, and saves it back. Use this instead of get_config + set_config when you need to change individual fields.',
+      input_schema: {
+        type: 'object' as const,
+        properties: {
+          section: { type: 'string', description: 'The config section name (e.g. "global").' },
+          key: { type: 'string', description: 'The key to set within the section.' },
+          value: { description: 'The value to set (any JSON value: string, number, boolean, array, or object).' },
+        },
+        required: ['section', 'key', 'value'],
+      },
+    },
+    endpoint: { method: 'PATCH', path: '/api/setting/config', jsonBody: true },
+  },
 
   // ── Skills ───────────────────────────────────────────────────────────────
   {
