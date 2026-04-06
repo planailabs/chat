@@ -10,7 +10,7 @@ export const buildSystemPrompt = (locale: string, configSchema?: string) => {
   const prefix = locale.split('-')[0].toLowerCase();
   const lang = ISO6391.getName(prefix) || 'English';
   const schemaSection = configSchema
-    ? `\n\nSchema for configuration file, use TOML format:\n\`\`\`\n${configSchema}\n\`\`\``
+    ? `\n\nSchema for configuration file, use JSON format:\n\`\`\`\n${configSchema}\n\`\`\``
     : '';
 
   return `You are an assistant that helps the user to configure their plan.ai machine. Be friendly, concise, and non-technical.

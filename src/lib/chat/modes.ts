@@ -39,13 +39,13 @@ export interface ChatModeConfig {
   maxTokens: number;
   /**
    * Mode-specific setup hook. Runs once per turn before the tool loop.
-   * Returns extra context (e.g. machine config fetches its TOML schema + current config).
+   * Returns extra context (e.g. machine config fetches its JSON schema + current config).
    * Generic modes return empty or null.
    */
   prepare?: (userId: string, config: ChatConfig, supabase: SupabaseClient | null) => Promise<ModeContext | null>;
   /**
    * Optional hook to inject context into Claude messages before each round.
-   * Machine config uses this to prepend current TOML config to the first message.
+   * Machine config uses this to prepend current JSON config to the first message.
    * Other modes don't need it.
    */
   injectContext?: (messages: Anthropic.MessageParam[], context: ModeContext) => void;

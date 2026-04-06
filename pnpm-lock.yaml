@@ -35,9 +35,6 @@ importers:
       marked:
         specifier: ^17.0.5
         version: 17.0.5
-      smol-toml:
-        specifier: ^1.6.1
-        version: 1.6.1
       tailwindcss:
         specifier: ^4.1.17
         version: 4.2.2

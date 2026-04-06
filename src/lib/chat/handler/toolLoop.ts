@@ -107,7 +107,7 @@ export async function runToolLoop(
     const trimmed = trimMessages(messages.filter((m) => m.role !== 'cancel'));
     const claudeMessages = sanitizeMessages(toClaudeMessages(trimmed));
 
-    // Mode-specific context injection (e.g. machine config prepends TOML)
+    // Mode-specific context injection (e.g. machine config prepends JSON config)
     if (mode.injectContext) {
       mode.injectContext(claudeMessages, modeContext);
     }

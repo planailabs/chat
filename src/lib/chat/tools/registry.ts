@@ -52,7 +52,7 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'get_config',
       description:
-        'Get the current TOML configuration for this customer. Returns the full config file contents.',
+        'Get the current JSON configuration for this customer. Returns the full config file contents.',
       input_schema: obj(),
     },
     endpoint: { method: 'GET', path: '/api/setting/config' },
@@ -61,11 +61,12 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'set_config',
       description:
-        'Replace the entire TOML configuration for this customer. Pass the full TOML string.',
-      input_schema: obj(
-        { config_toml: { type: 'string', description: 'The full TOML configuration to set.' } },
-        ['config_toml'],
-      ),
+        'Replace the entire JSON configuration for this customer. Pass the full config as a JSON object.',
+      input_schema: {
+        type: 'object' as const,
+        description: 'The full configuration object. Its top-level keys are section names (e.g. "global", "daemon").',
+        additionalProperties: true,
+      },
     },
     endpoint: { method: 'PUT', path: '/api/setting/config', jsonBody: true },
   },

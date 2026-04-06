@@ -1,8 +1,7 @@
 /**
- * Tool execution — ENDPOINT_MAP, tomlSetField(), executeTool(), buildToolDefinitions().
+ * Tool execution — ENDPOINT_MAP, jsonSetField(), executeTool(), buildToolDefinitions().
  */
 
-import { parse, stringify } from 'smol-toml';
 import type { EndpointSpec, ToolDef } from './registry';
 import { TOOLS } from './registry';
 import { ASK_QUESTION_TOOL, UPDATE_CONFIG_TOOL } from './clientTools';
@@ -13,11 +12,11 @@ const ENDPOINT_MAP = new Map<string, EndpointSpec>(
   TOOLS.map((t) => [t.tool.name, t.endpoint]),
 );
 
-/** Set a key under [section] in a TOML string. Parses, patches, re-serializes. */
-const tomlSetField = (toml: string, section: string, key: string, value: string): string => {
+/** Set a key under [section] in a JSON config string. Parses, patches, re-serializes. */
+const jsonSetField = (json: string, section: string, key: string, value: string): string => {
   let doc: Record<string, unknown>;
   try {
-    doc = parse(toml);
+    doc = JSON.parse(json);
   } catch {
     doc = {};
   }
@@ -25,7 +24,7 @@ const tomlSetField = (toml: string, section: string, key: string, value: string)
     doc[section] = {};
   }
   (doc[section] as Record<string, unknown>)[key] = value;
-  return stringify(doc);
+  return JSON.stringify(doc);
 };
 
 // ─── Public API ──────────────────────────────────────────────────────────────
@@ -50,16 +49,16 @@ export const executeTool = async (
     try {
       // Read current config
       const getRes = await fetch(`${macMgmtUrl}/api/setting/config`, { headers });
-      const currentToml = getRes.ok ? await getRes.text() : '';
+      const currentJson = getRes.ok ? await getRes.text() : '{}';
 
       // Patch field
-      const updated = tomlSetField(currentToml, section, key, value);
+      const updated = jsonSetField(currentJson, section, key, value);
 
-      // Write back
+      // Write back (API expects the config object directly as the body)
       const putRes = await fetch(`${macMgmtUrl}/api/setting/config`, {
         method: 'PUT',
         headers: { ...headers, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ config_toml: updated }),
+        body: updated,
       });
 
       if (!putRes.ok) {

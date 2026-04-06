@@ -3,7 +3,7 @@
  *
  * Manages mac-mgmt configuration via Claude. Owns:
  * - prepare(): fetches customer token, config schema, current config
- * - injectContext(): prepends TOML config to first user message
+ * - injectContext(): prepends JSON config to first user message
  * - buildSystemPrompt(): wraps existing prompt builder
  * - buildToolDefinitions() / executeTool(): from tools.ts
  */
@@ -95,7 +95,7 @@ export const machineConfigMode: ChatModeConfig = {
     const currentConfig = context.currentConfig as string | undefined;
     if (!currentConfig || messages.length === 0 || messages[0].role !== 'user') return;
 
-    const configNote = `[Current machine configuration]\n\`\`\`toml\n${currentConfig}\n\`\`\``;
+    const configNote = `[Current machine configuration]\n\`\`\`json\n${currentConfig}\n\`\`\``;
     const first = messages[0];
     if (typeof first.content === 'string') {
       first.content = configNote + '\n\n' + first.content;

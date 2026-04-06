@@ -9,7 +9,6 @@ import { describe, test, expect, beforeAll, afterAll, beforeEach } from 'vitest'
 import http from 'node:http';
 import { startServer, readDotenv, type TestServer } from './test-server';
 import { evaluateExchange, generateAnswer, type LogEntry } from './haiku-evaluator';
-import { parse, stringify } from 'smol-toml';
 import type { ChatModeId } from '../src/lib/chat/modes';
 
 // ─── Env ──────────────────────────────────────────────────────────────────────
@@ -226,16 +225,16 @@ function postRaw(port: number, path: string, jsonBody: string): Promise<number> 
 
 // ─── Mac-mgmt Config Helpers ─────────────────────────────────────────────────
 
-/** Read the current TOML config from mac-mgmt */
+/** Read the current JSON config from mac-mgmt */
 async function getConfig(srv: TestServer): Promise<string> {
   const res = await fetch(`${srv.macMgmtUrl}/api/setting/config`, {
     headers: { Authorization: `Bearer ${srv.customerToken}`, Accept: 'application/json' },
   });
-  return res.ok ? res.text() : '';
+  return res.ok ? res.text() : '{}';
 }
 
-/** Write a full TOML config to mac-mgmt */
-async function setConfig(srv: TestServer, toml: string): Promise<void> {
+/** Write a full JSON config to mac-mgmt (body is the config object directly) */
+async function setConfig(srv: TestServer, json: string): Promise<void> {
   await fetch(`${srv.macMgmtUrl}/api/setting/config`, {
     method: 'PUT',
     headers: {
@@ -243,21 +242,21 @@ async function setConfig(srv: TestServer, toml: string): Promise<void> {
       'Content-Type': 'application/json',
       Accept: 'application/json',
     },
-    body: JSON.stringify({ config_toml: toml }),
+    body: json,
   });
 }
 
 /** Remove agent_name and user_name from the [global] section */
 async function clearNameFields(srv: TestServer): Promise<string> {
-  const toml = await getConfig(srv);
-  const doc = parse(toml) as Record<string, unknown>;
+  const configStr = await getConfig(srv);
+  const doc = JSON.parse(configStr) as Record<string, unknown>;
   const global = doc.global as Record<string, unknown> | undefined;
   if (global) {
     delete global.agent_name;
     delete global.user_name;
   }
-  await setConfig(srv, stringify(doc));
-  return toml; // return original for restoration
+  await setConfig(srv, JSON.stringify(doc));
+  return configStr; // return original for restoration
 }
 
 // ─── Tests ───────────────────────────────────────────────────────────────────
