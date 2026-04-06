@@ -99,7 +99,7 @@ export const executeTool = async (
     headers,
   };
 
-  // Send JSON body for POST/PUT (exclude the pathParam field from the body)
+  // Send JSON body for POST/PUT/PATCH (exclude the pathParam field from the body)
   if (spec.jsonBody && input) {
     const body = { ...input };
     if (spec.pathParam) {

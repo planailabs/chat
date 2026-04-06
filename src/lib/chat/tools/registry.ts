@@ -15,7 +15,7 @@ export interface EndpointSpec {
   pathParam?: string;
   /** Append a fixed suffix after the path param (e.g. /bundles/{id}/skills) */
   pathSuffix?: string;
-  /** Send input as JSON body (POST / PUT) */
+  /** Send input as JSON body (POST / PUT / PATCH) */
   jsonBody?: boolean;
 }
 
@@ -85,7 +85,7 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'add_skill',
       description:
-        'Add a single skill to this customer by skill channel ID (UUID). Use available_skill_channels to find the ID first. Prefer batch_add_skills when adding multiple skills.',
+        'Add a single skill to this customer by skill channel ID (UUID). Use available_skill_channels to find the ID first. Prefer batch_skills when adding multiple skills.',
       input_schema: obj(
         { skill_channel_id: { type: 'string', description: 'The UUID of the skill channel to add.' } },
         ['skill_channel_id'],
@@ -95,22 +95,26 @@ export const TOOLS: ToolEntry[] = [
   },
   {
     tool: {
-      name: 'batch_add_skills',
+      name: 'batch_skills',
       description:
-        'Add multiple skills at once by their skill channel IDs (UUIDs). Already-assigned skills are silently skipped. Prefer this over multiple add_skill calls.',
+        'Batch add and/or remove skill assignments in a single call. `add` contains skill_channel_ids to assign (duplicates skipped). `remove` contains customer_skill_ids to delete. Both fields are optional and default to empty.',
       input_schema: {
         type: 'object' as const,
         properties: {
-          skill_channel_ids: {
+          add: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Array of skill channel UUIDs to add.',
+            description: 'Skill channel UUIDs to add.',
+          },
+          remove: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Customer skill assignment UUIDs to remove.',
           },
         },
-        required: ['skill_channel_ids'],
       },
     },
-    endpoint: { method: 'POST', path: '/api/setting/skills/batch', jsonBody: true },
+    endpoint: { method: 'PATCH', path: '/api/setting/skills/batch', jsonBody: true },
   },
   {
     tool: {
@@ -148,7 +152,7 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'add_bundle',
       description:
-        'Add a single application bundle to this customer by bundle ID (UUID). Use available_bundles to find the ID first. Prefer batch_add_bundles when adding multiple bundles.',
+        'Add a single application bundle to this customer by bundle ID (UUID). Use available_bundles to find the ID first. Prefer batch_bundles when adding multiple bundles.',
       input_schema: obj(
         { bundle_id: { type: 'string', description: 'The UUID of the bundle to add.' } },
         ['bundle_id'],
@@ -158,22 +162,26 @@ export const TOOLS: ToolEntry[] = [
   },
   {
     tool: {
-      name: 'batch_add_bundles',
+      name: 'batch_bundles',
       description:
-        'Add multiple application bundles at once by their bundle IDs (UUIDs). Already-assigned bundles are silently skipped. Prefer this over multiple add_bundle calls.',
+        'Batch add and/or remove bundle assignments in a single call. `add` contains bundle_ids to assign (duplicates skipped). `remove` contains customer_bundle_ids to delete. Both fields are optional and default to empty.',
       input_schema: {
         type: 'object' as const,
         properties: {
-          bundle_ids: {
+          add: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Array of bundle UUIDs to add.',
+            description: 'Bundle UUIDs to add.',
+          },
+          remove: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Customer bundle assignment UUIDs to remove.',
           },
         },
-        required: ['bundle_ids'],
       },
     },
-    endpoint: { method: 'POST', path: '/api/setting/bundles/batch', jsonBody: true },
+    endpoint: { method: 'PATCH', path: '/api/setting/bundles/batch', jsonBody: true },
   },
   {
     tool: {
@@ -211,7 +219,7 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'add_mcp_server',
       description:
-        'Add a single MCP server to this customer by server ID (UUID). Use available_mcp_servers to find the ID first. Prefer batch_add_mcp_servers when adding multiple servers.',
+        'Add a single MCP server to this customer by server ID (UUID). Use available_mcp_servers to find the ID first. Prefer batch_mcp_servers when adding multiple servers.',
       input_schema: obj(
         { mcp_server_id: { type: 'string', description: 'The UUID of the MCP server to add.' } },
         ['mcp_server_id'],
@@ -221,22 +229,26 @@ export const TOOLS: ToolEntry[] = [
   },
   {
     tool: {
-      name: 'batch_add_mcp_servers',
+      name: 'batch_mcp_servers',
       description:
-        'Add multiple MCP servers at once by their server IDs (UUIDs). Already-assigned servers are silently skipped. Prefer this over multiple add_mcp_server calls.',
+        'Batch add and/or remove MCP server assignments in a single call. `add` contains mcp_server_ids to assign (duplicates skipped). `remove` contains customer_mcp_server_ids to delete. Both fields are optional and default to empty.',
       input_schema: {
         type: 'object' as const,
         properties: {
-          mcp_server_ids: {
+          add: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Array of MCP server UUIDs to add.',
+            description: 'MCP server UUIDs to add.',
+          },
+          remove: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Customer MCP server assignment UUIDs to remove.',
           },
         },
-        required: ['mcp_server_ids'],
       },
     },
-    endpoint: { method: 'POST', path: '/api/setting/mcp-servers/batch', jsonBody: true },
+    endpoint: { method: 'PATCH', path: '/api/setting/mcp-servers/batch', jsonBody: true },
   },
   {
     tool: {
@@ -274,7 +286,7 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'add_mcp_bundle',
       description:
-        'Add a single MCP bundle to this customer by bundle ID (UUID). Use available_mcp_bundles to find the ID first. Prefer batch_add_mcp_bundles when adding multiple bundles.',
+        'Add a single MCP bundle to this customer by bundle ID (UUID). Use available_mcp_bundles to find the ID first. Prefer batch_mcp_bundles when adding multiple bundles.',
       input_schema: obj(
         { bundle_id: { type: 'string', description: 'The UUID of the MCP bundle to add.' } },
         ['bundle_id'],
@@ -284,22 +296,26 @@ export const TOOLS: ToolEntry[] = [
   },
   {
     tool: {
-      name: 'batch_add_mcp_bundles',
+      name: 'batch_mcp_bundles',
       description:
-        'Add multiple MCP bundles at once by their bundle IDs (UUIDs). Already-assigned bundles are silently skipped. Prefer this over multiple add_mcp_bundle calls.',
+        'Batch add and/or remove MCP bundle assignments in a single call. `add` contains bundle_ids to assign (duplicates skipped). `remove` contains customer_mcp_bundle_ids to delete. Both fields are optional and default to empty.',
       input_schema: {
         type: 'object' as const,
         properties: {
-          bundle_ids: {
+          add: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Array of MCP bundle UUIDs to add.',
+            description: 'MCP bundle UUIDs to add.',
+          },
+          remove: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Customer MCP bundle assignment UUIDs to remove.',
           },
         },
-        required: ['bundle_ids'],
       },
     },
-    endpoint: { method: 'POST', path: '/api/setting/mcp-bundles/batch', jsonBody: true },
+    endpoint: { method: 'PATCH', path: '/api/setting/mcp-bundles/batch', jsonBody: true },
   },
   {
     tool: {
