@@ -5,6 +5,7 @@ let activityChart: ApexCharts | null = null;
 let usersChart: ApexCharts | null = null;
 let tokenInputChart: ApexCharts | null = null;
 let tokenOutputChart: ApexCharts | null = null;
+let tokenTotalChart: ApexCharts | null = null;
 let messageCountChart: ApexCharts | null = null;
 
 export type TokenUsage = {
@@ -181,7 +182,14 @@ export const initCharts = () => {
     tokenOutputChart.render();
   }
 
-  // 4. Message Count per User (stacked bar, hourly, role=user only)
+  const tokenTotalEl = document.querySelector('#chart-token-total');
+  if (tokenTotalEl) {
+    tokenTotalEl.innerHTML = '';
+    tokenTotalChart = new ApexCharts(tokenTotalEl, { ...tokenChartBase });
+    tokenTotalChart.render();
+  }
+
+  // 5. Message Count per User (stacked bar, hourly, role=user only)
   const messageCountOptions = {
     series: [],
     chart: {
@@ -322,6 +330,16 @@ export const updateCharts = (data: ChartData) => {
       tokenOutputChart.updateSeries(topUsers.map((uid) => ({
         name: resolveUserLabel(uid, profilesMap),
         data: sortedHours.map((h) => ({ x: h, y: userHourOutput.get(uid)?.get(h) || 0 })),
+      })));
+    }
+
+    if (tokenTotalChart) {
+      tokenTotalChart.updateSeries(topUsers.map((uid) => ({
+        name: resolveUserLabel(uid, profilesMap),
+        data: sortedHours.map((h) => ({
+          x: h,
+          y: (userHourInput.get(uid)?.get(h) || 0) + (userHourOutput.get(uid)?.get(h) || 0),
+        })),
       })));
     }
   }
