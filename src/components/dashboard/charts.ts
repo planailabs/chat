@@ -129,7 +129,7 @@ export const initCharts = () => {
     usersChart.render();
   }
 
-  // 3. Token Usage per User (stacked bar, hourly)
+  // 3. Token Usage (stacked bar, hourly, input vs output)
   const tokenUsageOptions = {
     series: [],
     chart: {
@@ -164,6 +164,7 @@ export const initCharts = () => {
     },
     legend: { position: 'top', labels: { colors: '#aaa' } },
     tooltip: { x: { format: 'MMM dd HH:00' } },
+    colors: ['#00E5FF', '#FF6B6B'],
   };
 
   const tokenUsageEl = document.querySelector('#chart-token-usage');
@@ -276,38 +277,25 @@ export const updateCharts = (data: ChartData) => {
     },
   ]);
 
-  // --- Token Usage per User (hourly stacked bar) ---
+  // --- Token Usage per User (hourly stacked bar, split input/output) ---
   if (tokenUsageChart && data.tokenUsage?.length) {
-    // Group: user -> hour -> total tokens
-    const userHourTokens = new Map<string, Map<number, number>>();
-    const allHours = new Set<number>();
+    // Group: hour -> { input, output } (summed across all users)
+    const hourInput = new Map<number, number>();
+    const hourOutput = new Map<number, number>();
 
     for (const row of data.tokenUsage) {
       const hour = floorToHour(new Date(row.created_at));
-      allHours.add(hour);
-      let hourMap = userHourTokens.get(row.user_id);
-      if (!hourMap) {
-        hourMap = new Map();
-        userHourTokens.set(row.user_id, hourMap);
-      }
-      const total = row.input_tokens + row.output_tokens + row.cache_creation_input_tokens + row.cache_read_input_tokens;
-      hourMap.set(hour, (hourMap.get(hour) || 0) + total);
+      const input = row.input_tokens + row.cache_creation_input_tokens + row.cache_read_input_tokens;
+      hourInput.set(hour, (hourInput.get(hour) || 0) + input);
+      hourOutput.set(hour, (hourOutput.get(hour) || 0) + row.output_tokens);
     }
 
-    // Pick top users by total tokens
-    const userTotals = Array.from(userHourTokens.entries())
-      .map(([uid, hm]) => ({ uid, total: Array.from(hm.values()).reduce((a, b) => a + b, 0) }))
-      .sort((a, b) => b.total - a.total)
-      .slice(0, 10);
+    const sortedHours = Array.from(new Set([...hourInput.keys(), ...hourOutput.keys()])).sort((a, b) => a - b);
 
-    const sortedHours = Array.from(allHours).sort((a, b) => a - b);
-
-    const tokenSeries = userTotals.map(({ uid }) => ({
-      name: resolveUserLabel(uid, profilesMap),
-      data: sortedHours.map((h) => ({ x: h, y: userHourTokens.get(uid)?.get(h) || 0 })),
-    }));
-
-    tokenUsageChart.updateSeries(tokenSeries);
+    tokenUsageChart.updateSeries([
+      { name: 'Input tokens', data: sortedHours.map((h) => ({ x: h, y: hourInput.get(h) || 0 })) },
+      { name: 'Output tokens', data: sortedHours.map((h) => ({ x: h, y: hourOutput.get(h) || 0 })) },
+    ]);
   }
 
   // --- Message Count per User (hourly stacked bar, role=user only) ---
