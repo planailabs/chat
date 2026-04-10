@@ -6,6 +6,7 @@ let usersChart: ApexCharts | null = null;
 let tokenInputChart: ApexCharts | null = null;
 let tokenOutputChart: ApexCharts | null = null;
 let tokenTotalChart: ApexCharts | null = null;
+let tokenAggChart: ApexCharts | null = null;
 let messageCountChart: ApexCharts | null = null;
 
 export type TokenUsage = {
@@ -189,7 +190,17 @@ export const initCharts = () => {
     tokenTotalChart.render();
   }
 
-  // 5. Message Count per User (stacked bar, hourly, role=user only)
+  const tokenAggEl = document.querySelector('#chart-token-agg');
+  if (tokenAggEl) {
+    tokenAggEl.innerHTML = '';
+    tokenAggChart = new ApexCharts(tokenAggEl, {
+      ...tokenChartBase,
+      colors: ['#00E5FF', '#FF6B6B'],
+    });
+    tokenAggChart.render();
+  }
+
+  // 6. Message Count per User (stacked bar, hourly, role=user only)
   const messageCountOptions = {
     series: [],
     chart: {
@@ -341,6 +352,21 @@ export const updateCharts = (data: ChartData) => {
           y: (userHourInput.get(uid)?.get(h) || 0) + (userHourOutput.get(uid)?.get(h) || 0),
         })),
       })));
+    }
+
+    if (tokenAggChart) {
+      const aggInput = new Map<number, number>();
+      const aggOutput = new Map<number, number>();
+      for (const row of data.tokenUsage) {
+        const hour = floorToHour(new Date(row.created_at));
+        const input = row.input_tokens + row.cache_creation_input_tokens + row.cache_read_input_tokens;
+        aggInput.set(hour, (aggInput.get(hour) || 0) + input);
+        aggOutput.set(hour, (aggOutput.get(hour) || 0) + row.output_tokens);
+      }
+      tokenAggChart.updateSeries([
+        { name: 'Input tokens', data: sortedHours.map((h) => ({ x: h, y: aggInput.get(h) || 0 })) },
+        { name: 'Output tokens', data: sortedHours.map((h) => ({ x: h, y: aggOutput.get(h) || 0 })) },
+      ]);
     }
   }
 
