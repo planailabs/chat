@@ -132,11 +132,11 @@ export const initCharts = () => {
     usersChart.render();
   }
 
-  // 3 & 4. Token Input / Output per User (two separate stacked bars, hourly)
+  // 3 & 4. Token Input / Output per User (stacked area charts, hourly)
   const tokenChartBase = {
     series: [] as any[],
     chart: {
-      type: 'bar' as const,
+      type: 'area' as const,
       stacked: true,
       height: '100%',
       toolbar: { show: false },
@@ -145,7 +145,11 @@ export const initCharts = () => {
       zoom: { enabled: true, type: 'x' as const, autoScaleYaxis: true },
     },
     theme: { mode: 'dark' as const },
-    plotOptions: { bar: { borderRadius: 2, columnWidth: '80%' } },
+    stroke: { curve: 'smooth' as const, width: 2 },
+    fill: {
+      type: 'gradient',
+      gradient: { shadeIntensity: 1, opacityFrom: 0.5, opacityTo: 0.1, stops: [0, 90, 100] },
+    },
     dataLabels: { enabled: false },
     xaxis: {
       type: 'datetime' as const,
@@ -200,11 +204,11 @@ export const initCharts = () => {
     tokenAggChart.render();
   }
 
-  // 6. Message Count per User (stacked bar, hourly, role=user only)
+  // 6. Message Count per User (stacked area, hourly, role=user only)
   const messageCountOptions = {
     series: [],
     chart: {
-      type: 'bar',
+      type: 'area',
       stacked: true,
       height: '100%',
       toolbar: { show: false },
@@ -213,7 +217,11 @@ export const initCharts = () => {
       zoom: { enabled: true, type: 'x', autoScaleYaxis: true },
     },
     theme: { mode: 'dark' },
-    plotOptions: { bar: { borderRadius: 2, columnWidth: '80%' } },
+    stroke: { curve: 'smooth', width: 2 },
+    fill: {
+      type: 'gradient',
+      gradient: { shadeIntensity: 1, opacityFrom: 0.5, opacityTo: 0.1, stops: [0, 90, 100] },
+    },
     dataLabels: { enabled: false },
     xaxis: {
       type: 'datetime',
