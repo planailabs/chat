@@ -3,10 +3,23 @@ import type { Message, Profile } from './app';
 
 let activityChart: ApexCharts | null = null;
 let usersChart: ApexCharts | null = null;
+let tokenUsageChart: ApexCharts | null = null;
+let messageCountChart: ApexCharts | null = null;
+
+export type TokenUsage = {
+  id: number;
+  user_id: string;
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_input_tokens: number;
+  cache_read_input_tokens: number;
+  created_at: string;
+};
 
 export type ChartData = {
   messages: Message[];
   profiles: Profile[];
+  tokenUsage?: TokenUsage[];
 };
 
 export const initCharts = () => {
@@ -115,24 +128,123 @@ export const initCharts = () => {
     usersChart = new ApexCharts(usersEl, usersOptions);
     usersChart.render();
   }
+
+  // 3. Token Usage per User (stacked bar, hourly)
+  const tokenUsageOptions = {
+    series: [],
+    chart: {
+      type: 'bar',
+      stacked: true,
+      height: '100%',
+      toolbar: { show: false },
+      background: 'transparent',
+      animations: { enabled: false },
+      zoom: { enabled: true, type: 'x', autoScaleYaxis: true },
+    },
+    theme: { mode: 'dark' },
+    plotOptions: { bar: { borderRadius: 2, columnWidth: '80%' } },
+    dataLabels: { enabled: false },
+    xaxis: {
+      type: 'datetime',
+      labels: { style: { colors: '#aaa' }, datetimeUTC: false },
+      axisBorder: { show: false },
+      axisTicks: { show: false },
+    },
+    yaxis: {
+      labels: {
+        style: { colors: '#aaa' },
+        formatter: (val: number) => val >= 1000 ? (val / 1000).toFixed(0) + 'k' : String(val),
+      },
+      title: { text: 'Tokens', style: { color: '#aaa' } },
+    },
+    grid: {
+      borderColor: '#333',
+      strokeDashArray: 4,
+      padding: { left: 10, right: 10, bottom: 20 },
+    },
+    legend: { position: 'top', labels: { colors: '#aaa' } },
+    tooltip: { x: { format: 'MMM dd HH:00' } },
+  };
+
+  const tokenUsageEl = document.querySelector('#chart-token-usage');
+  if (tokenUsageEl) {
+    tokenUsageEl.innerHTML = '';
+    tokenUsageChart = new ApexCharts(tokenUsageEl, tokenUsageOptions);
+    tokenUsageChart.render();
+  }
+
+  // 4. Message Count per User (stacked bar, hourly, role=user only)
+  const messageCountOptions = {
+    series: [],
+    chart: {
+      type: 'bar',
+      stacked: true,
+      height: '100%',
+      toolbar: { show: false },
+      background: 'transparent',
+      animations: { enabled: false },
+      zoom: { enabled: true, type: 'x', autoScaleYaxis: true },
+    },
+    theme: { mode: 'dark' },
+    plotOptions: { bar: { borderRadius: 2, columnWidth: '80%' } },
+    dataLabels: { enabled: false },
+    xaxis: {
+      type: 'datetime',
+      labels: { style: { colors: '#aaa' }, datetimeUTC: false },
+      axisBorder: { show: false },
+      axisTicks: { show: false },
+    },
+    yaxis: {
+      labels: { style: { colors: '#aaa' } },
+      title: { text: 'Messages', style: { color: '#aaa' } },
+    },
+    grid: {
+      borderColor: '#333',
+      strokeDashArray: 4,
+      padding: { left: 10, right: 10, bottom: 20 },
+    },
+    legend: { position: 'top', labels: { colors: '#aaa' } },
+    tooltip: { x: { format: 'MMM dd HH:00' } },
+  };
+
+  const messageCountEl = document.querySelector('#chart-message-count');
+  if (messageCountEl) {
+    messageCountEl.innerHTML = '';
+    messageCountChart = new ApexCharts(messageCountEl, messageCountOptions);
+    messageCountChart.render();
+  }
 };
+
+/** Resolve a user ID to a short display label. */
+function resolveUserLabel(uid: string, profilesMap: Map<string, Profile>): string {
+  const p = profilesMap.get(uid);
+  if (p?.provider_identity?.identity_data?.email)
+    return p.provider_identity.identity_data.email;
+  if (p?.provider_identity?.email) return p.provider_identity.email;
+  return uid.slice(0, 8) + '...';
+}
+
+/** Floor a Date to the start of its hour (local time). */
+function floorToHour(d: Date): number {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours()).getTime();
+}
 
 export const updateCharts = (data: ChartData) => {
   if (!activityChart || !usersChart) return;
 
-  const { messages } = data; // profiles not needed for these simple stats yet
+  const { messages } = data;
 
-  // --- Aggregation for Activity (Prompts per day/hour) ---
-  // Group by hour for last 24h, or day for last 30 days.
-  // For simplicity v1: Group by Day
+  const profilesMap = new Map<string, Profile>();
+  data.profiles.forEach((p) => profilesMap.set(p.user_id, p));
+
+  // --- Aggregation for Activity (Prompts per day) ---
   const activityMap = new Map<string, number>();
 
   messages.forEach((msg) => {
-    const date = new Date(msg.created_at).toISOString().split('T')[0]; // YYYY-MM-DD
+    const date = new Date(msg.created_at).toISOString().split('T')[0];
     activityMap.set(date, (activityMap.get(date) || 0) + 1);
   });
 
-  // Sort logic
   const activitySeries = Array.from(activityMap.entries())
     .map(([date, count]) => ({ x: date, y: count }))
     .sort((a, b) => new Date(a.x).getTime() - new Date(b.x).getTime());
@@ -141,9 +253,6 @@ export const updateCharts = (data: ChartData) => {
 
   // --- Aggregation for Top Users ---
   const userCounts = new Map<string, number>();
-  // Make sure we have user identifiers.
-  // Join logic happens in main app, so messages might have user_id, or joined profile?
-  // Assuming messages have user_id.
   messages.forEach((msg) => {
     const uid = msg.user_id;
     if (uid) userCounts.set(uid, (userCounts.get(uid) || 0) + 1);
@@ -151,26 +260,12 @@ export const updateCharts = (data: ChartData) => {
 
   const sortedUsers = Array.from(userCounts.entries())
     .sort((a, b) => b[1] - a[1])
-    .slice(0, 10); // Top 10
+    .slice(0, 10);
 
-  // Map UUIDs to Names/Emails if available in profiles?
-  // We need profiles map.
-  const profilesMap = new Map();
-  data.profiles.forEach((p) => profilesMap.set(p.user_id, p));
-
-  const userCategories = sortedUsers.map(([uid]) => {
-    const p = profilesMap.get(uid);
-    // Fallback or use email
-    if (p?.provider_identity?.identity_data?.email)
-      return p.provider_identity.identity_data.email;
-    if (p?.provider_identity?.email) return p.provider_identity.email;
-    return uid.slice(0, 8) + '...';
-  });
-
-  // unused: const userSeriesData = sortedUsers.map(([uid, count]) => count);
+  const userCategories = sortedUsers.map(([uid]) => resolveUserLabel(uid, profilesMap));
 
   usersChart.updateOptions({
-    xaxis: { categories: userCategories }, // Bar chart uses categories on axis
+    xaxis: { categories: userCategories },
   });
   usersChart.updateSeries([
     {
@@ -180,6 +275,73 @@ export const updateCharts = (data: ChartData) => {
       })),
     },
   ]);
+
+  // --- Token Usage per User (hourly stacked bar) ---
+  if (tokenUsageChart && data.tokenUsage?.length) {
+    // Group: user -> hour -> total tokens
+    const userHourTokens = new Map<string, Map<number, number>>();
+    const allHours = new Set<number>();
+
+    for (const row of data.tokenUsage) {
+      const hour = floorToHour(new Date(row.created_at));
+      allHours.add(hour);
+      let hourMap = userHourTokens.get(row.user_id);
+      if (!hourMap) {
+        hourMap = new Map();
+        userHourTokens.set(row.user_id, hourMap);
+      }
+      const total = row.input_tokens + row.output_tokens + row.cache_creation_input_tokens + row.cache_read_input_tokens;
+      hourMap.set(hour, (hourMap.get(hour) || 0) + total);
+    }
+
+    // Pick top users by total tokens
+    const userTotals = Array.from(userHourTokens.entries())
+      .map(([uid, hm]) => ({ uid, total: Array.from(hm.values()).reduce((a, b) => a + b, 0) }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 10);
+
+    const sortedHours = Array.from(allHours).sort((a, b) => a - b);
+
+    const tokenSeries = userTotals.map(({ uid }) => ({
+      name: resolveUserLabel(uid, profilesMap),
+      data: sortedHours.map((h) => ({ x: h, y: userHourTokens.get(uid)?.get(h) || 0 })),
+    }));
+
+    tokenUsageChart.updateSeries(tokenSeries);
+  }
+
+  // --- Message Count per User (hourly stacked bar, role=user only) ---
+  if (messageCountChart) {
+    const userMessages = messages.filter((m) => m.role === 'user');
+    const userHourMsgs = new Map<string, Map<number, number>>();
+    const allMsgHours = new Set<number>();
+
+    for (const msg of userMessages) {
+      const hour = floorToHour(new Date(msg.created_at));
+      allMsgHours.add(hour);
+      let hourMap = userHourMsgs.get(msg.user_id);
+      if (!hourMap) {
+        hourMap = new Map();
+        userHourMsgs.set(msg.user_id, hourMap);
+      }
+      hourMap.set(hour, (hourMap.get(hour) || 0) + 1);
+    }
+
+    // Top users by message count
+    const msgUserTotals = Array.from(userHourMsgs.entries())
+      .map(([uid, hm]) => ({ uid, total: Array.from(hm.values()).reduce((a, b) => a + b, 0) }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 10);
+
+    const sortedMsgHours = Array.from(allMsgHours).sort((a, b) => a - b);
+
+    const msgSeries = msgUserTotals.map(({ uid }) => ({
+      name: resolveUserLabel(uid, profilesMap),
+      data: sortedMsgHours.map((h) => ({ x: h, y: userHourMsgs.get(uid)?.get(h) || 0 })),
+    }));
+
+    messageCountChart.updateSeries(msgSeries);
+  }
 };
 
 export const resetActivityZoom = () => {

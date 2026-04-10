@@ -1,5 +1,6 @@
 import { getSupabaseClientOrThrow } from '../chat/supabase/client';
 import { initCharts, updateCharts } from './charts';
+import type { TokenUsage } from './charts';
 import type { Message, Profile } from './app';
 
 export async function initOverview(container: HTMLElement) {
@@ -52,16 +53,29 @@ export async function initOverview(container: HTMLElement) {
   // Init charts
   initCharts();
 
-  // Fetch recent messages for chart data
-  const { data: msgs } = await supabase
-    .from('messages')
-    .select('*')
-    .order('created_at', { ascending: false })
-    .limit(500);
+  // Fetch recent messages and token usage for chart data
+  const [{ data: msgs }, { data: tokenRows }] = await Promise.all([
+    supabase
+      .from('messages')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(500),
+    supabase
+      .from('chat_token_usage')
+      .select('id, user_id, input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens, created_at')
+      .order('created_at', { ascending: false })
+      .limit(2000),
+  ]);
 
   if (msgs) {
     const messages = msgs as Message[];
-    const userIds = [...new Set(messages.map((m) => m.user_id))];
+    const tokenUsage = (tokenRows ?? []) as TokenUsage[];
+
+    // Collect all user IDs from both messages and token usage
+    const userIds = [...new Set([
+      ...messages.map((m) => m.user_id),
+      ...tokenUsage.map((t) => t.user_id),
+    ])];
     let profiles: Profile[] = [];
 
     if (userIds.length > 0) {
@@ -72,6 +86,6 @@ export async function initOverview(container: HTMLElement) {
       profiles = (profs ?? []) as Profile[];
     }
 
-    updateCharts({ messages, profiles });
+    updateCharts({ messages, profiles, tokenUsage });
   }
 }
