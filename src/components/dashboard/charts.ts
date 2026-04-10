@@ -164,7 +164,6 @@ export const initCharts = () => {
     },
     legend: { position: 'top', labels: { colors: '#aaa' } },
     tooltip: { x: { format: 'MMM dd HH:00' } },
-    colors: ['#00E5FF', '#FF6B6B'],
   };
 
   const tokenUsageEl = document.querySelector('#chart-token-usage');
@@ -277,25 +276,54 @@ export const updateCharts = (data: ChartData) => {
     },
   ]);
 
-  // --- Token Usage per User (hourly stacked bar, split input/output) ---
+  // --- Token Usage per User (hourly stacked bar, input + output per user) ---
   if (tokenUsageChart && data.tokenUsage?.length) {
-    // Group: hour -> { input, output } (summed across all users)
-    const hourInput = new Map<number, number>();
-    const hourOutput = new Map<number, number>();
+    // Group: user -> hour -> { input, output }
+    const userHourInput = new Map<string, Map<number, number>>();
+    const userHourOutput = new Map<string, Map<number, number>>();
+    const allHours = new Set<number>();
+    const userTotalTokens = new Map<string, number>();
 
     for (const row of data.tokenUsage) {
       const hour = floorToHour(new Date(row.created_at));
+      allHours.add(hour);
       const input = row.input_tokens + row.cache_creation_input_tokens + row.cache_read_input_tokens;
-      hourInput.set(hour, (hourInput.get(hour) || 0) + input);
-      hourOutput.set(hour, (hourOutput.get(hour) || 0) + row.output_tokens);
+
+      if (!userHourInput.has(row.user_id)) userHourInput.set(row.user_id, new Map());
+      if (!userHourOutput.has(row.user_id)) userHourOutput.set(row.user_id, new Map());
+
+      const inMap = userHourInput.get(row.user_id)!;
+      const outMap = userHourOutput.get(row.user_id)!;
+      inMap.set(hour, (inMap.get(hour) || 0) + input);
+      outMap.set(hour, (outMap.get(hour) || 0) + row.output_tokens);
+      userTotalTokens.set(row.user_id, (userTotalTokens.get(row.user_id) || 0) + input + row.output_tokens);
     }
 
-    const sortedHours = Array.from(new Set([...hourInput.keys(), ...hourOutput.keys()])).sort((a, b) => a - b);
+    // Top 10 users by total tokens
+    const topUsers = Array.from(userTotalTokens.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([uid]) => uid);
 
-    tokenUsageChart.updateSeries([
-      { name: 'Input tokens', data: sortedHours.map((h) => ({ x: h, y: hourInput.get(h) || 0 })) },
-      { name: 'Output tokens', data: sortedHours.map((h) => ({ x: h, y: hourOutput.get(h) || 0 })) },
-    ]);
+    const sortedHours = Array.from(allHours).sort((a, b) => a - b);
+
+    // Two series per user: input (group "input") and output (group "output")
+    const tokenSeries: { name: string; group: string; data: { x: number; y: number }[] }[] = [];
+    for (const uid of topUsers) {
+      const label = resolveUserLabel(uid, profilesMap);
+      tokenSeries.push({
+        name: `${label} (in)`,
+        group: 'input',
+        data: sortedHours.map((h) => ({ x: h, y: userHourInput.get(uid)?.get(h) || 0 })),
+      });
+      tokenSeries.push({
+        name: `${label} (out)`,
+        group: 'output',
+        data: sortedHours.map((h) => ({ x: h, y: userHourOutput.get(uid)?.get(h) || 0 })),
+      });
+    }
+
+    tokenUsageChart.updateSeries(tokenSeries);
   }
 
   // --- Message Count per User (hourly stacked bar, role=user only) ---
