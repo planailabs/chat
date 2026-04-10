@@ -105,15 +105,25 @@ import '../chat/style.css';
           </div>
         </section>
 
-        <!-- Token & Message Charts -->
+        <!-- Token Usage Charts -->
         <section class="grid grid-cols-1 lg:grid-cols-2 gap-8">
           <div class="p-6 rounded-xl border border-white/10 bg-white/5 h-[400px] flex flex-col shadow-sm hover:border-white/20 transition-colors">
-            <h3 class="text-sm font-medium opacity-70 mb-4">Token Usage per User (hourly)</h3>
-            <div id="chart-token-usage" class="flex-1 w-full h-full relative">
+            <h3 class="text-sm font-medium opacity-70 mb-4">Input Tokens per User (hourly)</h3>
+            <div id="chart-token-input" class="flex-1 w-full h-full relative">
               <div class="absolute inset-0 flex items-center justify-center text-xs opacity-40">Loading chart...</div>
             </div>
           </div>
 
+          <div class="p-6 rounded-xl border border-white/10 bg-white/5 h-[400px] flex flex-col shadow-sm hover:border-white/20 transition-colors">
+            <h3 class="text-sm font-medium opacity-70 mb-4">Output Tokens per User (hourly)</h3>
+            <div id="chart-token-output" class="flex-1 w-full h-full relative">
+              <div class="absolute inset-0 flex items-center justify-center text-xs opacity-40">Loading chart...</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Message Count Chart -->
+        <section class="grid grid-cols-1 lg:grid-cols-2 gap-8">
           <div class="p-6 rounded-xl border border-white/10 bg-white/5 h-[400px] flex flex-col shadow-sm hover:border-white/20 transition-colors">
             <h3 class="text-sm font-medium opacity-70 mb-4">User Messages per User (hourly)</h3>
             <div id="chart-message-count" class="flex-1 w-full h-full relative">

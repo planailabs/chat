@@ -3,7 +3,8 @@ import type { Message, Profile } from './app';
 
 let activityChart: ApexCharts | null = null;
 let usersChart: ApexCharts | null = null;
-let tokenUsageChart: ApexCharts | null = null;
+let tokenInputChart: ApexCharts | null = null;
+let tokenOutputChart: ApexCharts | null = null;
 let messageCountChart: ApexCharts | null = null;
 
 export type TokenUsage = {
@@ -129,23 +130,23 @@ export const initCharts = () => {
     usersChart.render();
   }
 
-  // 3. Token Usage (stacked bar, hourly, input vs output)
-  const tokenUsageOptions = {
-    series: [],
+  // 3 & 4. Token Input / Output per User (two separate stacked bars, hourly)
+  const tokenChartBase = {
+    series: [] as any[],
     chart: {
-      type: 'bar',
+      type: 'bar' as const,
       stacked: true,
       height: '100%',
       toolbar: { show: false },
       background: 'transparent',
       animations: { enabled: false },
-      zoom: { enabled: true, type: 'x', autoScaleYaxis: true },
+      zoom: { enabled: true, type: 'x' as const, autoScaleYaxis: true },
     },
-    theme: { mode: 'dark' },
+    theme: { mode: 'dark' as const },
     plotOptions: { bar: { borderRadius: 2, columnWidth: '80%' } },
     dataLabels: { enabled: false },
     xaxis: {
-      type: 'datetime',
+      type: 'datetime' as const,
       labels: { style: { colors: '#aaa' }, datetimeUTC: false },
       axisBorder: { show: false },
       axisTicks: { show: false },
@@ -162,15 +163,22 @@ export const initCharts = () => {
       strokeDashArray: 4,
       padding: { left: 10, right: 10, bottom: 20 },
     },
-    legend: { position: 'top', labels: { colors: '#aaa' } },
+    legend: { position: 'top' as const, labels: { colors: '#aaa' } },
     tooltip: { x: { format: 'MMM dd HH:00' } },
   };
 
-  const tokenUsageEl = document.querySelector('#chart-token-usage');
-  if (tokenUsageEl) {
-    tokenUsageEl.innerHTML = '';
-    tokenUsageChart = new ApexCharts(tokenUsageEl, tokenUsageOptions);
-    tokenUsageChart.render();
+  const tokenInputEl = document.querySelector('#chart-token-input');
+  if (tokenInputEl) {
+    tokenInputEl.innerHTML = '';
+    tokenInputChart = new ApexCharts(tokenInputEl, { ...tokenChartBase });
+    tokenInputChart.render();
+  }
+
+  const tokenOutputEl = document.querySelector('#chart-token-output');
+  if (tokenOutputEl) {
+    tokenOutputEl.innerHTML = '';
+    tokenOutputChart = new ApexCharts(tokenOutputEl, { ...tokenChartBase });
+    tokenOutputChart.render();
   }
 
   // 4. Message Count per User (stacked bar, hourly, role=user only)
@@ -276,9 +284,8 @@ export const updateCharts = (data: ChartData) => {
     },
   ]);
 
-  // --- Token Usage per User (hourly stacked bar, input + output per user) ---
-  if (tokenUsageChart && data.tokenUsage?.length) {
-    // Group: user -> hour -> { input, output }
+  // --- Token Usage per User (two separate hourly stacked bars: input & output) ---
+  if ((tokenInputChart || tokenOutputChart) && data.tokenUsage?.length) {
     const userHourInput = new Map<string, Map<number, number>>();
     const userHourOutput = new Map<string, Map<number, number>>();
     const allHours = new Set<number>();
@@ -292,14 +299,11 @@ export const updateCharts = (data: ChartData) => {
       if (!userHourInput.has(row.user_id)) userHourInput.set(row.user_id, new Map());
       if (!userHourOutput.has(row.user_id)) userHourOutput.set(row.user_id, new Map());
 
-      const inMap = userHourInput.get(row.user_id)!;
-      const outMap = userHourOutput.get(row.user_id)!;
-      inMap.set(hour, (inMap.get(hour) || 0) + input);
-      outMap.set(hour, (outMap.get(hour) || 0) + row.output_tokens);
+      userHourInput.get(row.user_id)!.set(hour, (userHourInput.get(row.user_id)!.get(hour) || 0) + input);
+      userHourOutput.get(row.user_id)!.set(hour, (userHourOutput.get(row.user_id)!.get(hour) || 0) + row.output_tokens);
       userTotalTokens.set(row.user_id, (userTotalTokens.get(row.user_id) || 0) + input + row.output_tokens);
     }
 
-    // Top 10 users by total tokens
     const topUsers = Array.from(userTotalTokens.entries())
       .sort((a, b) => b[1] - a[1])
       .slice(0, 10)
@@ -307,23 +311,19 @@ export const updateCharts = (data: ChartData) => {
 
     const sortedHours = Array.from(allHours).sort((a, b) => a - b);
 
-    // Two series per user: input (group "input") and output (group "output")
-    const tokenSeries: { name: string; group: string; data: { x: number; y: number }[] }[] = [];
-    for (const uid of topUsers) {
-      const label = resolveUserLabel(uid, profilesMap);
-      tokenSeries.push({
-        name: `${label} (in)`,
-        group: 'input',
+    if (tokenInputChart) {
+      tokenInputChart.updateSeries(topUsers.map((uid) => ({
+        name: resolveUserLabel(uid, profilesMap),
         data: sortedHours.map((h) => ({ x: h, y: userHourInput.get(uid)?.get(h) || 0 })),
-      });
-      tokenSeries.push({
-        name: `${label} (out)`,
-        group: 'output',
-        data: sortedHours.map((h) => ({ x: h, y: userHourOutput.get(uid)?.get(h) || 0 })),
-      });
+      })));
     }
 
-    tokenUsageChart.updateSeries(tokenSeries);
+    if (tokenOutputChart) {
+      tokenOutputChart.updateSeries(topUsers.map((uid) => ({
+        name: resolveUserLabel(uid, profilesMap),
+        data: sortedHours.map((h) => ({ x: h, y: userHourOutput.get(uid)?.get(h) || 0 })),
+      })));
+    }
   }
 
   // --- Message Count per User (hourly stacked bar, role=user only) ---
