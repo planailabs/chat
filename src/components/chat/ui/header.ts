@@ -338,13 +338,13 @@ export const renderHeader = ({ locale, state }: HeaderParams): string => {
 
   // Mobile: px-4 py-4, Desktop: px-8 py-6
   return `${impersonateBanner}<header class="flex w-full items-center justify-between px-4 py-4 md:px-8 md:py-6">
-    <a href="/" class="logo-link flex items-center gap-2 text-base font-semibold tracking-tight text-(--text-primary) md:text-lg focus-visible:underline">
+    <span class="logo-link flex items-center gap-2 text-base font-semibold tracking-tight text-(--text-primary) md:text-lg">
       ${LOGO_SVG}
       <span class="flex items-baseline gap-2 leading-none">
         <span>plan.ai</span>
         <span class="text-[0.5em] font-bold text-(--text-muted)">${APP_VERSION}</span>
       </span>
-    </a>
+    </span>
 
     <div class="flex items-center gap-3 text-sm text-(--text-muted) md:gap-[14px]">
       ${renderModeSwitcher(locale, state)}
