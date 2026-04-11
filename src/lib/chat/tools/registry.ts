@@ -41,7 +41,7 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'get_identity',
       description:
-        'Get the identity of the current customer associated with this token. Returns customer_id, customer_name, and token_kind.',
+        'Get the identity of the current cluster associated with this token. Returns cluster_id, cluster_name, organization_id, token_kind, and cluster_ids (all cluster IDs this token can access).',
       input_schema: obj(),
     },
     endpoint: { method: 'GET', path: '/api/self' },
@@ -50,9 +50,18 @@ export const TOOLS: ToolEntry[] = [
   // ── Config ───────────────────────────────────────────────────────────────
   {
     tool: {
+      name: 'get_config_schema',
+      description:
+        'Get the JSON Schema describing all valid configuration fields and their types. Use this to understand what config keys exist and their constraints before reading or updating the config.',
+      input_schema: obj(),
+    },
+    endpoint: { method: 'GET', path: '/api/setting/config/schema' },
+  },
+  {
+    tool: {
       name: 'get_config',
       description:
-        'Get the current JSON configuration for this customer. Returns the full config object.',
+        'Get the current JSON configuration for this cluster. Returns the full config object.',
       input_schema: obj(),
     },
     endpoint: { method: 'GET', path: '/api/setting/config' },
@@ -61,7 +70,7 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'set_config',
       description:
-        'Replace the entire JSON configuration for this customer. Pass the full config as a JSON object.',
+        'Replace the entire JSON configuration for this cluster. Pass the full config as a JSON object.',
       input_schema: {
         type: 'object' as const,
         description: 'The full configuration object. Its top-level keys are section names (e.g. "global", "daemon").',
@@ -93,7 +102,7 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'list_skills',
       description:
-        'List all skills currently assigned to this customer. Returns id, skill_slug, skill_name, skill_description, channel, installed, installed_bundle, and customer_skill_id (only present for direct assignments) for each.',
+        'List all skills currently assigned to this cluster. Returns id, skill_slug, skill_name, skill_description, channel, installed, installed_bundle, and cluster_skill_id (only present for direct assignments) for each.',
       input_schema: obj(),
     },
     endpoint: { method: 'GET', path: '/api/setting/skills' },
@@ -102,7 +111,7 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'add_skill',
       description:
-        'Add a single skill to this customer by skill channel ID (UUID). Use available_skill_channels to find the ID first. Prefer batch_skills when adding multiple skills.',
+        'Add a single skill to this cluster by skill channel ID (UUID). Use available_skill_channels to find the ID first. Prefer batch_skills when adding multiple skills.',
       input_schema: obj(
         { skill_channel_id: { type: 'string', description: 'The UUID of the skill channel to add.' } },
         ['skill_channel_id'],
@@ -114,7 +123,7 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'batch_skills',
       description:
-        'Batch add and/or remove skill assignments in a single call. `add` contains skill_channel_ids to assign (duplicates skipped). `remove` contains customer_skill_ids to delete. Both fields are optional and default to empty.',
+        'Batch add and/or remove skill assignments in a single call. `add` contains skill_channel_ids to assign (duplicates skipped). `remove` contains cluster_skill_ids to delete. Both fields are optional and default to empty.',
       input_schema: {
         type: 'object' as const,
         properties: {
@@ -126,7 +135,7 @@ export const TOOLS: ToolEntry[] = [
           remove: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Customer skill assignment UUIDs to remove.',
+            description: 'Cluster skill assignment UUIDs to remove.',
           },
         },
       },
@@ -137,9 +146,9 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'remove_skill',
       description:
-        'Remove a skill assignment from this customer by its customer_skill_id (UUID). Use list_skills to find the ID.',
+        'Remove a skill assignment from this cluster by its cluster_skill_id (UUID). Use list_skills to find the ID.',
       input_schema: obj(
-        { id: { type: 'string', description: 'The customer_skill_id (UUID) of the assignment to remove.' } },
+        { id: { type: 'string', description: 'The cluster_skill_id (UUID) of the assignment to remove.' } },
         ['id'],
       ),
     },
@@ -149,7 +158,7 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'available_skill_channels',
       description:
-        'List all available skill channels that can be added. Returns id, skill_slug, skill_name, skill_description, channel, installed, installed_bundle, and customer_skill_id for each.',
+        'List all available skill channels that can be added. Returns id, skill_slug, skill_name, skill_description, channel, installed, installed_bundle, and cluster_skill_id for each.',
       input_schema: obj(),
     },
     endpoint: { method: 'GET', path: '/api/setting/available/skill-channels' },
@@ -160,7 +169,7 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'list_bundles',
       description:
-        'List all application bundles currently assigned to this customer. Returns customer_bundle_id, bundle_slug, bundle_name, and bundle_description.',
+        'List all application bundles currently assigned to this cluster. Returns cluster_bundle_id, bundle_slug, bundle_name, and bundle_description.',
       input_schema: obj(),
     },
     endpoint: { method: 'GET', path: '/api/setting/bundles' },
@@ -169,7 +178,7 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'add_bundle',
       description:
-        'Add a single application bundle to this customer by bundle ID (UUID). Use available_bundles to find the ID first. Prefer batch_bundles when adding multiple bundles.',
+        'Add a single application bundle to this cluster by bundle ID (UUID). Use available_bundles to find the ID first. Prefer batch_bundles when adding multiple bundles.',
       input_schema: obj(
         { bundle_id: { type: 'string', description: 'The UUID of the bundle to add.' } },
         ['bundle_id'],
@@ -181,7 +190,7 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'batch_bundles',
       description:
-        'Batch add and/or remove bundle assignments in a single call. `add` contains bundle_ids to assign (duplicates skipped). `remove` contains customer_bundle_ids to delete. Both fields are optional and default to empty.',
+        'Batch add and/or remove bundle assignments in a single call. `add` contains bundle_ids to assign (duplicates skipped). `remove` contains cluster_bundle_ids to delete. Both fields are optional and default to empty.',
       input_schema: {
         type: 'object' as const,
         properties: {
@@ -193,7 +202,7 @@ export const TOOLS: ToolEntry[] = [
           remove: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Customer bundle assignment UUIDs to remove.',
+            description: 'Cluster bundle assignment UUIDs to remove.',
           },
         },
       },
@@ -204,9 +213,9 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'remove_bundle',
       description:
-        'Remove a bundle assignment from this customer by its customer_bundle_id (UUID). Use list_bundles to find the ID.',
+        'Remove a bundle assignment from this cluster by its cluster_bundle_id (UUID). Use list_bundles to find the ID.',
       input_schema: obj(
-        { id: { type: 'string', description: 'The customer_bundle_id (UUID) of the assignment to remove.' } },
+        { id: { type: 'string', description: 'The cluster_bundle_id (UUID) of the assignment to remove.' } },
         ['id'],
       ),
     },
@@ -227,7 +236,7 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'list_mcp_servers',
       description:
-        'List all MCP servers currently assigned to this customer. Returns id, slug, name, description, installed, installed_bundle, installed_transitive, and customer_mcp_server_id (only present for direct assignments) for each.',
+        'List all MCP servers currently assigned to this cluster. Returns id, slug, name, description, installed, installed_bundle, installed_transitive, and cluster_mcp_server_id (only present for direct assignments) for each.',
       input_schema: obj(),
     },
     endpoint: { method: 'GET', path: '/api/setting/mcp-servers' },
@@ -236,7 +245,7 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'add_mcp_server',
       description:
-        'Add a single MCP server to this customer by server ID (UUID). Use available_mcp_servers to find the ID first. Prefer batch_mcp_servers when adding multiple servers.',
+        'Add a single MCP server to this cluster by server ID (UUID). Use available_mcp_servers to find the ID first. Prefer batch_mcp_servers when adding multiple servers.',
       input_schema: obj(
         { mcp_server_id: { type: 'string', description: 'The UUID of the MCP server to add.' } },
         ['mcp_server_id'],
@@ -248,7 +257,7 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'batch_mcp_servers',
       description:
-        'Batch add and/or remove MCP server assignments in a single call. `add` contains mcp_server_ids to assign (duplicates skipped). `remove` contains customer_mcp_server_ids to delete. Both fields are optional and default to empty.',
+        'Batch add and/or remove MCP server assignments in a single call. `add` contains mcp_server_ids to assign (duplicates skipped). `remove` contains cluster_mcp_server_ids to delete. Both fields are optional and default to empty.',
       input_schema: {
         type: 'object' as const,
         properties: {
@@ -260,7 +269,7 @@ export const TOOLS: ToolEntry[] = [
           remove: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Customer MCP server assignment UUIDs to remove.',
+            description: 'Cluster MCP server assignment UUIDs to remove.',
           },
         },
       },
@@ -271,9 +280,9 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'remove_mcp_server',
       description:
-        'Remove an MCP server assignment from this customer by its customer_mcp_server_id (UUID). Use list_mcp_servers to find the ID.',
+        'Remove an MCP server assignment from this cluster by its cluster_mcp_server_id (UUID). Use list_mcp_servers to find the ID.',
       input_schema: obj(
-        { id: { type: 'string', description: 'The customer_mcp_server_id (UUID) of the assignment to remove.' } },
+        { id: { type: 'string', description: 'The cluster_mcp_server_id (UUID) of the assignment to remove.' } },
         ['id'],
       ),
     },
@@ -283,7 +292,7 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'available_mcp_servers',
       description:
-        'List all available MCP servers that can be added. Returns id, slug, name, description, installed, installed_bundle, installed_transitive, and customer_mcp_server_id for each.',
+        'List all available MCP servers that can be added. Returns id, slug, name, description, installed, installed_bundle, installed_transitive, and cluster_mcp_server_id for each.',
       input_schema: obj(),
     },
     endpoint: { method: 'GET', path: '/api/setting/available/mcp-servers' },
@@ -294,7 +303,7 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'list_mcp_bundles',
       description:
-        'List all MCP bundles currently assigned to this customer. Returns customer_mcp_bundle_id, bundle_slug, bundle_name, and bundle_description.',
+        'List all MCP bundles currently assigned to this cluster. Returns cluster_mcp_bundle_id, bundle_slug, bundle_name, and bundle_description.',
       input_schema: obj(),
     },
     endpoint: { method: 'GET', path: '/api/setting/mcp-bundles' },
@@ -303,7 +312,7 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'add_mcp_bundle',
       description:
-        'Add a single MCP bundle to this customer by bundle ID (UUID). Use available_mcp_bundles to find the ID first. Prefer batch_mcp_bundles when adding multiple bundles.',
+        'Add a single MCP bundle to this cluster by bundle ID (UUID). Use available_mcp_bundles to find the ID first. Prefer batch_mcp_bundles when adding multiple bundles.',
       input_schema: obj(
         { bundle_id: { type: 'string', description: 'The UUID of the MCP bundle to add.' } },
         ['bundle_id'],
@@ -315,7 +324,7 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'batch_mcp_bundles',
       description:
-        'Batch add and/or remove MCP bundle assignments in a single call. `add` contains bundle_ids to assign (duplicates skipped). `remove` contains customer_mcp_bundle_ids to delete. Both fields are optional and default to empty.',
+        'Batch add and/or remove MCP bundle assignments in a single call. `add` contains bundle_ids to assign (duplicates skipped). `remove` contains cluster_mcp_bundle_ids to delete. Both fields are optional and default to empty.',
       input_schema: {
         type: 'object' as const,
         properties: {
@@ -327,7 +336,7 @@ export const TOOLS: ToolEntry[] = [
           remove: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Customer MCP bundle assignment UUIDs to remove.',
+            description: 'Cluster MCP bundle assignment UUIDs to remove.',
           },
         },
       },
@@ -338,9 +347,9 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'remove_mcp_bundle',
       description:
-        'Remove an MCP bundle assignment from this customer by its customer_mcp_bundle_id (UUID). Use list_mcp_bundles to find the ID.',
+        'Remove an MCP bundle assignment from this cluster by its cluster_mcp_bundle_id (UUID). Use list_mcp_bundles to find the ID.',
       input_schema: obj(
-        { id: { type: 'string', description: 'The customer_mcp_bundle_id (UUID) of the assignment to remove.' } },
+        { id: { type: 'string', description: 'The cluster_mcp_bundle_id (UUID) of the assignment to remove.' } },
         ['id'],
       ),
     },
@@ -387,7 +396,7 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'list_ssh_keys',
       description:
-        'List all SSH keys for this customer. Returns id, fingerprint (SHA256), comment, and created_at for each.',
+        'List all SSH keys for this cluster. Returns id, fingerprint (SHA256), comment, and created_at for each.',
       input_schema: obj(),
     },
     endpoint: { method: 'GET', path: '/api/setting/ssh-keys' },
@@ -396,7 +405,7 @@ export const TOOLS: ToolEntry[] = [
     tool: {
       name: 'add_ssh_key',
       description:
-        'Add an SSH public key for this customer. The API parses the key to extract the fingerprint and comment.',
+        'Add an SSH public key for this cluster. The API parses the key to extract the fingerprint and comment.',
       input_schema: obj(
         { public_key: { type: 'string', description: 'The full SSH public key string.' } },
         ['public_key'],
