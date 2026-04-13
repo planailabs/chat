@@ -13,7 +13,7 @@ CREATE TABLE public.system_prompt_extensions (
 -- Auto-update updated_at
 CREATE TRIGGER system_prompt_extensions_set_updated_at
   BEFORE UPDATE ON public.system_prompt_extensions
-  FOR EACH ROW EXECUTE FUNCTION private.set_updated_at();
+  FOR EACH ROW EXECUTE FUNCTION public.touch_updated_at();
 
 -- RLS: deny by default, admin full access (service role bypasses)
 ALTER TABLE public.system_prompt_extensions ENABLE ROW LEVEL SECURITY;
