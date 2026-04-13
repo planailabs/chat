@@ -183,7 +183,20 @@ export async function handleChatMessage(
     return null;
   })();
 
-  const [prepareResult, loadedRecord] = await Promise.all([preparePromise, recordPromise]);
+  // Fetch per-user system prompt extension in parallel
+  const extensionPromise: Promise<string | undefined> = supabase
+    ? Promise.resolve(
+        supabase
+          .from('system_prompt_extensions')
+          .select('content')
+          .eq('user_id', userId)
+          .eq('mode', mode.modeColumn)
+          .maybeSingle(),
+      ).then(({ data }) => (data?.content as string) ?? undefined)
+       .catch(() => undefined)
+    : Promise.resolve(undefined);
+
+  const [prepareResult, loadedRecord, promptExtension] = await Promise.all([preparePromise, recordPromise, extensionPromise]);
 
   // Check if prepare() signaled failure (e.g. missing customer token)
   if (mode.prepare && prepareResult === null) {
@@ -193,6 +206,9 @@ export async function handleChatMessage(
 
   if (prepareResult) {
     modeContext = prepareResult;
+  }
+  if (promptExtension) {
+    modeContext.systemPromptExtension = promptExtension;
   }
 
   if (loadedRecord) {

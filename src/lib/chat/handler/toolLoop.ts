@@ -50,7 +50,11 @@ export async function runToolLoop(
   for (const [k, v] of Object.entries(modeContext)) {
     if (typeof v === 'string') extraContext[k] = v;
   }
-  const systemPrompt = mode.buildSystemPrompt(locale, extraContext);
+  const baseSystemPrompt = mode.buildSystemPrompt(locale, extraContext);
+  const promptExtension = modeContext.systemPromptExtension as string | undefined;
+  const systemPrompt = promptExtension
+    ? `${baseSystemPrompt}\n\n${promptExtension}`
+    : baseSystemPrompt;
   const tools = mode.buildToolDefinitions();
 
   // Cache breakpoint on system prompt

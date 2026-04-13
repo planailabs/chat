@@ -95,6 +95,21 @@ export const GET: APIRoute = async ({ request }) => {
 
   const profileMap = new Map((profiles ?? []).map((p: any) => [p.user_id, p]));
 
+  // Fetch system prompt extensions for matching users
+  const { data: extensions } = userIds.length > 0
+    ? await supabase
+        .from('system_prompt_extensions')
+        .select('user_id, mode')
+        .in('user_id', userIds)
+    : { data: [] };
+
+  const extensionMap = new Map<string, string[]>();
+  for (const ext of extensions ?? []) {
+    const list = extensionMap.get(ext.user_id) ?? [];
+    list.push(ext.mode);
+    extensionMap.set(ext.user_id, list);
+  }
+
   const results = matchingUsers.map((u) => {
     const profile = profileMap.get(u.id) as any;
     const pi = profile?.provider_identity ?? {};
@@ -108,6 +123,7 @@ export const GET: APIRoute = async ({ request }) => {
       newsletterOptIn: profile?.newsletter_opt_in ?? null,
       customerToken: profile?.customer_token ?? null,
       pendingDeletion: profile?.pending_deletion ?? false,
+      systemPromptExtensions: extensionMap.get(u.id) ?? [],
     };
   });
 
