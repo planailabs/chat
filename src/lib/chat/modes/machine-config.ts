@@ -21,7 +21,7 @@ export const machineConfigMode: ChatModeConfig = {
   messagesTable: 'chat_messages',
   modeColumn: 'machine_config',
   maxChars: 1024,
-  model: 'claude-sonnet-4-20250514',
+  model: 'claude-sonnet-4-5',
   maxTokens: 2048,
 
   buildSystemPrompt(locale: string, extraContext?: Record<string, string>): string {

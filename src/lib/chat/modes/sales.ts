@@ -88,7 +88,7 @@ export const salesMode: ChatModeConfig = {
   messagesTable: 'chat_messages',
   modeColumn: 'sales',
   maxChars: 2048,
-  model: 'claude-sonnet-4-20250514',
+  model: 'claude-sonnet-4-5',
   maxTokens: 2048,
 
   buildSystemPrompt(locale: string): string {
