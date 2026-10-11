@@ -42,8 +42,10 @@ stdenv.mkDerivation (finalAttrs: {
 
   pnpmDeps = fetchPnpmDeps {
     inherit (finalAttrs) pname version src;
-    fetcherVersion = 3;
-    hash = "sha256-lt76DuRH2XXzFbnGVnKDTJxbWGAywywucVNnbDA1SPs=";
+    # 3 is refused with pnpm_11 (nixpkgs 26.11); the hash below is
+    # fetcherVersion 4's.
+    fetcherVersion = 4;
+    hash = "sha256-gkzDAg/GVIoAcQKQqNTyZQ05jq9SJ9sEg9RMG4uuSbo=";
   };
 
   buildPhase = ''
