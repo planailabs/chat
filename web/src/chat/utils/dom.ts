@@ -62,3 +62,20 @@ export const delegateEvent = <E extends Event = Event>(
 export const dispatch = (name: string, detail?: unknown): void => {
   document.dispatchEvent(new CustomEvent(name, { detail }));
 };
+
+let replacing = 0;
+
+/**
+ * Replaces an element's markup. Focus lost because of it (an input removed by
+ * a re-render) is not the user leaving the field: see `isReplacingMarkup`.
+ */
+export const replaceMarkup = (el: HTMLElement, html: string): void => {
+  replacing++;
+  try {
+    el.innerHTML = html;
+  } finally {
+    replacing--;
+  }
+};
+
+export const isReplacingMarkup = (): boolean => replacing > 0;

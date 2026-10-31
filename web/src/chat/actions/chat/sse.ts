@@ -1,17 +1,16 @@
 /**
- * Chat SSE — the EventSource on /api/v1/chat/events for the active mode
- * (cookie session): connect, reconnect with backoff, disconnect.
+ * Chat SSE — the EventSource on /api/v1/chat/events (cookie session), one for
+ * all the user's conversations: connect, reconnect with backoff, disconnect.
  */
 
 import { store } from '../../app/store';
-import { api, CHAT_EVENT_NAMES, type ChatModeId } from '../../api';
-import { handleServerEvent } from './events';
-import { resyncHistory } from './session';
+import { api, CHAT_EVENT_NAMES } from '../../api';
+import { routeServerEvent } from './events';
+import { resyncAll } from './session';
 
 let eventSource: EventSource | null = null;
-let eventSourceMode: ChatModeId | null = null;
 
-/** Whether the close was intentional (sign-out, mode switch) — suppress reconnect */
+/** Whether the close was intentional (sign-out) — suppress reconnect */
 let intentionalClose = false;
 
 let reconnectAttempt = 0;
@@ -31,20 +30,18 @@ const scheduleReconnect = () => {
 };
 
 /**
- * Opens the event stream for the active mode. Resolves once it is open, so
- * a message sent afterwards can't miss its reply.
+ * Opens the event stream. Resolves once it is open, so a message sent
+ * afterwards can't miss its reply.
  */
 export const connectEvents = (): Promise<void> => {
-  const mode = store.state.activeChatMode;
-  if (eventSource && eventSourceMode === mode && eventSource.readyState === EventSource.OPEN) return Promise.resolve();
+  if (eventSource && eventSource.readyState === EventSource.OPEN) return Promise.resolve();
   if (connectPromise) return connectPromise;
   if (!store.state.isAuthenticated) return Promise.resolve();
 
   intentionalClose = false;
   eventSource?.close();
-  const es = new EventSource(api.chat.eventsUrl(mode));
+  const es = new EventSource(api.chat.eventsUrl);
   eventSource = es;
-  eventSourceMode = mode;
   const isReconnect = reconnectAttempt > 0;
 
   // Listeners before open: nothing between open and registration is lost.
@@ -53,7 +50,7 @@ export const connectEvents = (): Promise<void> => {
       // The connection's own 'error' events carry no data.
       if (!(event instanceof MessageEvent) || typeof event.data !== 'string') return;
       try {
-        handleServerEvent(name, JSON.parse(event.data));
+        routeServerEvent(name, JSON.parse(event.data));
       } catch (err) {
         console.error('[sse-client] Failed to handle event:', name, err);
       }
@@ -64,7 +61,7 @@ export const connectEvents = (): Promise<void> => {
     es.onopen = () => {
       reconnectAttempt = 0;
       // Events may have been missed while disconnected.
-      if (isReconnect) void resyncHistory();
+      if (isReconnect) void resyncAll();
       resolve();
     };
     es.onerror = (event) => {
@@ -75,7 +72,6 @@ export const connectEvents = (): Promise<void> => {
       console.warn('[sse-client] EventSource error/disconnected');
       es.close();
       eventSource = null;
-      eventSourceMode = null;
       scheduleReconnect();
     };
   });
@@ -86,7 +82,7 @@ export const connectEvents = (): Promise<void> => {
   return opened;
 };
 
-/** Closes the event stream and suppresses reconnects (sign-out, mode switch). */
+/** Closes the event stream and suppresses reconnects (sign-out). */
 export const disconnectEvents = () => {
   intentionalClose = true;
   reconnectAttempt = 0;
@@ -97,5 +93,4 @@ export const disconnectEvents = () => {
   }
   eventSource?.close();
   eventSource = null;
-  eventSourceMode = null;
 };

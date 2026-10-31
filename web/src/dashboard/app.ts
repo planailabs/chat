@@ -122,7 +122,7 @@ function render() {
       </td>
       <td class="p-4 text-xs">
         <div class="flex items-center gap-2 overflow-hidden">
-          <span class="shrink-0 px-2 py-0.5 rounded-full border border-white/10 opacity-60">${escapeHtml(msg.mode)} · ${escapeHtml(msg.role)}</span>
+          <span class="shrink-0 max-w-[220px] truncate px-2 py-0.5 rounded-full border border-white/10 opacity-60">${conversationLabel(msg)} · ${escapeHtml(msg.role)}</span>
           <span class="preview font-mono opacity-80 overflow-hidden text-ellipsis whitespace-nowrap max-w-[400px]"></span>
         </div>
       </td>
@@ -136,6 +136,11 @@ function render() {
 
     tableBody.appendChild(tr);
   }
+}
+
+/** The message's conversation title (escaped), or a dash when it has none. */
+function conversationLabel(msg: AdminMessage): string {
+  return msg.conversation?.trim() ? escapeHtml(msg.conversation) : '—';
 }
 
 function openModal(msg: AdminMessage) {
@@ -153,7 +158,7 @@ function openModal(msg: AdminMessage) {
         ${COPY_ICON}
       </button>
       <span class="mx-2 opacity-50">•</span>
-      <span>${escapeHtml(msg.mode)} · ${escapeHtml(msg.role)}</span>
+      <span>${conversationLabel(msg)} · ${escapeHtml(msg.role)}</span>
       <span class="mx-2 opacity-50">•</span>
       <span>${new Date(msg.created_at).toLocaleString()}</span>
     </div>

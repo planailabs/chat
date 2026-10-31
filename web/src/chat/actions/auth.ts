@@ -9,30 +9,37 @@ import { store } from '../app/store';
 import { cacheUserState, clearCachedUserState, persistLocaleSelection, signedOutUserState } from '../app/state';
 import { profileLoadError, profileLoadSuccess, profileStartLoading } from '../app/profileState';
 import { api, isUnauthorized, signIn, signOut, stopImpersonation, type Profile } from '../api';
+import { conversationIdFromPath } from '../app/route';
 import { locales } from '../content';
 import { getLocaleDateString } from '../utils/date';
 import { applyThemeMode } from './theme';
 import {
   clearAllCachedChatMessages,
-  clearPendingSalesPrompt,
-  consumePendingSalesPrompt,
+  clearPendingPrompt,
+  connectEvents,
+  consumePendingPrompt,
   disconnectEvents,
-  openChat,
-  sendPendingSalesPrompt,
+  loadConversations,
+  openConversation,
+  readPendingPrompt,
+  sendPendingPrompt,
   showAnonymousChat,
 } from './chat';
 
 // ─── Sign-in / sign-out ─────────────────────────────────────────────────────
 
-/** Sends the browser to sign-in; it comes back to the chat. */
+/**
+ * Sends the browser to sign-in; it comes back to the page it left (a typed
+ * prompt starts a new chat, so that one comes back to `/`).
+ */
 export const handleSignIn = () => {
   store.setState({ isAuthMenuOpen: false });
-  signIn('/');
+  signIn(readPendingPrompt() ? '/' : window.location.pathname);
 };
 
 /** Forgets everything stored for the user in this browser, then signs out. */
 export const handleSignOut = () => {
-  clearPendingSalesPrompt();
+  clearPendingPrompt();
   clearCachedUserState();
   clearAllCachedChatMessages();
   disconnectEvents();
@@ -60,7 +67,7 @@ export const handlePendingDeletionSignOut = (requestedAt: number | null) => {
 const applySignedOut = () => {
   const state = store.state;
   const wasAuthenticated = state.isAuthenticated;
-  Object.assign(state, signedOutUserState(), { activeChatMode: 'sales' });
+  Object.assign(state, signedOutUserState());
   cacheUserState(state);
   if (wasAuthenticated) {
     // The cached conversation belonged to a session that has ended.
@@ -91,21 +98,7 @@ const applyProfile = (profile: Profile) => {
   }
 };
 
-const loadModes = async () => {
-  const state = store.state;
-  try {
-    const modes = await api.chat.modes();
-    state.availableModes = modes.filter((m) => m.available).map((m) => m.id);
-  } catch (error) {
-    console.error('[chat] loading the chat modes failed', error);
-    state.availableModes = ['sales'];
-  }
-  if (!state.availableModes.includes(state.activeChatMode)) {
-    state.activeChatMode = 'sales';
-  }
-};
-
-/** Loads who is signed in, then their conversation. */
+/** Loads who is signed in, then their conversations and the one in the URL. */
 export const startSession = async () => {
   const state = store.state;
   profileStartLoading(state.profile);
@@ -127,14 +120,15 @@ export const startSession = async () => {
     handlePendingDeletionSignOut(state.profile.deletionRequestedAt);
     return;
   }
-  await loadModes();
   cacheUserState(state);
   store.notify();
 
-  const pendingPrompt = profile.impersonating ? null : consumePendingSalesPrompt();
+  void connectEvents();
+  void loadConversations();
+  const pendingPrompt = profile.impersonating ? null : consumePendingPrompt();
   if (pendingPrompt) {
-    await sendPendingSalesPrompt(pendingPrompt);
+    await sendPendingPrompt(pendingPrompt);
   } else {
-    await openChat();
+    await openConversation(conversationIdFromPath(window.location.pathname), 'none');
   }
 };

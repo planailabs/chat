@@ -1,21 +1,9 @@
-import type { ChatModeId } from '../api';
-
 export type LocaleKey = 'en' | 'de';
 
 export interface StreamConfig {
   initialDelayMs: number;
   chunkSize: number;
   intervalMs: number;
-}
-
-export interface ChatModeLocale {
-  heroBadgeLabel: string;
-  heading: string;
-  placeholder: string;
-  cancelLabel: string;
-  configuringLabel: string;
-  /** Sent for the user when the conversation is empty ('' = none). */
-  greeting: string;
 }
 
 export interface PreferencePromptLocale {
@@ -44,12 +32,35 @@ export interface LocaleContent {
       signOutLabel: string;
     };
     settingsLabel: string;
-    newConversationLabel: string;
+  };
+  /** The conversations sidebar. */
+  sidebar: {
+    open: string;
+    close: string;
+    newChat: string;
+    groups: { today: string; yesterday: string; previous7Days: string; older: string };
+    empty: string;
+    rename: string;
+    delete: string;
+    /** `{{title}}`: the conversation's title. */
+    deleteConfirm: string;
+    /** A conversation is answering or has news. */
+    activity: string;
+    applications: string;
+    /** Screen readers: the link opens in a new tab. */
+    newTab: string;
   };
   composer: {
     submitLabel: string;
   };
   chat: {
+    /** The empty chat's heading. */
+    heading: string;
+    placeholder: string;
+    /** Dismisses a question. */
+    skipLabel: string;
+    /** While the assistant runs a tool. */
+    workingLabel: string;
     /** Shown to anonymous users after their first prompt. */
     loginInvite: {
       text: string;
@@ -105,7 +116,6 @@ export interface LocaleContent {
     termsUrl: string;
     privacyUrl: string;
   };
-  chatModes: Record<ChatModeId, ChatModeLocale>;
   preferencePrompts: Record<string, PreferencePromptLocale>;
 }
 
@@ -132,12 +142,28 @@ const en: LocaleContent = {
       signOutLabel: 'Sign out',
     },
     settingsLabel: 'Settings',
-    newConversationLabel: 'New conversation',
+  },
+  sidebar: {
+    open: 'Show conversations',
+    close: 'Hide conversations',
+    newChat: 'New chat',
+    groups: { today: 'Today', yesterday: 'Yesterday', previous7Days: 'Previous 7 days', older: 'Older' },
+    empty: 'No conversations yet.',
+    rename: 'Rename',
+    delete: 'Delete',
+    deleteConfirm: 'Delete “{{title}}”? This can’t be undone.',
+    activity: 'New activity',
+    applications: 'Applications',
+    newTab: 'opens in a new tab',
   },
   composer: {
     submitLabel: 'Send',
   },
   chat: {
+    heading: 'What can we do for you?',
+    placeholder: 'Ask about plan.ai, or tell me what your Mac should do…',
+    skipLabel: 'Skip',
+    workingLabel: 'Working…',
     loginInvite: {
       text: 'Please sign in to chat with our assistant.',
       stream: defaultStream,
@@ -198,24 +224,6 @@ const en: LocaleContent = {
     termsUrl: '/legal-en.md',
     privacyUrl: '/legal-en.md',
   },
-  chatModes: {
-    machine_config: {
-      heroBadgeLabel: 'Machine configuration',
-      heading: 'What should your Mac do?',
-      placeholder: 'Install dev tools, add MCP servers, show my config...',
-      cancelLabel: 'Skip',
-      configuringLabel: 'Configuring…',
-      greeting: 'Hello',
-    },
-    sales: {
-      heroBadgeLabel: 'Sales',
-      heading: 'How can we help your team?',
-      placeholder: 'Tell us about your Mac fleet...',
-      cancelLabel: 'Skip',
-      configuringLabel: 'Thinking…',
-      greeting: '',
-    },
-  },
   preferencePrompts: {
     newsletter: {
       question: 'Would you like to subscribe to our newsletter to stay updated on new features and upgrades?',
@@ -245,12 +253,28 @@ const de: LocaleContent = {
       signOutLabel: 'Abmelden',
     },
     settingsLabel: 'Einstellungen',
-    newConversationLabel: 'Neues Gespräch',
+  },
+  sidebar: {
+    open: 'Gespräche anzeigen',
+    close: 'Gespräche ausblenden',
+    newChat: 'Neuer Chat',
+    groups: { today: 'Heute', yesterday: 'Gestern', previous7Days: 'Letzte 7 Tage', older: 'Älter' },
+    empty: 'Noch keine Gespräche.',
+    rename: 'Umbenennen',
+    delete: 'Löschen',
+    deleteConfirm: '„{{title}}“ löschen? Das kann nicht rückgängig gemacht werden.',
+    activity: 'Neue Aktivität',
+    applications: 'Anwendungen',
+    newTab: 'öffnet in einem neuen Tab',
   },
   composer: {
     submitLabel: 'Senden',
   },
   chat: {
+    heading: 'Was können wir für dich tun?',
+    placeholder: 'Frag nach plan.ai oder sag mir, was dein Mac können soll…',
+    skipLabel: 'Überspringen',
+    workingLabel: 'Arbeite…',
     loginInvite: {
       text: 'Bitte melde dich an, um mit unserem Assistenten zu chatten.',
       stream: defaultStream,
@@ -310,24 +334,6 @@ const de: LocaleContent = {
     privacyLabel: 'Datenschutzrichtlinien',
     termsUrl: '/legal-de.md',
     privacyUrl: '/legal-de.md',
-  },
-  chatModes: {
-    machine_config: {
-      heroBadgeLabel: 'Maschinenkonfiguration',
-      heading: 'Was soll dein Mac können?',
-      placeholder: 'Dev-Tools installieren, MCP-Server hinzufügen, Config anzeigen...',
-      cancelLabel: 'Überspringen',
-      configuringLabel: 'Konfiguriere…',
-      greeting: 'Hallo',
-    },
-    sales: {
-      heroBadgeLabel: 'Vertrieb',
-      heading: 'Wie können wir deinem Team helfen?',
-      placeholder: 'Erzähl uns von deiner Mac-Flotte...',
-      cancelLabel: 'Überspringen',
-      configuringLabel: 'Denke nach…',
-      greeting: '',
-    },
   },
   preferencePrompts: {
     newsletter: {

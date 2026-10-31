@@ -97,14 +97,12 @@ export interface ProfileUpdate {
   newsletter_source?: 'chat_flow' | 'settings';
 }
 
-export type ChatModeId = 'sales' | 'machine_config';
-
-export interface ChatMode {
-  id: ChatModeId;
-  /** Offered to the user (modes acting on a service need it reachable). */
-  available: boolean;
-  /** The user has a conversation in it. */
-  active: boolean;
+/** One of the user's conversations (`GET /api/v1/chat`, newest first). */
+export interface Conversation {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface QuestionData {
@@ -139,29 +137,40 @@ export interface PendingQuestion {
 }
 
 export interface History {
+  id: string;
+  title: string;
   messages: HistoryMessage[];
-  /** Absent when there is no conversation yet. */
-  phase?: string | null;
-  pending_questions?: PendingQuestion[] | null;
-  pending_approvals?: ApprovalData[] | null;
-  auto_approve?: boolean;
+  phase: string | null;
+  pending_questions: PendingQuestion[] | null;
+  pending_approvals: ApprovalData[] | null;
+  auto_approve: boolean;
 }
 
-/** Server-sent events of `/api/v1/chat/events`, by event name. */
+/** An event without a payload (besides its conversation). */
+type Empty = { conversation?: string };
+
+/**
+ * Server-sent events of `/api/v1/chat/events`, by event name. One stream
+ * carries all the user's conversations: every event but `resync` names its
+ * `conversation`.
+ */
 export interface ChatEvents {
-  thinking: Record<string, never>;
+  thinking: Empty;
   text_delta: { content: string };
   text_done: { content: string };
   tool_start: { name: string };
   tool_end: { name: string };
   question: QuestionData;
   approval: ApprovalData;
-  done: Record<string, never>;
+  done: Empty;
   error: { message: string };
-  resync: Record<string, never>;
+  resync: Empty;
 }
 
 export type ChatEventName = keyof ChatEvents;
+
+/** An event's data as it arrives: tagged with its conversation. */
+export type ConversationEvent<E extends ChatEventName = ChatEventName> = ChatEvents[E] & { conversation?: string };
 
 export const CHAT_EVENT_NAMES: ChatEventName[] = [
   'thinking',
@@ -193,7 +202,8 @@ export interface AdminMessage {
   id: number;
   user_id: string;
   email: string;
-  mode: string;
+  /** The conversation's title. */
+  conversation: string | null;
   role: string;
   content: string;
   created_at: string;
@@ -203,13 +213,12 @@ export interface UserHit {
   id: string;
   email: string;
   name: string;
-  /** Modes with a prompt extension. */
-  extension_modes: string[];
+  has_extension: boolean;
 }
 
 export interface PromptExtension {
-  mode: string;
   content: string;
+  updated_at: string;
 }
 
 export interface StaffPing {
@@ -238,29 +247,32 @@ export const api = {
   },
 
   chat: {
-    modes: () => request<ChatMode[]>('GET', '/api/v1/chat'),
-    history: (mode: ChatModeId) => request<History>('POST', '/api/v1/chat/history', { mode }),
-    send: (mode: ChatModeId, text: string, lang: Language) => request<Ok>('POST', '/api/v1/chat/send', { mode, text, lang }),
+    list: () => request<Conversation[]>('GET', '/api/v1/chat'),
+    /** 404: the conversation is gone. */
+    history: (id: string) => request<History>('POST', '/api/v1/chat/history', { id }),
+    /** No `id`: starts a new conversation. Returns the conversation's id. */
+    send: (id: string | null, text: string, lang: Language) =>
+      request<{ id: string }>('POST', '/api/v1/chat/send', id ? { id, text, lang } : { text, lang }),
     /** `content` absent: the user dismissed the question. */
-    answer: (mode: ChatModeId, callId: string, content?: string) =>
-      request<Ok>('POST', '/api/v1/chat/answer', content === undefined ? { mode, call_id: callId } : { mode, call_id: callId, content }),
-    approve: (mode: ChatModeId, callId: string, approved: boolean, options: { all?: boolean; reason?: string } = {}) =>
-      request<Ok>('POST', '/api/v1/chat/approve', { mode, call_id: callId, approved, ...options }),
-    /** Ends the conversation; the next message starts a new one. */
-    reset: (mode: ChatModeId) => request<Ok>('POST', '/api/v1/chat/reset', { mode }),
-    eventsUrl: (mode: ChatModeId) => `/api/v1/chat/events${query({ mode })}`,
+    answer: (id: string, callId: string, content?: string) =>
+      request<Ok>('POST', '/api/v1/chat/answer', content === undefined ? { id, call_id: callId } : { id, call_id: callId, content }),
+    approve: (id: string, callId: string, approved: boolean, options: { all?: boolean; reason?: string } = {}) =>
+      request<Ok>('POST', '/api/v1/chat/approve', { id, call_id: callId, approved, ...options }),
+    rename: (id: string, title: string) => request<Ok>('POST', '/api/v1/chat/rename', { id, title }),
+    /** Deletes the conversation and its messages. */
+    remove: (id: string) => request<Ok>('POST', '/api/v1/chat/remove', { id }),
+    eventsUrl: '/api/v1/chat/events',
   },
 
   admin: {
     stats: () => request<Stats>('GET', '/api/v1/stats/all'),
     messages: (limit: number) => request<AdminMessage[]>('GET', `/api/v1/message${query({ limit })}`),
     users: (q: string) => request<UserHit[]>('GET', `/api/v1/user${query({ q })}`),
-    promptExtensions: (userId: string, mode?: string) =>
-      request<PromptExtension[]>('GET', `/api/v1/prompt_extension${query({ user_id: userId, mode })}`),
-    setPromptExtension: (userId: string, mode: string, content: string) =>
-      request<Ok>('PATCH', '/api/v1/prompt_extension/x', { user_id: userId, mode, content }),
-    removePromptExtension: (userId: string, mode: string) =>
-      request<Ok>('POST', '/api/v1/prompt_extension/remove', { user_id: userId, mode }),
+    /** The user's prompt extension: empty, or one entry. */
+    promptExtension: (userId: string) => request<PromptExtension[]>('GET', `/api/v1/prompt_extension${query({ user_id: userId })}`),
+    setPromptExtension: (userId: string, content: string) =>
+      request<Ok>('POST', '/api/v1/prompt_extension/set', { user_id: userId, content }),
+    removePromptExtension: (userId: string) => request<Ok>('POST', '/api/v1/prompt_extension/remove', { user_id: userId }),
     staffPings: (includeResolved: boolean) =>
       request<StaffPing[]>('GET', `/api/v1/staff_ping${query({ include_resolved: includeResolved })}`),
     resolvePing: (id: number) => request<Ok>('POST', '/api/v1/staff_ping/resolve', { id }),

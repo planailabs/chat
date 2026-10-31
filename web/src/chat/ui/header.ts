@@ -2,7 +2,7 @@
  * Header Component
  *
  * Renders the application header with:
- * - Logo and version badge
+ * - Sidebar toggle (signed in), logo and version badge
  * - Theme toggle
  * - Language selector dropdown
  * - Authentication controls (sign in / user menu)
@@ -15,7 +15,8 @@ import {
   type LocaleContent,
 } from '../content';
 import type { AppState } from '../app/state';
-import type { ChatModeId } from '../api';
+import { SIDEBAR_ICON_SVG } from './icons';
+import { isSidebarShown } from './sidebar';
 import { escapeHtml } from '../utils/html';
 import { store } from '../app/store';
 import { APP_VERSION } from '../constants';
@@ -136,55 +137,6 @@ const renderLanguageOptions = (currentLocale: LocaleKey): string =>
     .join('');
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Mode Switcher
-// ─────────────────────────────────────────────────────────────────────────────
-
-const MODE_ORDER: ChatModeId[] = ['machine_config', 'sales'];
-
-const renderModeSwitcher = (locale: LocaleContent, state: AppState): string => {
-  if (!state.isAuthenticated) return '';
-
-  const options = MODE_ORDER.filter((id) => state.availableModes.includes(id)).map((id) => ({
-    id,
-    label: locale.chatModes[id].heroBadgeLabel,
-  }));
-
-  // Don't show switcher if only one option available
-  if (options.length <= 1) return '';
-
-  const currentLabel = options.find((o) => o.id === state.activeChatMode)?.label ?? options[0].label;
-
-  const optionButtons = options
-    .map((opt) => {
-      const isSelected = state.activeChatMode === opt.id;
-      return `<button
-        type="button"
-        class="dropdown-option"
-        data-action="switch-chat-mode"
-        data-mode="${opt.id}"
-        role="menuitemradio"
-        aria-checked="${isSelected}">
-        <span>${escapeHtml(opt.label)}</span>
-        ${isSelected ? CHECK_ICON_SVG : ''}
-      </button>`;
-    })
-    .join('');
-
-  return `<div class="relative" data-menu="mode-switcher">
-    <button
-      class="pill-button pill-button--mode"
-      type="button"
-      data-action="mode-switcher-toggle"
-      aria-haspopup="menu">
-      ${escapeHtml(currentLabel)}
-    </button>
-    <div class="dropdown-panel dropdown-panel--mode hidden" role="menu" data-mode-dropdown>
-      <div class="flex flex-col gap-1">${optionButtons}</div>
-    </div>
-  </div>`;
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Header Component
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -242,13 +194,6 @@ export const renderHeader = ({ locale, state }: HeaderParams): string => {
               <span>${navigation.settingsLabel}</span>
             </button>
             ${
-              state.impersonating
-                ? ''
-                : `<button type="button" class="dropdown-option" data-action="new-conversation">
-                    <span>${escapeHtml(navigation.newConversationLabel)}</span>
-                  </button>`
-            }
-            ${
               state.isAdmin
                 ? `<a href="/dashboard/" class="dropdown-option" data-action="dashboard-link">
                     <span>Dashboard</span>
@@ -289,6 +234,20 @@ export const renderHeader = ({ locale, state }: HeaderParams): string => {
 
   // Mobile: px-4 py-4, Desktop: px-8 py-6
   return `${impersonateBanner}<header class="flex w-full items-center justify-between px-4 py-4 md:px-8 md:py-6">
+    <div class="flex items-center gap-3">
+    ${
+      state.isAuthenticated
+        ? `<button
+            class="icon-button sidebar-toggle"
+            type="button"
+            data-action="sidebar-toggle"
+            aria-controls="sidebar-region"
+            aria-expanded="${isSidebarShown(state)}"
+            aria-label="${escapeHtml(isSidebarShown(state) ? locale.sidebar.close : locale.sidebar.open)}">
+            ${SIDEBAR_ICON_SVG}
+          </button>`
+        : ''
+    }
     <span class="logo-link flex items-center gap-2 text-base font-semibold tracking-tight text-(--text-primary) md:text-lg">
       ${LOGO_SVG}
       <span class="flex items-baseline gap-2 leading-none">
@@ -296,10 +255,9 @@ export const renderHeader = ({ locale, state }: HeaderParams): string => {
         <span class="text-[0.5em] font-bold text-(--text-muted)">${APP_VERSION}</span>
       </span>
     </span>
+    </div>
 
     <div class="flex items-center gap-3 text-sm text-(--text-muted) md:gap-[14px]">
-      ${renderModeSwitcher(locale, state)}
-
       <div class="relative">
         <button
           class="icon-button tooltip"

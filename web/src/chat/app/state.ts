@@ -4,13 +4,13 @@
  * State is divided into:
  * - UI state (menus, overlay)
  * - User state (from GET /api/v1/profile/me, cached for the first render)
- * - Chat state (the conversation in the active mode)
+ * - Chat state (the conversation list and the open conversation)
  * - Preference state (theme, locale, newsletter)
  */
 
 import { defaultLocale, supportedLocales, type LocaleKey, type StreamConfig } from '../content';
 import { STORAGE_KEYS } from '../constants';
-import type { ChatModeId } from '../api';
+import type { ConversationItem } from '../actions/chat/conversationList';
 import { createProfileState, type ProfileState } from './profileState';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -77,7 +77,7 @@ export interface LoginInvite {
   ctaLocked?: boolean;
 }
 
-/** The conversation in the active chat mode. */
+/** The conversation on screen. */
 export interface ChatSession {
   messages: ChatMessage[];
   phase: ChatPhase;
@@ -101,6 +101,12 @@ export interface AppState {
   isLanguageMenuOpen: boolean;
   isAuthMenuOpen: boolean;
   isSettingsOverlayOpen: boolean;
+  /** Mobile: the conversations drawer is open. */
+  isSidebarOpen: boolean;
+  /** Desktop: the sidebar is collapsed (remembered in this browser). */
+  isSidebarCollapsed: boolean;
+  /** The conversation whose title is being edited in the sidebar. */
+  renamingConversationId: string | null;
 
   // ─── User State ────────────────────────────────────────────────────────────
   isAuthenticated: boolean;
@@ -110,11 +116,12 @@ export interface AppState {
   isAdmin: boolean;
   /** An admin looks at this user's account (read-only). */
   impersonating: boolean;
-  /** Chat modes offered to the user */
-  availableModes: ChatModeId[];
 
   // ─── Chat State ────────────────────────────────────────────────────────────
-  activeChatMode: ChatModeId;
+  /** The user's conversations, most recent first. */
+  conversations: ConversationItem[];
+  /** The conversation on screen (its URL is /c/<id>); null: a new chat. */
+  activeConversationId: string | null;
   /** null until the chat is set up on load */
   chat: ChatSession | null;
 
@@ -160,7 +167,6 @@ export interface CachedUserState {
   userDisplayName: string | null;
   isAdmin: boolean;
   impersonating: boolean;
-  availableModes: ChatModeId[];
 }
 
 /** Max age for a cached signed-in state (5 minutes) */
@@ -171,7 +177,7 @@ const readCachedUserState = (): CachedUserState | null => {
     const stored = sessionStorage.getItem(STORAGE_KEYS.USER_CACHE);
     if (!stored) return null;
     const parsed = JSON.parse(stored) as CachedUserState & { timestamp?: number };
-    if (typeof parsed.isAuthenticated !== 'boolean' || !Array.isArray(parsed.availableModes)) return null;
+    if (typeof parsed.isAuthenticated !== 'boolean') return null;
     // Signed-in state expires; the signed-out state is remembered.
     if (parsed.isAuthenticated && (!parsed.timestamp || Date.now() - parsed.timestamp > USER_CACHE_MAX_AGE_MS)) {
       return null;
@@ -191,7 +197,6 @@ export const cacheUserState = (state: AppState): void => {
     userDisplayName: state.userDisplayName,
     isAdmin: state.isAdmin,
     impersonating: state.impersonating,
-    availableModes: state.availableModes,
     timestamp: Date.now(),
   };
   try {
@@ -216,7 +221,7 @@ export const clearCachedUserState = (): void => {
 /** The signed-out user state. */
 export const signedOutUserState = (): Pick<
   AppState,
-  'isAuthenticated' | 'userId' | 'userEmail' | 'userDisplayName' | 'isAdmin' | 'impersonating' | 'availableModes'
+  'isAuthenticated' | 'userId' | 'userEmail' | 'userDisplayName' | 'isAdmin' | 'impersonating'
 > => ({
   isAuthenticated: false,
   userId: null,
@@ -224,8 +229,23 @@ export const signedOutUserState = (): Pick<
   userDisplayName: null,
   isAdmin: false,
   impersonating: false,
-  availableModes: ['sales'],
 });
+
+const readSidebarCollapsed = (): boolean => {
+  try {
+    return localStorage.getItem(STORAGE_KEYS.SIDEBAR_COLLAPSED) === '1';
+  } catch {
+    return false;
+  }
+};
+
+export const persistSidebarCollapsed = (collapsed: boolean): void => {
+  try {
+    localStorage.setItem(STORAGE_KEYS.SIDEBAR_COLLAPSED, collapsed ? '1' : '0');
+  } catch {
+    // Ignore storage errors
+  }
+};
 
 /**
  * Creates the initial application state, with the cached user state so the
@@ -240,9 +260,12 @@ export const createInitialState = (): AppState => {
     isLanguageMenuOpen: false,
     isAuthMenuOpen: false,
     isSettingsOverlayOpen: false,
+    isSidebarOpen: false,
+    isSidebarCollapsed: readSidebarCollapsed(),
+    renamingConversationId: null,
     ...user,
-    // Machine configuration is the default where it's offered.
-    activeChatMode: user.isAuthenticated && user.availableModes.includes('machine_config') ? 'machine_config' : 'sales',
+    conversations: [],
+    activeConversationId: null,
     chat: null,
     profile: createProfileState(),
   };

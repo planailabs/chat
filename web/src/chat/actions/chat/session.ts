@@ -1,19 +1,21 @@
 /**
- * Chat Session — sets up the conversation of the active mode: cached
- * messages first, then the server's history (and what it waits on), the
- * greeting for an empty conversation, and the prompt an anonymous user typed
- * before signing in.
+ * Chat Session — which conversation is on screen: a new chat (`/`) or a
+ * conversation (`/c/<id>`), shown from the cache first, then from the
+ * server's history (and what it waits on). Also the prompt an anonymous user
+ * typed before signing in, sent as a new conversation.
  */
 
 import { store } from '../../app/store';
 import type { ChatMessage, ChatPhase } from '../../app/state';
+import { conversationIdFromPath, setConversationPath, type HistoryMode } from '../../app/route';
 import { locales } from '../../content';
-import { api, type ChatModeId, type History } from '../../api';
-import { cacheChatMessages, readCachedChatMessages, readPendingSalesPrompt } from './cache';
-import { connectEvents, disconnectEvents } from './sse';
+import { ApiError, api, type History } from '../../api';
+import { readCachedChatMessages, readPendingPrompt, cacheChatMessages } from './cache';
+import { connectEvents } from './sse';
 import { questionPrompt } from './events';
 import { historyToChat } from './history';
-import { clearChatTimers, sendChatMessage, showChatError, transition } from './stateMachine';
+import { forgetConversation, loadConversations, patchConversation, showCachedConversations } from './conversations';
+import { clearChatTimers, sendChatMessage, transition } from './stateMachine';
 
 const locale = () => locales[store.state.localeKey];
 
@@ -24,7 +26,9 @@ export const initChat = (messages: ChatMessage[], phase: ChatPhase = 'idle') => 
 
 /** Signed out: an empty chat, or the stashed prompt with the sign-in invite. */
 export const showAnonymousChat = () => {
-  const pending = readPendingSalesPrompt();
+  store.state.activeConversationId = null;
+  store.state.conversations = [];
+  const pending = readPendingPrompt();
   if (!pending) {
     initChat([]);
     return;
@@ -43,31 +47,37 @@ export const showAnonymousChat = () => {
 
 /** First render, before the profile is known: whatever the last visit showed. */
 export const showCachedChat = () => {
-  if (store.state.isAuthenticated) {
-    initChat(readCachedChatMessages());
-  } else {
+  if (!store.state.isAuthenticated) {
     showAnonymousChat();
+    return;
   }
+  showCachedConversations();
+  const id = conversationIdFromPath(window.location.pathname);
+  store.state.activeConversationId = id;
+  initChat(id ? readCachedChatMessages(id) : []);
 };
 
-const loadHistory = async (mode: ChatModeId): Promise<History | null> => {
+/** The history, null when it couldn't be loaded, 'gone' when it no longer exists. */
+const loadHistory = async (id: string): Promise<History | 'gone' | null> => {
   try {
-    return await api.chat.history(mode);
+    return await api.chat.history(id);
   } catch (error) {
+    if (error instanceof ApiError && error.status === 404) return 'gone';
     console.error('[chat] loading the history failed', error);
     return null;
   }
 };
 
+const isLive = (phase: ChatPhase) => phase === 'waiting' || phase === 'streaming' || phase === 'tool';
+
 /** Replaces the chat with the server's record of it. */
 const applyHistory = (history: History) => {
   const mc = store.state.chat;
   if (!mc) return;
-  const mode = store.state.activeChatMode;
-  const snapshot = historyToChat(history, locale(), locale().chatModes[mode].cancelLabel);
-
+  const snapshot = historyToChat(history, locale());
   // A turn in progress keeps showing its progress.
-  const live = mc.phase === 'waiting' || mc.phase === 'streaming' || mc.phase === 'tool';
+  const busy = isLive(mc.phase) || store.state.conversations.find((c) => c.id === history.id)?.busy === true;
+
   clearChatTimers();
   mc.streamingText = undefined;
   mc.messages = snapshot.messages;
@@ -78,68 +88,70 @@ const applyHistory = (history: History) => {
     mc.clientPrompt = questionPrompt(callId, toolName, input, false);
   } else if (snapshot.approvals.length > 0) {
     transition(mc, 'approval');
-  } else if (!live) {
+  } else if (busy) {
+    if (!isLive(mc.phase)) transition(mc, 'waiting');
+  } else {
     transition(mc, 'idle');
   }
-  cacheChatMessages(mc.messages, mode);
+  cacheChatMessages(mc.messages, history.id);
   store.notify();
 };
 
-/** Refetches the history (the event stream missed something). */
-export const resyncHistory = async () => {
-  const mode = store.state.activeChatMode;
-  const history = await loadHistory(mode);
-  if (history && store.state.activeChatMode === mode) applyHistory(history);
+/** The conversation on screen no longer exists: back to a new chat. */
+const conversationGone = (id: string) => {
+  forgetConversation(id);
+  if (store.state.activeConversationId === id) void openConversation(null, 'replace');
 };
 
-/** Signed in: the conversation of the active mode, kept live. */
-export const openChat = async () => {
-  const mode = store.state.activeChatMode;
-  initChat(readCachedChatMessages(mode));
-  void connectEvents();
+/** Refetches the open conversation (the event stream missed something). */
+export const resyncOpenConversation = async () => {
+  const id = store.state.activeConversationId;
+  if (!id) return;
+  const history = await loadHistory(id);
+  if (store.state.activeConversationId !== id) return;
+  if (history === 'gone') conversationGone(id);
+  else if (history) applyHistory(history);
+};
 
-  const history = await loadHistory(mode);
-  if (!history || store.state.activeChatMode !== mode) return;
-  applyHistory(history);
-
-  // An empty conversation starts with the mode's greeting, if it has one.
-  const greeting = locale().chatModes[mode].greeting;
-  if (history.messages.length === 0 && greeting && !store.state.impersonating) {
-    void sendChatMessage(greeting);
-  }
+/** Refetches everything shown: the list and the open conversation. */
+export const resyncAll = async () => {
+  await Promise.all([loadConversations(), resyncOpenConversation()]);
 };
 
 /**
- * After sign-in: the prompt typed while signed out goes to the sales chat,
- * after anything that conversation still waits on is dismissed.
+ * Shows conversation `id` (null: a new chat) and points the URL at it
+ * (`nav`: push a history entry, replace it, or leave the URL alone).
  */
-export const sendPendingSalesPrompt = async (prompt: string) => {
-  disconnectEvents();
-  store.state.activeChatMode = 'sales';
-  initChat(readCachedChatMessages('sales'));
-  await connectEvents();
-
-  const history = await loadHistory('sales');
-  if (history) {
-    applyHistory(history);
-    try {
-      for (const q of history.pending_questions ?? []) {
-        await api.chat.answer('sales', q.call_id);
-      }
-      for (const a of history.pending_approvals ?? []) {
-        await api.chat.approve('sales', a.call_id, false);
-      }
-    } catch (error) {
-      showChatError(error);
-      return;
-    }
+export const openConversation = async (id: string | null, nav: HistoryMode = 'push') => {
+  const state = store.state;
+  const previous = state.activeConversationId;
+  // Leaving a conversation mid-turn: the sidebar shows it working.
+  if (previous && previous !== id && state.chat && isLive(state.chat.phase)) {
+    patchConversation(previous, { busy: true });
   }
 
-  const mc = store.state.chat;
-  if (!mc) return;
-  mc.approvals = [];
-  transition(mc, 'idle');
-  store.notify();
-  void sendChatMessage(prompt);
+  setConversationPath(id, nav);
+  clearChatTimers();
+  state.activeConversationId = id;
+  state.isSidebarOpen = false;
+  state.renamingConversationId = null;
+
+  if (!id) {
+    initChat([]);
+    return;
+  }
+  if (state.conversations.some((c) => c.id === id && c.unread)) patchConversation(id, { unread: false });
+  initChat(readCachedChatMessages(id));
+  void connectEvents();
+
+  const history = await loadHistory(id);
+  if (store.state.activeConversationId !== id) return;
+  if (history === 'gone') conversationGone(id);
+  else if (history) applyHistory(history);
 };
 
+/** After sign-in: the prompt typed while signed out starts a new conversation. */
+export const sendPendingPrompt = async (prompt: string) => {
+  await openConversation(null, 'replace');
+  void sendChatMessage(prompt);
+};

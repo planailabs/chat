@@ -6,7 +6,6 @@ import { persistLocaleSelection } from '../app/state';
 import { persistLanguagePreference } from '../actions/profile';
 import { handleSignIn, handleSignOut, handleStopImpersonation } from '../actions/auth';
 import { openSettingsOverlay } from '../actions/overlay';
-import { startNewConversation } from '../actions/chat';
 
 export const registerHeaderEvents = (app: HTMLElement) => {
   // Header: Theme Toggle
@@ -74,13 +73,6 @@ export const registerHeaderEvents = (app: HTMLElement) => {
     event.stopPropagation();
     store.setState({ isAuthMenuOpen: false });
     handleSignOut();
-  });
-
-  // Header: New Conversation
-  delegateEvent(app, 'click', '[data-action="new-conversation"]', (event) => {
-    event.stopPropagation();
-    store.setState({ isAuthMenuOpen: false });
-    void startNewConversation();
   });
 
   // Header: Stop Impersonation (menu entry and banner)

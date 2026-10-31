@@ -4,17 +4,17 @@
 
 import { escapeHtml } from '../../utils/html';
 
-import type { LocaleContent, ChatModeLocale } from '../../content';
+import type { LocaleContent } from '../../content';
 import type { ChatSession } from '../../app/state';
 
 // ── Question UI (ask_question) ──────────────────────────────────────────
 
 export const renderQuestionUI = (
   mc: ChatSession,
-  modeLocale: ChatModeLocale,
+  locale: LocaleContent,
 ): { questionLabel: string; questionButtons: string } => {
   const prompt = mc.phase === 'question' ? mc.clientPrompt : undefined;
-  const skipLabel = escapeHtml(modeLocale.cancelLabel);
+  const skipLabel = escapeHtml(locale.chat.skipLabel);
 
   let questionLabel = '';
   let questionButtons = '';

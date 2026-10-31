@@ -1055,3 +1055,272 @@ html.is-first-visit #app {
   width: 1.125em;
   height: 1.125em;
 }
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Sidebar: conversations and applications. Desktop: a column (collapsible).
+ * Mobile: an off-canvas drawer over the chat.
+ * ───────────────────────────────────────────────────────────────────────── */
+@layer components {
+  .sidebar {
+    display: flex;
+    flex-direction: column;
+    flex-shrink: 0;
+    width: 264px;
+    height: 100%;
+    border-right: 1px solid color-mix(in lab, var(--border-muted) 60%, transparent);
+    background: var(--surface-elevated);
+  }
+
+  .sidebar.is-hidden {
+    display: none;
+  }
+
+  .sidebar-backdrop {
+    display: none;
+  }
+
+  .sidebar-panel {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+  }
+
+  @media (min-width: 768px) {
+    .sidebar.is-collapsed {
+      display: none;
+    }
+  }
+
+  @media (max-width: 767.98px) {
+    .sidebar {
+      position: fixed;
+      inset: 0;
+      z-index: 40;
+      width: auto;
+      border: 0;
+      background: transparent;
+      pointer-events: none;
+    }
+
+    .sidebar-backdrop {
+      display: block;
+      position: absolute;
+      inset: 0;
+      background: rgb(0 0 0 / 0.45);
+      opacity: 0;
+      transition: opacity 0.2s ease;
+    }
+
+    .sidebar-panel {
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: min(85vw, 300px);
+      background: var(--surface-elevated);
+      box-shadow: 0 0 24px rgb(0 0 0 / 0.25);
+      transform: translateX(-100%);
+      visibility: hidden;
+      transition:
+        transform 0.22s ease,
+        visibility 0s linear 0.22s;
+    }
+
+    .sidebar.is-open {
+      pointer-events: auto;
+    }
+
+    .sidebar.is-open .sidebar-backdrop {
+      opacity: 1;
+    }
+
+    .sidebar.is-open .sidebar-panel {
+      transform: none;
+      visibility: visible;
+      transition: transform 0.22s ease;
+    }
+  }
+
+  .sidebar-top {
+    padding: 0.75rem;
+  }
+
+  .sidebar-new-chat {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    width: 100%;
+    padding: 0.55rem 0.75rem;
+    border: 1px solid color-mix(in lab, var(--border-muted) 80%, transparent);
+    border-radius: 0.65rem;
+    background: var(--surface-base);
+    color: var(--text-primary);
+    font-size: 0.875rem;
+  }
+
+  .sidebar-new-chat:hover {
+    background: var(--surface-hover);
+  }
+
+  .sidebar-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 0 0.5rem 0.75rem;
+  }
+
+  .sidebar-group + .sidebar-group {
+    margin-top: 0.75rem;
+  }
+
+  .sidebar-heading {
+    padding: 0.5rem 0.5rem 0.25rem;
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .sidebar-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .sidebar-empty {
+    padding: 0.5rem;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+  }
+
+  .sidebar-item {
+    display: flex;
+    align-items: center;
+    border-radius: 0.5rem;
+  }
+
+  .sidebar-item:hover,
+  .sidebar-item:focus-within {
+    background: var(--surface-hover);
+  }
+
+  .sidebar-item.is-active {
+    background: color-mix(in lab, var(--accent) 16%, var(--surface-elevated));
+  }
+
+  .sidebar-item__link,
+  .sidebar-app {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    gap: 0.6rem;
+    min-width: 0;
+    padding: 0.45rem 0.5rem;
+    border-radius: 0.5rem;
+    color: var(--text-primary);
+    font-size: 0.875rem;
+    text-decoration: none;
+  }
+
+  .sidebar-app:hover {
+    background: var(--surface-hover);
+  }
+
+  .sidebar-item__title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .sidebar-item__actions {
+    display: none;
+    gap: 2px;
+    padding-right: 0.25rem;
+  }
+
+  .sidebar-item:hover .sidebar-item__actions,
+  .sidebar-item:focus-within .sidebar-item__actions,
+  .sidebar-item.is-active .sidebar-item__actions {
+    display: flex;
+  }
+
+  @media (hover: none) {
+    .sidebar-item__actions {
+      display: flex;
+    }
+  }
+
+  .sidebar-item__action {
+    display: inline-flex;
+    padding: 0.3rem;
+    border-radius: 0.4rem;
+    color: var(--text-muted);
+  }
+
+  .sidebar-item__action:hover {
+    background: var(--surface-base);
+    color: var(--text-primary);
+  }
+
+  .sidebar-dot {
+    flex-shrink: 0;
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 999px;
+    background: var(--accent);
+  }
+
+  .sidebar-dot.is-busy {
+    animation: sidebar-pulse 1.2s ease-in-out infinite;
+  }
+
+  .sidebar-item.is-renaming {
+    padding: 0.1rem 0;
+  }
+
+  .sidebar-rename-input {
+    width: 100%;
+    padding: 0.35rem 0.5rem;
+    border: 1px solid var(--accent);
+    border-radius: 0.5rem;
+    background: var(--surface-base);
+    color: var(--text-primary);
+    font-size: 0.875rem;
+    outline: none;
+  }
+
+  .sidebar-apps {
+    padding: 0.5rem 0.5rem 0.75rem;
+    border-top: 1px solid color-mix(in lab, var(--border-muted) 60%, transparent);
+  }
+
+  .sidebar-icon {
+    flex-shrink: 0;
+    width: 1.1rem;
+    height: 1.1rem;
+  }
+
+  .sidebar-icon--small {
+    width: 0.85rem;
+    height: 0.85rem;
+    color: var(--text-muted);
+  }
+}
+
+@keyframes sidebar-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-dot.is-busy {
+    animation: none;
+  }
+}

@@ -45,7 +45,7 @@ describe('api', () => {
   it('keeps the status of errors without a JSON body', async () => {
     fetchMock.mockImplementation(async () => new Response('bad gateway', { status: 502 }));
 
-    const error = await api.chat.modes().catch((e: unknown) => e);
+    const error = await api.chat.list().catch((e: unknown) => e);
     expect(error).toMatchObject({ status: 502, code: 'http_error' });
     expect(isUnauthorized(error)).toBe(false);
   });
@@ -61,41 +61,65 @@ describe('api', () => {
     expect(body).toEqual({ newsletter_opt_in: true, newsletter_source: 'chat_flow' });
   });
 
-  it('sends chat messages with mode and language', async () => {
-    fetchMock.mockImplementation(async () => jsonResponse(200, { ok: true }));
+  it('lists conversations and reads one by id', async () => {
+    fetchMock.mockImplementation(async () => jsonResponse(200, []));
 
-    await api.chat.send('sales', 'Hello', 'de');
-    expect(lastCall()).toMatchObject({ url: '/api/v1/chat/send', init: { method: 'POST' }, body: { mode: 'sales', text: 'Hello', lang: 'de' } });
+    await api.chat.list();
+    expect(lastCall()).toMatchObject({ url: '/api/v1/chat', init: { method: 'GET' } });
+
+    await api.chat.history('c1');
+    expect(lastCall()).toMatchObject({ url: '/api/v1/chat/history', init: { method: 'POST' }, body: { id: 'c1' } });
+  });
+
+  it('starts a new conversation when sending without an id', async () => {
+    fetchMock.mockImplementation(async () => jsonResponse(200, { id: 'new-1' }));
+
+    await expect(api.chat.send(null, 'Hello', 'de')).resolves.toEqual({ id: 'new-1' });
+    expect(lastCall()).toMatchObject({ url: '/api/v1/chat/send', init: { method: 'POST' } });
+    expect(lastCall().body).toEqual({ text: 'Hello', lang: 'de' });
+
+    await api.chat.send('c1', 'More', 'en');
+    expect(lastCall().body).toEqual({ id: 'c1', text: 'More', lang: 'en' });
   });
 
   it('maps the hourly limit to a 402 error with the server message', async () => {
     fetchMock.mockImplementation(async () => jsonResponse(402, { error: 'insufficient_quota', message: 'limit reached' }));
 
-    await expect(api.chat.send('sales', 'Hi', 'en')).rejects.toMatchObject({ status: 402, message: 'limit reached' });
+    await expect(api.chat.send('c1', 'Hi', 'en')).rejects.toMatchObject({ status: 402, message: 'limit reached' });
   });
 
   it('omits the answer content when a question is dismissed', async () => {
     fetchMock.mockImplementation(async () => jsonResponse(200, { ok: true }));
 
-    await api.chat.answer('machine_config', 'call-1', 'Option A');
-    expect(lastCall().body).toEqual({ mode: 'machine_config', call_id: 'call-1', content: 'Option A' });
+    await api.chat.answer('c1', 'call-1', 'Option A');
+    expect(lastCall().body).toEqual({ id: 'c1', call_id: 'call-1', content: 'Option A' });
 
-    await api.chat.answer('machine_config', 'call-2');
-    expect(lastCall().body).toEqual({ mode: 'machine_config', call_id: 'call-2' });
+    await api.chat.answer('c1', 'call-2');
+    expect(lastCall().body).toEqual({ id: 'c1', call_id: 'call-2' });
   });
 
   it('approves tool calls, optionally for the whole conversation', async () => {
     fetchMock.mockImplementation(async () => jsonResponse(200, { ok: true }));
 
-    await api.chat.approve('machine_config', 'call-3', true, { all: true });
-    expect(lastCall()).toMatchObject({ url: '/api/v1/chat/approve', body: { mode: 'machine_config', call_id: 'call-3', approved: true, all: true } });
+    await api.chat.approve('c1', 'call-3', true, { all: true });
+    expect(lastCall()).toMatchObject({ url: '/api/v1/chat/approve', body: { id: 'c1', call_id: 'call-3', approved: true, all: true } });
 
-    await api.chat.approve('machine_config', 'call-4', false);
-    expect(lastCall().body).toEqual({ mode: 'machine_config', call_id: 'call-4', approved: false });
+    await api.chat.approve('c1', 'call-4', false);
+    expect(lastCall().body).toEqual({ id: 'c1', call_id: 'call-4', approved: false });
   });
 
-  it('builds the event stream URL without credentials in it', () => {
-    expect(api.chat.eventsUrl('machine_config')).toBe('/api/v1/chat/events?mode=machine_config');
+  it('renames and removes conversations', async () => {
+    fetchMock.mockImplementation(async () => jsonResponse(200, { ok: true }));
+
+    await api.chat.rename('c1', 'Fleet setup');
+    expect(lastCall()).toMatchObject({ url: '/api/v1/chat/rename', init: { method: 'POST' }, body: { id: 'c1', title: 'Fleet setup' } });
+
+    await api.chat.remove('c1');
+    expect(lastCall()).toMatchObject({ url: '/api/v1/chat/remove', init: { method: 'POST' }, body: { id: 'c1' } });
+  });
+
+  it('has one event stream URL for all conversations, without credentials in it', () => {
+    expect(api.chat.eventsUrl).toBe('/api/v1/chat/events');
   });
 
   it('passes admin filters as query parameters', async () => {
@@ -110,20 +134,17 @@ describe('api', () => {
     await api.admin.staffPings(true);
     expect(lastCall().url).toBe('/api/v1/staff_ping?include_resolved=true');
 
-    await api.admin.promptExtensions('u1');
+    await api.admin.promptExtension('u1');
     expect(lastCall().url).toBe('/api/v1/prompt_extension?user_id=u1');
-
-    await api.admin.promptExtensions('u1', 'sales');
-    expect(lastCall().url).toBe('/api/v1/prompt_extension?user_id=u1&mode=sales');
   });
 
-  it('writes and removes prompt extensions', async () => {
+  it('sets and removes a user\'s prompt extension', async () => {
     fetchMock.mockImplementation(async () => jsonResponse(200, { ok: true }));
 
-    await api.admin.setPromptExtension('u1', 'sales', 'Be brief.');
-    expect(lastCall()).toMatchObject({ url: '/api/v1/prompt_extension/x', init: { method: 'PATCH' }, body: { user_id: 'u1', mode: 'sales', content: 'Be brief.' } });
+    await api.admin.setPromptExtension('u1', 'Be brief.');
+    expect(lastCall()).toMatchObject({ url: '/api/v1/prompt_extension/set', init: { method: 'POST' }, body: { user_id: 'u1', content: 'Be brief.' } });
 
-    await api.admin.removePromptExtension('u1', 'sales');
-    expect(lastCall()).toMatchObject({ url: '/api/v1/prompt_extension/remove', init: { method: 'POST' }, body: { user_id: 'u1', mode: 'sales' } });
+    await api.admin.removePromptExtension('u1');
+    expect(lastCall()).toMatchObject({ url: '/api/v1/prompt_extension/remove', init: { method: 'POST' }, body: { user_id: 'u1' } });
   });
 });

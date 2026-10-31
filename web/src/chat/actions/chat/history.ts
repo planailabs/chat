@@ -21,10 +21,8 @@ const questionText = (input: Record<string, unknown>): string | null =>
 const preferenceOf = (input: Record<string, unknown>, locale: LocaleContent) =>
   typeof input.preference_id === 'string' ? locale.preferencePrompts[input.preference_id] : undefined;
 
-/**
- * `cancelLabel` is what a dismissed question shows (the mode's Skip label).
- */
-export const historyToChat = (history: History, locale: LocaleContent, cancelLabel: string): ChatSnapshot => {
+/** A dismissed question shows as the Skip label. */
+export const historyToChat = (history: History, locale: LocaleContent): ChatSnapshot => {
   const pending = history.pending_questions?.[0];
   const pendingQuestion: ClientPrompt | null = pending ? { callId: pending.call_id, toolName: pending.name, input: pending.input ?? {} } : null;
   const approvals: PendingApproval[] = (history.pending_approvals ?? []).map((a) => ({
@@ -63,7 +61,7 @@ export const historyToChat = (history: History, locale: LocaleContent, cancelLab
 
       case 'answer': {
         if (m.data.is_error) {
-          messages.push({ role: 'cancel', content: cancelLabel });
+          messages.push({ role: 'cancel', content: locale.chat.skipLabel });
           break;
         }
         const question = questions.get(m.data.call_id);

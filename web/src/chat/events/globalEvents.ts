@@ -6,7 +6,6 @@ export const registerGlobalEvents = () => {
     const target = event.target as Node | null;
     const languageMenu = document.querySelector('[data-menu="language"]');
     const authMenu = document.querySelector('[data-menu="auth"]');
-    const modeMenu = document.querySelector('[data-menu="mode-switcher"]');
     const state = store.state;
 
     let updates: Partial<typeof state> = {};
@@ -23,14 +22,6 @@ export const registerGlobalEvents = () => {
     if (state.isAuthMenuOpen && authMenu && !authMenu.contains(target)) {
       updates.isAuthMenuOpen = false;
       hasUpdates = true;
-    }
-
-    // Close mode switcher dropdown on outside click
-    if (modeMenu && !modeMenu.contains(target)) {
-      const dropdown = modeMenu.querySelector<HTMLElement>('[data-mode-dropdown]');
-      if (dropdown && !dropdown.classList.contains('hidden')) {
-        dropdown.classList.add('hidden');
-      }
     }
 
     if (hasUpdates) {

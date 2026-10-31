@@ -16,8 +16,10 @@ export const STORAGE_KEYS = {
   LANGUAGE: 'planai-language',
   /** Cached user state for instant header render (prevents layout shift) */
   USER_CACHE: 'planai-user-cache',
-  /** Anonymous prompt saved for sending to the sales chat after sign-in */
-  PENDING_SALES_PROMPT: 'planai-pending-sales-prompt',
-  /** Prefix of the per-user, per-mode chat message cache */
+  /** Anonymous prompt, sent as a new conversation after sign-in */
+  PENDING_PROMPT: 'planai-pending-prompt',
+  /** Prefix of the per-user caches (conversation list, each conversation's messages) */
   CHAT_PREFIX: 'planai-chat-',
+  /** Desktop sidebar collapsed (localStorage) */
+  SIDEBAR_COLLAPSED: 'planai-sidebar-collapsed',
 } as const;

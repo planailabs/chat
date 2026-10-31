@@ -1,44 +1,55 @@
 /**
- * Chat Cache — the conversation per user and mode in sessionStorage (shown
- * instantly on reload while the server's history loads), and the anonymous
- * prompt carried over sign-in.
+ * Chat Cache — per user in sessionStorage (shown instantly on reload while
+ * the server's copy loads): the conversation list and each conversation's
+ * messages. Plus the anonymous prompt carried over sign-in.
  */
 
 import { store } from '../../app/store';
 import { STORAGE_KEYS } from '../../constants';
 import type { ChatMessage } from '../../app/state';
-import type { ChatModeId } from '../../api';
+import type { ConversationItem } from './conversationList';
 
 // ─── Conversation cache ─────────────────────────────────────────────────────
 
-const messagesKey = (mode: ChatModeId) => `${STORAGE_KEYS.CHAT_PREFIX}${store.state.userId ?? 'anonymous'}-${mode}`;
+const userKey = (suffix: string) => `${STORAGE_KEYS.CHAT_PREFIX}${store.state.userId ?? 'anonymous'}-${suffix}`;
 
-export const cacheChatMessages = (messages: ChatMessage[], mode: ChatModeId = store.state.activeChatMode) => {
+const write = (key: string, value: unknown) => {
   if (!store.state.isAuthenticated) return;
   try {
-    sessionStorage.setItem(messagesKey(mode), JSON.stringify(messages));
+    sessionStorage.setItem(key, JSON.stringify(value));
   } catch {
     // sessionStorage full or unavailable — silently ignore
   }
 };
 
-export const readCachedChatMessages = (mode: ChatModeId = store.state.activeChatMode): ChatMessage[] => {
+const readArray = <T>(key: string): T[] => {
   try {
-    const parsed: unknown = JSON.parse(sessionStorage.getItem(messagesKey(mode)) ?? '[]');
-    if (Array.isArray(parsed)) return parsed as ChatMessage[];
+    const parsed: unknown = JSON.parse(sessionStorage.getItem(key) ?? '[]');
+    if (Array.isArray(parsed)) return parsed as T[];
   } catch {
     // corrupt data — ignore
   }
   return [];
 };
 
-export const clearCachedChatMessages = (mode: ChatModeId) => {
+/** Caches the open conversation's messages (a new chat has none to keep). */
+export const cacheChatMessages = (messages: ChatMessage[], id: string | null = store.state.activeConversationId) => {
+  if (id) write(userKey(`c-${id}`), messages);
+};
+
+export const readCachedChatMessages = (id: string): ChatMessage[] => readArray<ChatMessage>(userKey(`c-${id}`));
+
+export const clearCachedChatMessages = (id: string) => {
   try {
-    sessionStorage.removeItem(messagesKey(mode));
+    sessionStorage.removeItem(userKey(`c-${id}`));
   } catch {
     // ignore
   }
 };
+
+export const cacheConversations = (list: ConversationItem[]) => write(userKey('list'), list);
+
+export const readCachedConversations = (): ConversationItem[] => readArray<ConversationItem>(userKey('list'));
 
 /** Forgets every cached conversation (sign-out). */
 export const clearAllCachedChatMessages = () => {
@@ -52,7 +63,7 @@ export const clearAllCachedChatMessages = () => {
   }
 };
 
-// ─── Pending sales prompt (anonymous → sent after sign-in) ──────────────────
+// ─── Pending prompt (anonymous → a new conversation after sign-in) ─────────
 
 /** A stashed prompt older than this is dropped. */
 const PENDING_PROMPT_MAX_AGE_MS = 30 * 60 * 1000;
@@ -77,21 +88,21 @@ const storages = (): Storage[] => {
   return out;
 };
 
-export const savePendingSalesPrompt = (prompt: string) => {
+export const savePendingPrompt = (prompt: string) => {
   const value = JSON.stringify({ prompt, savedAt: Date.now() } satisfies PendingPrompt);
   for (const storage of storages()) {
     try {
-      storage.setItem(STORAGE_KEYS.PENDING_SALES_PROMPT, value);
+      storage.setItem(STORAGE_KEYS.PENDING_PROMPT, value);
     } catch {
       /* ignore */
     }
   }
 };
 
-export const readPendingSalesPrompt = (): string | null => {
+export const readPendingPrompt = (): string | null => {
   for (const storage of storages()) {
     try {
-      const parsed = JSON.parse(storage.getItem(STORAGE_KEYS.PENDING_SALES_PROMPT) ?? 'null') as PendingPrompt | null;
+      const parsed = JSON.parse(storage.getItem(STORAGE_KEYS.PENDING_PROMPT) ?? 'null') as PendingPrompt | null;
       if (parsed && typeof parsed.prompt === 'string' && Date.now() - parsed.savedAt < PENDING_PROMPT_MAX_AGE_MS) {
         return parsed.prompt;
       }
@@ -102,18 +113,18 @@ export const readPendingSalesPrompt = (): string | null => {
   return null;
 };
 
-export const clearPendingSalesPrompt = () => {
+export const clearPendingPrompt = () => {
   for (const storage of storages()) {
     try {
-      storage.removeItem(STORAGE_KEYS.PENDING_SALES_PROMPT);
+      storage.removeItem(STORAGE_KEYS.PENDING_PROMPT);
     } catch {
       /* ignore */
     }
   }
 };
 
-export const consumePendingSalesPrompt = (): string | null => {
-  const prompt = readPendingSalesPrompt();
-  clearPendingSalesPrompt();
+export const consumePendingPrompt = (): string | null => {
+  const prompt = readPendingPrompt();
+  clearPendingPrompt();
   return prompt;
 };

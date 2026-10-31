@@ -1,16 +1,81 @@
 /**
- * Chat Events — applies the assistant's side of the conversation, as it
- * arrives over /api/v1/chat/events, to the chat state.
+ * Chat Events — the one event stream carries all the user's conversations.
+ * Events of the conversation on screen drive the chat; the others mark their
+ * sidebar entry (working, news) and move it to the top. An event of a
+ * conversation this tab doesn't know refetches the list — unless a new
+ * conversation is being started here: its first events can arrive before its
+ * id, so they wait for it.
  */
 
 import { store } from '../../app/store';
 import { locales } from '../../content';
-import type { ChatEventName, ChatEvents } from '../../api';
+import type { ChatEventName, ChatEvents, ConversationEvent } from '../../api';
 import type { ClientPrompt } from '../../app/state';
 import { cacheChatMessages } from './cache';
 import { finishStreamingText, transition } from './stateMachine';
 import { startPreferenceQuestionStream } from './preference';
-import { resyncHistory } from './session';
+import { resyncAll } from './session';
+import { backgroundActivity, eventDestination } from './conversationList';
+import { patchConversation, refetchConversationsSoon } from './conversations';
+
+// ─── Routing ────────────────────────────────────────────────────────────────
+
+/** Events that count as activity (move the conversation to the top). */
+const MARKS_ACTIVITY = new Set<ChatEventName>(['thinking', 'text_done', 'question', 'approval', 'done', 'error']);
+
+/** New conversations being started here (sent, id not back yet). */
+let startingConversations = 0;
+let heldEvents: { name: ChatEventName; data: ConversationEvent }[] = [];
+
+export const beginNewConversation = () => {
+  startingConversations++;
+};
+
+/**
+ * The new conversation's id is known (null: starting it failed): its held
+ * events are applied; when nothing is starting any more, the rest belong to
+ * conversations from elsewhere.
+ */
+export const endNewConversation = (id: string | null) => {
+  startingConversations = Math.max(0, startingConversations - 1);
+  const mine = heldEvents.filter((e) => e.data.conversation === id);
+  heldEvents = heldEvents.filter((e) => e.data.conversation !== id);
+  for (const { name, data } of mine) routeServerEvent(name, data);
+  if (startingConversations === 0 && heldEvents.length > 0) {
+    heldEvents = [];
+    refetchConversationsSoon();
+  }
+};
+
+/** Dispatches an event of the shared stream to where it belongs. */
+export const routeServerEvent = <E extends ChatEventName>(name: E, data: ConversationEvent<E>) => {
+  const state = store.state;
+  const id = data.conversation;
+  const destination = eventDestination(name, id, state.activeConversationId, state.conversations);
+  if (destination === 'resync') {
+    void resyncAll();
+    return;
+  }
+  if (destination === 'unknown') {
+    if (startingConversations > 0) heldEvents.push({ name, data: data as ConversationEvent });
+    else refetchConversationsSoon();
+    return;
+  }
+
+  const activity = backgroundActivity(name);
+  const at = MARKS_ACTIVITY.has(name) ? new Date() : undefined;
+  if (destination === 'open') {
+    // The open conversation has no "news"; whether it works matters when it's reopened.
+    if (activity && (at || state.conversations.find((c) => c.id === id)?.busy !== activity.busy)) {
+      patchConversation(id!, { busy: activity.busy }, at);
+    }
+    handleServerEvent(name, data);
+  } else if (activity) {
+    patchConversation(id!, activity, at);
+  }
+};
+
+// ─── The conversation on screen ─────────────────────────────────────────────
 
 /** The question UI for a client tool call; `streamed` animates a preference question. */
 export const questionPrompt = (callId: string, toolName: string, input: Record<string, unknown>, streamed: boolean): ClientPrompt => {
@@ -29,12 +94,8 @@ export const questionPrompt = (callId: string, toolName: string, input: Record<s
   return prompt;
 };
 
+/** Applies an event of the open conversation to the chat. */
 export const handleServerEvent = <E extends ChatEventName>(type: E, data: ChatEvents[E]) => {
-  if (type === 'resync') {
-    void resyncHistory();
-    return;
-  }
-
   const mc = store.state.chat;
   if (!mc) return;
 

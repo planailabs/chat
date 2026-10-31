@@ -5,7 +5,7 @@
 import { escapeHtml } from '../../utils/html';
 import { SEND_ICON_SVG } from '../icons';
 
-import type { LocaleContent, ChatModeLocale } from '../../content';
+import type { LocaleContent } from '../../content';
 import type { ChatSession } from '../../app/state';
 
 // ── Chat Composer (input field) ─────────────────────────────────────────
@@ -13,17 +13,16 @@ import type { ChatSession } from '../../app/state';
 export const renderChatComposer = (
   mc: ChatSession,
   locale: LocaleContent,
-  modeLocale: ChatModeLocale,
 ): string => {
   const prompt = mc.phase === 'question' ? mc.clientPrompt : undefined;
-  const skipLabel = escapeHtml(modeLocale.cancelLabel);
+  const skipLabel = escapeHtml(locale.chat.skipLabel);
 
   const aqInput = prompt?.toolName === 'ask_question' ? prompt.input as { type?: string; question?: string } : undefined;
   const isTextQuestion = mc.phase === 'question' && aqInput?.type === 'text';
   const showComposer = mc.phase === 'idle' || mc.phase === 'error' || isTextQuestion;
 
   const placeholder = escapeHtml(
-    isTextQuestion ? (aqInput!.question ?? modeLocale.placeholder) : modeLocale.placeholder,
+    isTextQuestion ? (aqInput!.question ?? locale.chat.placeholder) : locale.chat.placeholder,
   );
 
   return showComposer
@@ -62,17 +61,12 @@ export const renderChatComposer = (
 
 // ── Hero Header ─────────────────────────────────────────────────────────
 
-export const renderHeroHeader = (
-  mc: ChatSession,
-  modeLocale: ChatModeLocale,
-): string => {
-  const isEmptyState = mc.messages.length === 0;
-  return `<div class="space-y-3 text-center md:space-y-4">
-        <p class="text-[0.65rem] uppercase tracking-[0.35em] text-(--text-muted) md:text-xs md:tracking-[0.4em]">
-          ${escapeHtml(modeLocale.heroBadgeLabel)}
-        </p>
-        <h1 class="${isEmptyState ? 'text-3xl font-semibold tracking-tight sm:text-4xl md:text-5xl' : 'text-xl font-semibold tracking-tight sm:text-2xl md:text-3xl'}">
-          ${escapeHtml(modeLocale.heading)}
+/** A new chat's heading (a conversation shows its title in the sidebar). */
+export const renderHeroHeader = (mc: ChatSession, locale: LocaleContent): string =>
+  mc.messages.length === 0
+    ? `<div class="text-center">
+        <h1 class="text-3xl font-semibold tracking-tight sm:text-4xl md:text-5xl">
+          ${escapeHtml(locale.chat.heading)}
         </h1>
-      </div>`;
-};
+      </div>`
+    : '';

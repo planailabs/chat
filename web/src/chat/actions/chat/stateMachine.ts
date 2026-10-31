@@ -11,9 +11,13 @@ import type { ChatMessage, ChatPhase, ChatSession } from '../../app/state';
 import { locales } from '../../content';
 import { ApiError, api } from '../../api';
 import { startCharacterStream } from '../../utils/stream';
-import { cacheChatMessages, savePendingSalesPrompt } from './cache';
+import { setConversationPath } from '../../app/route';
+import { cacheChatMessages, savePendingPrompt } from './cache';
 import { connectEvents } from './sse';
 import { clearPreferenceTimers } from './preference';
+import { beginNewConversation, endNewConversation } from './events';
+import { addConversation, loadConversations, patchConversation } from './conversations';
+import { titleFrom } from './conversationList';
 
 const locale = () => locales[store.state.localeKey];
 
@@ -120,7 +124,7 @@ export const transition = (mc: ChatSession, phase: ChatPhase) => {
   mc.phase = phase;
 };
 
-/** Cancels every chat timer (mode switch, new conversation). */
+/** Cancels every chat timer (switching conversations). */
 export const clearChatTimers = () => {
   if (toolTransitionTimer) {
     clearTimeout(toolTransitionTimer);
@@ -151,11 +155,10 @@ const errorText = (error: unknown): string => {
   }
 };
 
-/** Shows a failed request in the chat. */
-export const showChatError = (error: unknown) => {
+/** Shows a failed request in the chat (`mc`: only if that chat is still on screen). */
+export const showChatError = (error: unknown, mc: ChatSession | null = store.state.chat) => {
   console.error('[chat] request failed', error);
-  const mc = store.state.chat;
-  if (!mc) return;
+  if (!mc || store.state.chat !== mc) return;
   transition(mc, 'error');
   mc.error = errorText(error);
   store.notify();
@@ -167,8 +170,8 @@ export const showChatError = (error: unknown) => {
 
 const showLoginInvite = (mc: ChatSession, message: string) => {
   const invite = locale().chat.loginInvite;
-  // Sent to the sales chat after sign-in
-  savePendingSalesPrompt(message);
+  // Starts a conversation after sign-in
+  savePendingPrompt(message);
   transition(mc, 'login');
   mc.messages.push({ role: 'user', content: message });
   mc.loginInvite = {
@@ -198,19 +201,49 @@ export const sendChatMessage = async (message: string) => {
     return;
   }
 
-  const mode = state.activeChatMode;
+  const id = state.activeConversationId;
   transition(mc, 'waiting');
   mc.messages.push({ role: 'user', content: message });
   cacheChatMessages(mc.messages);
+  if (id) patchConversation(id, { busy: true }, new Date());
   store.notify();
 
   // The reply streams over the event stream: be listening before it starts.
   await connectEvents();
-  try {
-    await api.chat.send(mode, message, state.localeKey);
-  } catch (error) {
-    showChatError(error);
+  if (id) {
+    try {
+      await api.chat.send(id, message, state.localeKey);
+    } catch (error) {
+      showChatError(error, mc);
+    }
+    return;
   }
+  await startConversation(mc, message);
+};
+
+/** The first message of a new chat: the conversation gets its id, URL and sidebar entry. */
+const startConversation = async (mc: ChatSession, message: string) => {
+  beginNewConversation();
+  let id: string;
+  try {
+    ({ id } = await api.chat.send(null, message, store.state.localeKey));
+  } catch (error) {
+    endNewConversation(null);
+    showChatError(error, mc);
+    return;
+  }
+  const now = new Date().toISOString();
+  addConversation({ id, title: titleFrom(message), created_at: now, updated_at: now, busy: true });
+  // Still on this new chat: it becomes the conversation.
+  if (store.state.chat === mc && store.state.activeConversationId === null) {
+    store.state.activeConversationId = id;
+    setConversationPath(id, 'push');
+    cacheChatMessages(mc.messages, id);
+  }
+  endNewConversation(id);
+  store.notify();
+  // The server's title.
+  void loadConversations();
 };
 
 /**
@@ -222,7 +255,8 @@ const submitAnswer = async (content: string | undefined, bubbles: ChatMessage[])
   const prompt = mc?.clientPrompt;
   if (!mc || !prompt) return;
 
-  const mode = store.state.activeChatMode;
+  const id = store.state.activeConversationId;
+  if (!id) return;
   transition(mc, 'waiting');
   mc.messages.push(...bubbles);
   cacheChatMessages(mc.messages);
@@ -230,9 +264,9 @@ const submitAnswer = async (content: string | undefined, bubbles: ChatMessage[])
 
   await connectEvents();
   try {
-    await api.chat.answer(mode, prompt.callId, content);
+    await api.chat.answer(id, prompt.callId, content);
   } catch (error) {
-    showChatError(error);
+    showChatError(error, mc);
   }
 };
 
@@ -241,8 +275,7 @@ export const answerChatQuestion = (text: string) => submitAnswer(text, [{ role: 
 export const cancelChatQuestion = () => {
   const mc = store.state.chat;
   if (mc?.phase !== 'question') return Promise.resolve();
-  const cancelLabel = locale().chatModes[store.state.activeChatMode].cancelLabel;
-  return submitAnswer(undefined, [{ role: 'cancel', content: cancelLabel }]);
+  return submitAnswer(undefined, [{ role: 'cancel', content: locale().chat.skipLabel }]);
 };
 
 /** Answers a prompt_preference question whose exchange is already in the chat. */
@@ -259,9 +292,9 @@ export const decideApproval = async (callId: string, action: ApprovalAction) => 
   const mc = store.state.chat;
   if (!mc) return;
   const approval = mc.approvals.find((a) => a.callId === callId);
-  if (!approval) return;
+  const id = store.state.activeConversationId;
+  if (!approval || !id) return;
 
-  const mode = store.state.activeChatMode;
   const approved = action !== 'deny';
   // "Approve all" also covers the other calls waiting right now.
   const decided = action === 'approve_all' ? mc.approvals : [approval];
@@ -278,9 +311,9 @@ export const decideApproval = async (callId: string, action: ApprovalAction) => 
   await connectEvents();
   try {
     for (const a of decided) {
-      await api.chat.approve(mode, a.callId, approved, a === approval && action === 'approve_all' ? { all: true } : {});
+      await api.chat.approve(id, a.callId, approved, a === approval && action === 'approve_all' ? { all: true } : {});
     }
   } catch (error) {
-    showChatError(error);
+    showChatError(error, mc);
   }
 };

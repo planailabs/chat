@@ -5,15 +5,13 @@ import {
   sendChatMessage,
   answerChatQuestion,
   cancelChatQuestion,
-  switchChatMode,
   answerPreferencePrompt,
   decideApproval,
   type ApprovalAction,
 } from '../actions/chat';
-import type { ChatModeId } from '../api';
 
 export const registerChatEvents = (app: HTMLElement) => {
-  // Chat: Login Invite (anonymous sales chat sign-in)
+  // Chat: Login Invite (anonymous prompt → sign-in)
   delegateEvent(app, 'click', '[data-action="login-invite-sign-in"]', (event) => {
     event.stopPropagation();
     const invite = store.state.chat?.loginInvite;
@@ -139,36 +137,6 @@ export const registerChatEvents = (app: HTMLElement) => {
       const choice = target.getAttribute('data-choice');
       if (choice === 'yes' || choice === 'no') {
         answerPreferencePrompt(choice);
-      }
-    },
-  );
-
-  // Chat: Mode Switcher Toggle
-  delegateEvent(
-    app,
-    'click',
-    '[data-action="mode-switcher-toggle"]',
-    (event) => {
-      event.stopPropagation();
-      const dropdown = app.querySelector<HTMLElement>('[data-mode-dropdown]');
-      if (dropdown) {
-        dropdown.classList.toggle('hidden');
-      }
-    },
-  );
-
-  // Chat: Mode Switch
-  delegateEvent(
-    app,
-    'click',
-    '[data-action="switch-chat-mode"]',
-    (event, target) => {
-      event.stopPropagation();
-      const modeId = target.getAttribute('data-mode') as ChatModeId | null;
-      if (modeId) {
-        const dropdown = app.querySelector<HTMLElement>('[data-mode-dropdown]');
-        if (dropdown) dropdown.classList.add('hidden');
-        switchChatMode(modeId);
       }
     },
   );

@@ -5,7 +5,7 @@
 import { escapeHtml } from '../../utils/html';
 import { renderMarkdown } from '../../utils/markdown';
 
-import type { ChatModeLocale } from '../../content';
+import type { LocaleContent } from '../../content';
 import type { ChatSession } from '../../app/state';
 
 export const renderStreamingBubble = (mc: ChatSession): string =>
@@ -32,13 +32,13 @@ export const renderThinkingIndicator = (mc: ChatSession): string =>
 
 export const renderToolIndicator = (
   mc: ChatSession,
-  modeLocale: ChatModeLocale,
+  locale: LocaleContent,
 ): string =>
   mc.phase === 'tool'
     ? `<div class="flex justify-start">
           <div class="max-w-[min(100%,640px)] flex items-center gap-2 text-xs text-(--text-muted)">
             <span class="inline-block h-3 w-3 animate-spin rounded-full border-2 border-(--text-muted) border-t-transparent"></span>
-            ${escapeHtml(modeLocale.configuringLabel)}
+            ${escapeHtml(locale.chat.workingLabel)}
           </div>
         </div>`
     : '';

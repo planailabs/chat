@@ -1,8 +1,8 @@
 /**
  * Chat Section Component
  *
- * The conversation of the active mode. Empty, it is the hero: the mode's
- * badge and heading above the composer.
+ * The conversation on screen. Empty (a new chat), it is the hero: the
+ * heading above the composer.
  */
 
 import type { LocaleContent } from '../../content';
@@ -19,8 +19,7 @@ export const renderChatSection = (locale: LocaleContent, state: AppState): strin
   if (!mc) {
     return '';
   }
-  const modeLocale = locale.chatModes[state.activeChatMode];
-  const { questionLabel, questionButtons } = renderQuestionUI(mc, modeLocale);
+  const { questionLabel, questionButtons } = renderQuestionUI(mc, locale);
 
   const sectionClasses =
     mc.messages.length === 0
@@ -29,18 +28,18 @@ export const renderChatSection = (locale: LocaleContent, state: AppState): strin
 
   return `
     <section class="${sectionClasses}">
-      ${renderHeroHeader(mc, modeLocale)}
+      ${renderHeroHeader(mc, locale)}
       ${renderMessageBubbles(mc, locale)}
       ${renderStreamingBubble(mc)}
       ${renderThinkingIndicator(mc)}
-      ${renderToolIndicator(mc, modeLocale)}
+      ${renderToolIndicator(mc, locale)}
       ${renderErrorMessage(mc)}
       ${questionLabel}
       ${questionButtons}
       ${renderPreferenceBlock(mc, locale)}
       ${renderApprovalCards(mc, locale)}
       ${renderLoginInvite(mc, locale)}
-      ${renderChatComposer(mc, locale, modeLocale)}
+      ${renderChatComposer(mc, locale)}
     </section>
   `;
 };

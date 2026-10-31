@@ -1,12 +1,6 @@
 import { api, type UserHit } from '../chat/api';
 import { errorMessage, escapeHtml } from './logic';
 
-const MODES = ['machine_config', 'sales'] as const;
-const MODE_LABELS: Record<string, string> = {
-  machine_config: 'Machine Config',
-  sales: 'Sales',
-};
-
 export function initPrompts(container: HTMLElement) {
   const searchInput = container.querySelector('.search-input') as HTMLInputElement;
   const searchBtn = container.querySelector('.search-btn') as HTMLButtonElement;
@@ -16,7 +10,6 @@ export function initPrompts(container: HTMLElement) {
 
   // Modal elements
   const modal = document.getElementById('prompt-ext-modal')!;
-  const modeSelect = document.getElementById('prompt-ext-mode') as HTMLSelectElement;
   const contentArea = document.getElementById('prompt-ext-content') as HTMLTextAreaElement;
   const userInfo = document.getElementById('prompt-ext-user-info')!;
   const errorEl = document.getElementById('prompt-ext-error')!;
@@ -79,11 +72,9 @@ export function initPrompts(container: HTMLElement) {
       const card = document.createElement('div');
       card.className = 'flex items-center justify-between px-4 py-3 rounded-lg border border-white/10 hover:border-white/20 transition-colors';
 
-      const badges = u.extension_modes.length > 0
-        ? u.extension_modes
-            .map((m) => `<span class="text-xs px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/20">${escapeHtml(MODE_LABELS[m] ?? m)}</span>`)
-            .join(' ')
-        : '<span class="text-xs px-2 py-0.5 rounded-full bg-white/5 opacity-40 border border-white/5">No extensions</span>';
+      const badges = u.has_extension
+        ? '<span class="text-xs px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/20">Prompt extension</span>'
+        : '<span class="text-xs px-2 py-0.5 rounded-full bg-white/5 opacity-40 border border-white/5">No extension</span>';
 
       card.innerHTML = `
         <div class="flex items-center gap-3">
@@ -109,7 +100,7 @@ export function initPrompts(container: HTMLElement) {
     contentArea.value = '';
     contentArea.placeholder = 'Loading...';
     try {
-      const [extension] = await api.admin.promptExtensions(modalUser.id, modeSelect.value);
+      const [extension] = await api.admin.promptExtension(modalUser.id);
       contentArea.value = extension?.content ?? '';
     } catch (error) {
       showModalError(`Loading failed: ${errorMessage(error)}`);
@@ -122,7 +113,6 @@ export function initPrompts(container: HTMLElement) {
     modalUser = user;
     userInfo.textContent = `${user.email} (${user.id.slice(0, 12)}...)`;
     errorEl.classList.add('hidden');
-    modeSelect.value = MODES[0];
     modal.classList.remove('hidden');
     modal.classList.add('flex');
     await loadExtension();
@@ -134,11 +124,6 @@ export function initPrompts(container: HTMLElement) {
     modal.classList.remove('flex');
   }
 
-  modeSelect.addEventListener('change', () => {
-    errorEl.classList.add('hidden');
-    void loadExtension();
-  });
-
   cancelBtn.addEventListener('click', closeModal);
   modal.addEventListener('click', (e) => {
     if (e.target === modal) closeModal();
@@ -147,9 +132,8 @@ export function initPrompts(container: HTMLElement) {
     if (e.key === 'Escape' && !modal.classList.contains('hidden')) closeModal();
   });
 
-  function setModes(user: UserHit, mode: string, present: boolean) {
-    const others = user.extension_modes.filter((m) => m !== mode);
-    user.extension_modes = present ? [...others, mode].sort() : others;
+  function setHasExtension(user: UserHit, present: boolean) {
+    user.has_extension = present;
     renderUsers();
   }
 
@@ -159,16 +143,15 @@ export function initPrompts(container: HTMLElement) {
     const user = modalUser;
     const content = contentArea.value.trim();
     if (!user || !content) return;
-    const mode = modeSelect.value;
 
     saveBtn.textContent = 'Saving...';
     saveBtn.disabled = true;
     try {
-      await api.admin.setPromptExtension(user.id, mode, content);
+      await api.admin.setPromptExtension(user.id, content);
       errorEl.classList.add('hidden');
-      showStatus(`Prompt extension saved for ${user.email} (${MODE_LABELS[mode]})`, 'success');
+      showStatus(`Prompt extension saved for ${user.email}`, 'success');
       closeModal();
-      setModes(user, mode, true);
+      setHasExtension(user, true);
     } catch (error) {
       showModalError(errorMessage(error));
     } finally {
@@ -182,17 +165,16 @@ export function initPrompts(container: HTMLElement) {
   deleteBtn.addEventListener('click', async () => {
     const user = modalUser;
     if (!user) return;
-    const mode = modeSelect.value;
-    if (!confirm(`Remove prompt extension for ${user.email} (${MODE_LABELS[mode]})?`)) return;
+    if (!confirm(`Remove the prompt extension for ${user.email}?`)) return;
 
     deleteBtn.textContent = 'Deleting...';
     deleteBtn.disabled = true;
     try {
-      await api.admin.removePromptExtension(user.id, mode);
+      await api.admin.removePromptExtension(user.id);
       errorEl.classList.add('hidden');
-      showStatus(`Prompt extension removed for ${user.email} (${MODE_LABELS[mode]})`, 'success');
+      showStatus(`Prompt extension removed for ${user.email}`, 'success');
       closeModal();
-      setModes(user, mode, false);
+      setHasExtension(user, false);
     } catch (error) {
       showModalError(errorMessage(error));
     } finally {
