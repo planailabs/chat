@@ -24,6 +24,21 @@ pub struct Config {
     pub chat: Chat,
     /// mac-mgmt's public catalog, read by the sales agent with a service token.
     pub catalog: Option<Catalog>,
+    /// Acting as the user on plan.ai services (`/connector/mcp`). Without it,
+    /// modes that need a service are unavailable.
+    pub connector: Option<Connector>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Connector {
+    /// Zitadel token exchange: the exchange app and the impersonating service account.
+    pub exchange: plan_ai_connector::ExchangeConfig,
+    /// Services every user can reach (each authorizes the user itself).
+    // ponytail: one list for everyone; per-user deployments come from a
+    // plan-ai-cloud TargetSource once the console lists them.
+    #[serde(default)]
+    pub targets: Vec<plan_ai_connector::Target>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -75,6 +90,13 @@ pub struct Subnet {
     /// Agent type per chat mode, as declared in the cluster file.
     #[serde(default = "default_types")]
     pub types: std::collections::BTreeMap<String, String>,
+    /// Modes that need a connector service of this kind to be offered.
+    #[serde(default = "default_requires")]
+    pub requires: std::collections::BTreeMap<String, String>,
+}
+
+fn default_requires() -> std::collections::BTreeMap<String, String> {
+    [("machine_config".to_string(), "mac-mgmt".to_string())].into()
 }
 
 fn default_types() -> std::collections::BTreeMap<String, String> {

@@ -2831,6 +2831,7 @@ dependencies = [
  "plan-ai-accounts",
  "plan-ai-api-mcp",
  "plan-ai-auth",
+ "plan-ai-connector",
  "reqwest 0.13.5",
  "rustls",
  "schemars",
@@ -2844,6 +2845,31 @@ dependencies = [
  "tower-http",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "plan-ai-connector"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "base64 0.22.1",
+ "futures",
+ "http 1.5.0",
+ "jsonwebtoken",
+ "plan-ai-api-mcp",
+ "reqwest 0.13.5",
+ "rmcp",
+ "rustls",
+ "schemars",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "subtle",
+ "thiserror",
+ "tokio",
+ "tower",
+ "tracing",
 ]
 
 [[package]]
@@ -3368,6 +3394,7 @@ dependencies = [
  "pastey",
  "pin-project-lite",
  "rand 0.10.3",
+ "reqwest 0.13.5",
  "rmcp-macros",
  "schemars",
  "serde",

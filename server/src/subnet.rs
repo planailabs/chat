@@ -112,7 +112,7 @@ impl Pump {
         let res = self.hub.http.get(format!("{}/v1/events", self.hub.base)).bearer_auth(&self.hub.token).send().await?.error_for_status()?;
         tracing::info!("following subnet events");
         let mut turns: HashMap<String, Turn> = HashMap::new();
-        let mut stream = sse_stream::SseStream::from_byte_stream(res.bytes_stream());
+        let mut stream = sse_stream::SseStream::from_bytes_stream(res.bytes_stream());
         while let Some(sse) = stream.next().await {
             let Some(data) = sse?.data else { continue };
             let notice: Value = match serde_json::from_str(&data) {

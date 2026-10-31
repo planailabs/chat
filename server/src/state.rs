@@ -14,13 +14,15 @@ pub struct App {
     pub owners: Owners,
     pub events: broadcast::Sender<BrowserEvent>,
     pub http: reqwest::Client,
+    /// The connector's services; None without `[connector]`.
+    pub targets: Option<Arc<dyn plan_ai_connector::TargetSource>>,
 }
 
 pub type AppState = Arc<App>;
 
 /// Connects and migrates (accounts first: our tables reference its users),
 /// then starts following the hub.
-pub async fn init(cfg: &'static Config) -> anyhow::Result<AppState> {
+pub async fn init(cfg: &'static Config) -> anyhow::Result<(AppState, Option<plan_ai_connector::Connector>)> {
     let pool = PgPool::connect(&cfg.database.url).await?;
     let acc_cfg = plan_ai_accounts::Config { admin_emails: cfg.accounts.admin_emails.clone(), default_plan: "free".into() };
     let accounts = plan_ai_accounts::Accounts::connect(&cfg.database.url, acc_cfg, Arc::new(plan_ai_accounts::NoHooks)).await?;
@@ -41,6 +43,10 @@ pub async fn init(cfg: &'static Config) -> anyhow::Result<AppState> {
     let owners = Owners::load(&pool).await?;
     let (events, _) = broadcast::channel(1024);
     tokio::spawn(Pump { hub: hub.clone(), pool: pool.clone(), owners: owners.clone(), tx: events.clone() }.run());
-    Ok(Arc::new(App { cfg, pool, accounts, hub, owners, events, http: reqwest::Client::new() }))
+    let (connector, targets) = match crate::connector::build(cfg, pool.clone())? {
+        Some((c, t)) => (Some(c), Some(t)),
+        None => (None, None),
+    };
+    Ok((Arc::new(App { cfg, pool, accounts, hub, owners, events, http: reqwest::Client::new(), targets }), connector))
 }
 

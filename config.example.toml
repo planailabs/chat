@@ -29,7 +29,7 @@ admin_emails = []
 [subnet]
 url = "http://127.0.0.1:7070"
 token = "CHANGE_ME"              # subnet issue_token for client "chat"
-callback_secret = "CHANGE_ME"    # also in subnet/chat.hcl's env (CHAT_CALLBACK_SECRET)
+callback_secret = "CHANGE_ME_at_least_32_chars"   # openssl rand -hex 32; subnet sends it as CHAT_CALLBACK_SECRET
 types = { sales = "chat-sales", machine_config = "chat-machine-config" }
 
 [approval]
@@ -47,3 +47,17 @@ max_chars = 2048
 # [catalog]
 # url = "https://mgmt.plan.ai/daemon/"
 # token = "CHANGE_ME"
+
+# Acting as the user on plan.ai services (Zitadel token exchange, see
+# common/plan-ai-connector/README.md). Without it, machine_config is off.
+# [connector.exchange]
+# issuer = "https://id.plan.ai"
+# client = { method = "basic", client_id = "xxx", client_secret = "xxx" }   # app with the token-exchange grant
+# actor = { method = "jwt_profile", key = { type = "serviceaccount", keyId = "xxx", key = "-----BEGIN RSA PRIVATE KEY-----...", userId = "xxx" } }
+#
+# [[connector.targets]]
+# name = "mac-mgmt"
+# description = "Your plan.ai machine: config, skills, bundles, MCP servers, SSH keys"
+# kind = "mac-mgmt"
+# mcp_url = "https://mgmt.plan.ai/mcp"
+# audience_project_id = "xxx"

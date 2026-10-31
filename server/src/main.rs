@@ -3,6 +3,7 @@ mod api;
 mod chat;
 mod hook;
 mod config;
+mod connector;
 mod state;
 mod subnet;
 
@@ -12,7 +13,7 @@ use std::sync::Arc;
 use axum::Router;
 use axum::extract::{Query, Request, State};
 use axum::http::{StatusCode, header};
-use axum::middleware::{Next, from_fn};
+use axum::middleware::{Next, from_fn, from_fn_with_state};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -36,7 +37,7 @@ async fn main() -> anyhow::Result<()> {
     rustls::crypto::ring::default_provider().install_default().expect("install rustls crypto provider");
     mac_mgmt_common::otel::init("plan-ai-chat", "info");
     let cfg = config::load();
-    let app = state::init(cfg).await?;
+    let (app, connector) = state::init(cfg).await?;
 
     let auth_layers = if dev_no_auth() {
         tracing::warn!("DEV_ONLY_NO_AUTH=1: no sign-in, every request is dev@localhost (admin)");
@@ -50,7 +51,7 @@ async fn main() -> anyhow::Result<()> {
     let api = Router::new()
         .route("/api/v1/chat/events", get(chat_events).with_state(app.clone()))
         .merge(registry.http_router(app.clone()))
-        .layer(from_fn(session_principal))
+        .layer(from_fn_with_state(app.clone(), session_principal))
         .layer(from_fn(auth_unless_bearer));
 
     let dist = &cfg.web.static_dir;
@@ -66,7 +67,10 @@ async fn main() -> anyhow::Result<()> {
     // Subnet calls back with the callback secret: the approval hook and the
     // agents' own tools.
     let agent_mcp = agent_tools::registry(&cfg.subnet.callback_secret).mcp_service(app.clone());
-    let callbacks = Router::new().route("/hooks/pre_tool", post(hook::pre_tool)).with_state(app.clone()).route_service("/agent/mcp", agent_mcp);
+    let mut callbacks = Router::new().route("/hooks/pre_tool", post(hook::pre_tool)).with_state(app.clone()).route_service("/agent/mcp", agent_mcp);
+    if let Some(c) = &connector {
+        callbacks = callbacks.route_service("/connector/mcp", c.service());
+    }
 
     let mcp = registry.mcp_service(app.clone());
     let router = Router::new()
@@ -108,8 +112,23 @@ async fn auth_unless_bearer(req: Request, next: Next) -> Response {
 }
 
 /// A signed-in browser is an API caller too. Impersonation is recorded so
-/// handlers keep the admin from changing the user's settings.
-async fn session_principal(mut req: Request, next: Next) -> Response {
+/// handlers keep the admin from changing the user's settings. The user's
+/// Zitadel subject is recorded for the connector.
+async fn session_principal(State(app): State<AppState>, mut req: Request, next: Next) -> Response {
+    if let (Some(user), Some(sub)) = (req.extensions().get::<WebUser>(), req.extensions().get::<plan_ai_auth::OidcSubject>()) {
+        let res = sqlx::query(
+            "INSERT INTO profiles (user_id, subject) VALUES ($1, $2)
+             ON CONFLICT (user_id) DO UPDATE SET subject = EXCLUDED.subject WHERE profiles.subject IS DISTINCT FROM EXCLUDED.subject",
+        )
+        .bind(user.id)
+        .bind(&sub.subject)
+        .execute(&app.pool)
+        .await;
+        if let Err(e) = res {
+            tracing::error!("recording the Zitadel subject of {}: {e}", user.email);
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    }
     if let Some(user) = req.extensions().get::<WebUser>() {
         let mut p = plan_ai_accounts::principal_for(user);
         p.scopes["impersonating_from"] = json!(user.impersonating_from);

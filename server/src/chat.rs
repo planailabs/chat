@@ -39,6 +39,16 @@ pub fn agent_type<'a>(app: &'a App, mode: &str) -> Result<&'a str, ApiError> {
     app.cfg.subnet.types.get(mode).map(String::as_str).ok_or_else(|| ApiError::not_found(format!("unknown chat mode {mode}")))
 }
 
+/// Whether `mode` is offered to `user`: modes that act on a service need the
+/// connector to reach one of that kind.
+pub async fn available(app: &App, user: Uuid, mode: &str) -> Result<bool, ApiError> {
+    agent_type(app, mode)?;
+    let Some(kind) = app.cfg.subnet.requires.get(mode) else { return Ok(true) };
+    let Some(targets) = &app.targets else { return Ok(false) };
+    let list = targets.targets(&user.to_string()).await.map_err(|e| internal(format!("listing services: {e}")))?;
+    Ok(list.iter().any(|t| &t.kind == kind))
+}
+
 pub async fn current_agent(app: &App, user: Uuid, mode: &str) -> Result<Option<(String, bool)>, ApiError> {
     sqlx::query_as("SELECT agent_id, auto_approve FROM chat_agents WHERE user_id = $1 AND mode = $2")
         .bind(user)
@@ -88,6 +98,9 @@ async fn initial_context(app: &App, user: Uuid, mode: &str, lang: &str) -> Resul
 
 pub async fn send(app: &App, user: Uuid, mode: &str, text: &str, lang: &str) -> Result<(), ApiError> {
     let ty = agent_type(app, mode)?;
+    if !available(app, user, mode).await? {
+        return Err(ApiError::forbidden(format!("{mode} isn't available for your account")));
+    }
     let text = text.trim();
     if text.is_empty() {
         return Err(ApiError::bad_request("empty message"));

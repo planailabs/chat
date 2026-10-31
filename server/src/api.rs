@@ -168,6 +168,9 @@ pub struct ApproveInput {
 #[derive(Serialize, JsonSchema)]
 pub struct ModeInfo {
     id: String,
+    /// Offered to you (modes acting on a service need it reachable).
+    available: bool,
+    /// You have a conversation in it.
     active: bool,
 }
 
@@ -288,7 +291,11 @@ pub fn registry(auth: Arc<dyn plan_ai_api_mcp::Authenticator>) -> Registry<AppSt
             let user = user_of(&p)?;
             let mut out = vec![];
             for mode in app.cfg.subnet.types.keys() {
-                out.push(ModeInfo { id: mode.clone(), active: chat::current_agent(&app, user, mode).await?.is_some() });
+                out.push(ModeInfo {
+                    id: mode.clone(),
+                    available: chat::available(&app, user, mode).await?,
+                    active: chat::current_agent(&app, user, mode).await?.is_some(),
+                });
             }
             Ok(out)
         })
