@@ -128,13 +128,13 @@ pub async fn history(app: &App, user: Uuid, mode: &str) -> Result<Value, ApiErro
         sqlx::query_as("SELECT id, role, content, data, created_at FROM chat_messages WHERE agent_id = $1 ORDER BY seq").bind(&agent).fetch_all(&app.pool).await.map_err(internal)?;
     let messages: Vec<Value> =
         rows.into_iter().map(|(id, role, content, data, at)| json!({ "id": id, "role": role, "content": content, "data": data, "at": at })).collect();
-    let summary = app.hub.transcript(&agent).await.map_err(internal)?;
-    let state = &summary["state"];
+    // The agent's summary is flattened into its transcript.
+    let t = app.hub.transcript(&agent).await.map_err(internal)?;
     Ok(json!({
         "messages": messages,
-        "phase": state["phase"],
-        "pending_questions": state["awaiting_client"],
-        "pending_approvals": state["awaiting_approval"],
+        "phase": t["phase"],
+        "pending_questions": t["awaiting_client"],
+        "pending_approvals": t["awaiting_approval"],
         "auto_approve": auto_approve,
     }))
 }

@@ -1,5 +1,7 @@
+mod agent_tools;
 mod api;
 mod chat;
+mod hook;
 mod config;
 mod state;
 mod subnet;
@@ -13,7 +15,7 @@ use axum::http::{StatusCode, header};
 use axum::middleware::{Next, from_fn};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use futures::Stream;
 use plan_ai_api_mcp::SessionPrincipal;
 use plan_ai_auth::WebUser;
@@ -61,10 +63,16 @@ async fn main() -> anyhow::Result<()> {
         web = web.layer(layer);
     }
 
+    // Subnet calls back with the callback secret: the approval hook and the
+    // agents' own tools.
+    let agent_mcp = agent_tools::registry(&cfg.subnet.callback_secret).mcp_service(app.clone());
+    let callbacks = Router::new().route("/hooks/pre_tool", post(hook::pre_tool)).with_state(app.clone()).route_service("/agent/mcp", agent_mcp);
+
     let mcp = registry.mcp_service(app.clone());
     let router = Router::new()
         .route_service("/mcp", mcp.clone())
         .route_service("/mcp/", mcp)
+        .merge(callbacks)
         .merge(web)
         .layer(mac_mgmt_common::otel::http::trace_layer())
         .layer(from_fn(mac_mgmt_common::otel::http::record_request_metrics));
