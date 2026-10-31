@@ -28,9 +28,15 @@ One typed client, shared by chat and dashboard, for the server's `/api/v1/...` (
 - Sign-in/out are navigations: `signIn(path)` → `/auth/login?redirect=…`, `signOut()` → `/auth/logout`. There is no client-side token.
 - Admin impersonation is the `impersonate_user_id` cookie (`startImpersonation` / `stopImpersonation`); the profile's `impersonating` flag makes the UI read-only.
 
-### 3. Chat Event Stream
+### 3. Conversations and the Event Stream
 
-Replies stream over `EventSource(/api/v1/chat/events?mode=…)` (`actions/chat/sse.ts`), handled in `actions/chat/events.ts`. Connect before sending (`await connectEvents()`); on reconnect or a `resync` event the history is refetched (`actions/chat/session.ts`). `actions/chat/history.ts` maps the server's history to chat messages (pure, unit-tested).
+One assistant, many conversations per user. The open one is `store.state.activeConversationId` (null: a new chat), mirrored in the URL (`/c/<id>`, `app/route.ts`; `openConversation(id, 'push' | 'replace' | 'none')` in `actions/chat/session.ts`, popstate in `main.ts`). The first message of a new chat (`api.chat.send(null, …)`) returns the conversation's id.
+
+One `EventSource(/api/v1/chat/events)` (`actions/chat/sse.ts`) carries every conversation; each event names its `conversation`. `routeServerEvent` (`actions/chat/events.ts`) sends the open one's events to the chat, marks others in the sidebar (busy/unread, moved to the top), refetches the list for unknown ones, and holds events of a conversation being started until its id is back. Connect before sending (`await connectEvents()`); `resync` and reconnects refetch the list and the open history. Pure logic (grouping, routing, list updates) lives in `actions/chat/conversationList.ts`, `actions/chat/history.ts` and `app/route.ts`, all unit-tested.
+
+### Sidebar and applications
+
+`ui/sidebar.ts` renders New chat, the grouped conversations (rename, delete) and the applications from `content/applications.ts` (one entry per app). Regions in `main.ts` are only rewritten when their markup changes; use `replaceMarkup`/`isReplacingMarkup` (`utils/dom.ts`) so a re-render isn't mistaken for the user leaving an input.
 
 ### 4. Manual i18n & Theme Resolution
 
