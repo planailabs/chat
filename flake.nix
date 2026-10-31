@@ -52,6 +52,16 @@
           subnet = subagent-net.packages.${final.stdenv.hostPlatform.system}.default;
         };
 
-      nixosModules.default = import ./module.nix;
+      # The module's packages default to this flake's own builds (its pinned
+      # nixpkgs): the UI's pnpm-deps hash only holds with that nixpkgs' pnpm.
+      nixosModules.default = { lib, pkgs, ... }:
+        let system = pkgs.stdenv.hostPlatform.system; in {
+          imports = [ ./module.nix ];
+          services.plan-ai-chat = {
+            package = lib.mkDefault self.packages.${system}.server;
+            webPackage = lib.mkDefault self.packages.${system}.web;
+            hub.package = lib.mkDefault subagent-net.packages.${system}.default;
+          };
+        };
     };
 }
