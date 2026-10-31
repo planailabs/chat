@@ -44,7 +44,7 @@ agent "chat-sales-agent" {
     env      = "LITELLM_API_KEY"
     base_url = "https://codex.plan.ai/v1"
   }
-  model  = "claude-sonnet-4-5"
+  model  = "deepseek-flash"
   nodes  = ["chat"]
   params = { max_tokens = 2048 }
   budget = { max_tokens = 2000000, max_depth = 0, max_children = 0 }
@@ -100,7 +100,7 @@ agent "chat-machine-config-agent" {
     env      = "LITELLM_API_KEY"
     base_url = "https://codex.plan.ai/v1"
   }
-  model        = "claude-sonnet-4-5"
+  model        = "deepseek-flash"
   nodes        = ["chat"]
   params       = { max_tokens = 2048 }
   budget       = { max_tokens = 4000000, max_depth = 0, max_children = 0 }
