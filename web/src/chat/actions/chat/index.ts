@@ -1,101 +1,47 @@
 /**
- * Chat Actions — barrel re-exports and top-level actions (switchChatMode, nukeChat).
+ * Chat Actions — barrel re-exports and top-level actions (switchChatMode,
+ * startNewConversation).
  */
 
 import { store } from '../../app/store';
-import { type ClientChatModeId } from '../../constants';
-import { withImpersonate } from '../../impersonation';
-import { clearAIChatMessages, getJwt } from './cache';
+import { api, type ChatModeId } from '../../api';
+import { clearCachedChatMessages } from './cache';
 import { disconnectEvents } from './sse';
-import { restoreAIChatSession } from './session';
+import { openChat } from './session';
+import { clearChatTimers, showChatError } from './stateMachine';
 
-// ─── Re-exports ─────────────────────────────────────────────────────────────
-
-export {
-  clearChatTimers,
-  startNewsletterPrompt,
-  startPostLoginSequence,
-  setShouldRunPostLoginSequence,
-  tryStartPostLoginSequence,
-  startNewsletterReconsiderFlow,
-  handleChatNewsletterChoice,
-} from './newsletter';
-
-export {
-  clearAIChatMessages,
-  clearMachineConfigMessages,
-  consumePendingSalesPrompt,
-} from './cache';
-
+export { clearAllCachedChatMessages, clearPendingSalesPrompt, consumePendingSalesPrompt } from './cache';
 export { disconnectEvents } from './sse';
-
-export {
-  restoreAIChatSession,
-  restoreMachineConfigSession,
-} from './session';
-
+export { openChat, sendPendingSalesPrompt, showAnonymousChat, showCachedChat } from './session';
 export { answerPreferencePrompt } from './preference';
+export { sendChatMessage, answerChatQuestion, cancelChatQuestion, decideApproval, type ApprovalAction } from './stateMachine';
 
-export {
-  sendChatMessage,
-  sendMachineConfigMessage,
-  answerChatQuestion,
-  answerMachineConfigQuestion,
-  cancelChatQuestion,
-  cancelMachineConfigQuestion,
-  sendPendingSalesPrompt,
-} from './stateMachine';
-
-export {
-  handlePromptSubmit,
-  startChatFromPrompt,
-  restoreChatSession,
-} from './prompt';
-
-// ─── Top-level Actions ──────────────────────────────────────────────────────
-
-/**
- * Switches the active chat mode. Disconnects current SSE, saves state,
- * switches mode, and restores/inits the new mode.
- */
-export const switchChatMode = (newMode: ClientChatModeId): void => {
+/** Switches to another of the user's chat modes. */
+export const switchChatMode = (newMode: ChatModeId): void => {
   const state = store.state;
-  if (state.activeChatMode === newMode) return;
+  if (state.activeChatMode === newMode || !state.availableModes.includes(newMode)) return;
 
-  // Machine config requires customer token
-  if (newMode === 'machine_config' && !state.customerToken) return;
-
-  // Disconnect current EventSource
   disconnectEvents();
-
-  // Clear current chat state
-  state.chat = null;
-  state.heroPhase = 'composer';
+  clearChatTimers();
   state.activeChatMode = newMode;
-  store.notify();
-
-  // Restore/init the new mode
-  restoreAIChatSession();
+  void openChat();
 };
 
-/**
- * Dev-only: deletes all chat messages for the current user & mode via /api/chat/nuke/,
- * clears the local cache, and reloads the page.
- */
-export const nukeChat = async (): Promise<void> => {
-  const jwt = await getJwt();
-  if (!jwt) return;
-
-  const mode = store.state.activeChatMode;
+/** Ends the conversation in the active mode; the next message starts a new one. */
+export const startNewConversation = async (): Promise<void> => {
+  const state = store.state;
+  if (!state.isAuthenticated || state.impersonating) return;
+  const mode = state.activeChatMode;
   try {
-    await fetch(withImpersonate(`/api/chat/nuke/?mode=${encodeURIComponent(mode)}`), {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${jwt}` },
-    });
-  } catch {
-    // ignore network errors
+    await api.chat.reset(mode);
+  } catch (error) {
+    showChatError(error);
+    return;
   }
-
-  clearAIChatMessages(mode);
-  window.location.reload();
+  clearCachedChatMessages(mode);
+  disconnectEvents();
+  clearChatTimers();
+  if (store.state.activeChatMode === mode) {
+    await openChat();
+  }
 };

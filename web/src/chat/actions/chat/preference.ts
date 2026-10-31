@@ -1,147 +1,113 @@
 /**
- * Chat Preference — answerPreferencePrompt, preference streaming helpers.
+ * Chat Preference — the prompt_preference tool: a scripted yes/no question
+ * streamed in the UI language, the choice saved to the profile, a follow-up,
+ * then the answer for the assistant.
  */
 
 import { store } from '../../app/store';
 import { locales } from '../../content';
 import { startCharacterStream } from '../../utils/stream';
-import { cacheAIChatMessages } from './cache';
-import { answerChatQuestion } from './stateMachine';
+import { persistNewsletterChoice } from '../profile';
+import { answerPreference } from './stateMachine';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Preference Prompt Timers (for prompt_preference tool)
-// ─────────────────────────────────────────────────────────────────────────────
-export let preferenceQuestionStreamCancel: (() => void) | null = null;
-export let preferenceFollowupStreamCancel: (() => void) | null = null;
+const locale = () => locales[store.state.localeKey];
+
+let questionStreamCancel: (() => void) | null = null;
+let followupStreamCancel: (() => void) | null = null;
 
 export const clearPreferenceTimers = () => {
-  if (preferenceQuestionStreamCancel) {
-    preferenceQuestionStreamCancel();
-    preferenceQuestionStreamCancel = null;
-  }
-  if (preferenceFollowupStreamCancel) {
-    preferenceFollowupStreamCancel();
-    preferenceFollowupStreamCancel = null;
-  }
+  questionStreamCancel?.();
+  questionStreamCancel = null;
+  followupStreamCancel?.();
+  followupStreamCancel = null;
 };
 
-export const locale = () => locales[store.state.localeKey];
+const currentPreference = () => store.state.chat?.clientPrompt?.preference;
 
 export const startPreferenceQuestionStream = () => {
-  const pref = store.state.chat?.aiChat?.clientPrompt?.preference;
+  const pref = currentPreference();
   if (!pref) return;
-
-  if (preferenceQuestionStreamCancel) {
-    preferenceQuestionStreamCancel();
-    preferenceQuestionStreamCancel = null;
-  }
-
-  const totalLength = pref.questionText.length;
-  preferenceQuestionStreamCancel = startCharacterStream(
-    totalLength,
+  questionStreamCancel?.();
+  questionStreamCancel = startCharacterStream(
+    pref.questionText.length,
     pref.stream.chunkSize,
     pref.stream.intervalMs,
     (index) => {
-      const curPref = store.state.chat?.aiChat?.clientPrompt?.preference;
-      if (!curPref) return;
-      curPref.visibleQuestionText = curPref.questionText.slice(0, index);
+      const cur = currentPreference();
+      if (!cur) return;
+      cur.visibleQuestionText = cur.questionText.slice(0, index);
       store.notify();
     },
     () => {
-      preferenceQuestionStreamCancel = null;
-      const curPref = store.state.chat?.aiChat?.clientPrompt?.preference;
-      if (!curPref) return;
-      curPref.visibleQuestionText = curPref.questionText;
-      curPref.subPhase = 'awaiting_choice';
+      questionStreamCancel = null;
+      const cur = currentPreference();
+      if (!cur) return;
+      cur.visibleQuestionText = cur.questionText;
+      cur.subPhase = 'awaiting_choice';
       store.notify();
     },
   );
 };
 
 const startPreferenceFollowupStream = () => {
-  const pref = store.state.chat?.aiChat?.clientPrompt?.preference;
-  if (!pref || !pref.followupText) return;
-
-  if (preferenceFollowupStreamCancel) {
-    preferenceFollowupStreamCancel();
-    preferenceFollowupStreamCancel = null;
-  }
-
-  const totalLength = pref.followupText.length;
-  preferenceFollowupStreamCancel = startCharacterStream(
-    totalLength,
+  const pref = currentPreference();
+  if (!pref?.followupText) return;
+  followupStreamCancel?.();
+  followupStreamCancel = startCharacterStream(
+    pref.followupText.length,
     pref.stream.chunkSize,
     pref.stream.intervalMs,
     (index) => {
-      const curPref = store.state.chat?.aiChat?.clientPrompt?.preference;
-      if (!curPref || !curPref.followupText) return;
-      curPref.visibleFollowupText = curPref.followupText.slice(0, index);
+      const cur = currentPreference();
+      if (!cur?.followupText) return;
+      cur.visibleFollowupText = cur.followupText.slice(0, index);
       store.notify();
     },
     () => {
-      preferenceFollowupStreamCancel = null;
-      const curPref = store.state.chat?.aiChat?.clientPrompt?.preference;
-      if (!curPref) return;
-      curPref.visibleFollowupText = curPref.followupText;
-      curPref.subPhase = 'done';
+      followupStreamCancel = null;
+      const prompt = store.state.chat?.clientPrompt;
+      const cur = prompt?.preference;
+      if (!prompt || !cur?.followupText || !cur.choice) return;
+      cur.visibleFollowupText = cur.followupText;
+      cur.subPhase = 'done';
       store.notify();
 
-      // After follow-up completes, add exchange to messages and send answer to server
-      const mc = store.state.chat?.aiChat;
-      if (!mc || !curPref) return;
-      mc.messages.push({ role: 'assistant', content: curPref.questionText });
-      const choiceLabel = curPref.choice === 'yes' ? locale().newsletter.ctaYesLabel : locale().newsletter.ctaNoLabel;
-      mc.messages.push({ role: 'user', content: choiceLabel });
-      mc.messages.push({ role: 'assistant', content: curPref.followupText! });
-      cacheAIChatMessages(mc.messages);
-
-      const answerText = curPref.choice === 'yes' ? 'subscribed' : 'declined';
-      void answerChatQuestion(answerText);
+      // The exchange stays in the conversation; the assistant gets the answer.
+      const prefLocale = locale().preferencePrompts[prompt.input.preference_id as string];
+      void answerPreference(cur.choice, [
+        { role: 'assistant', content: cur.questionText },
+        { role: 'user', content: cur.choice === 'yes' ? prefLocale.ctaYesLabel : prefLocale.ctaNoLabel },
+        { role: 'assistant', content: cur.followupText },
+      ]);
     },
   );
 };
 
 export const answerPreferencePrompt = (choice: 'yes' | 'no') => {
-  const pref = store.state.chat?.aiChat?.clientPrompt?.preference;
-  if (!pref || pref.subPhase !== 'awaiting_choice') return;
+  const prompt = store.state.chat?.clientPrompt;
+  const pref = prompt?.preference;
+  if (!prompt || !pref || pref.subPhase !== 'awaiting_choice') return;
 
-  // Lock buttons and set choice
   pref.ctaLocked = true;
   pref.choice = choice;
   pref.subPhase = 'persisting';
   store.notify();
 
-  // Persist newsletter preference
-  const userId = store.state.userId;
-  if (!userId) return;
-
-  const subscribe = choice === 'yes';
   void (async () => {
-    try {
-      const { persistNewsletterPreference } = await import('../../supabase/newsletter');
-      await persistNewsletterPreference({
-        userId,
-        localeKey: store.state.localeKey,
-        subscribe,
-        source: 'chat_flow',
-      });
-    } catch (err) {
-      console.warn('[chat] Failed to persist newsletter preference:', err);
+    // newsletter is the only preference the profile stores
+    if (prompt.input.preference_id === 'newsletter') {
+      await persistNewsletterChoice(choice === 'yes', 'chat_flow');
     }
 
-    // Stream follow-up text
-    const curPref = store.state.chat?.aiChat?.clientPrompt?.preference;
-    if (!curPref) return;
+    const cur = currentPreference();
+    const prefContent = locale().preferencePrompts[prompt.input.preference_id as string];
+    if (!cur || !prefContent) return;
 
-    const prefId = store.state.chat?.aiChat?.clientPrompt?.input.preference_id as string;
-    const prefContent = locale().preferencePrompts[prefId];
-    if (!prefContent) return;
-
-    curPref.followupText = choice === 'yes' ? prefContent.confirmText : prefContent.declineText;
-    curPref.visibleFollowupText = '';
-    curPref.subPhase = 'streaming_followup';
+    cur.followupText = choice === 'yes' ? prefContent.confirmText : prefContent.declineText;
+    cur.visibleFollowupText = '';
+    cur.subPhase = 'streaming_followup';
     store.notify();
 
-    setTimeout(() => startPreferenceFollowupStream(), curPref.stream.initialDelayMs);
+    setTimeout(() => startPreferenceFollowupStream(), cur.stream.initialDelayMs);
   })();
 };

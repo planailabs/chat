@@ -1,69 +1,17 @@
 /**
- * Composer — chat input field, hero header, and auth CTAs.
+ * Composer — chat input field and hero header.
  */
 
 import { escapeHtml } from '../../utils/html';
-import { getOAuthIcon } from '../oauthIcons';
 import { SEND_ICON_SVG } from '../icons';
 
 import type { LocaleContent, ChatModeLocale } from '../../content';
-import type { ChatState } from '../../app/state';
-
-type AiChat = NonNullable<ChatState['aiChat']>;
-
-// ── Auth CTAs (OAuth sign-in buttons for sales chat) ────────────────────
-
-export const renderAuthCtas = (locale: LocaleContent, chat: ChatState | null): string => {
-  if (
-    !chat ||
-    !chat.ctaVisible ||
-    !chat.cta ||
-    chat.cta.type !== 'oauth_providers'
-  ) {
-    return '';
-  }
-  const providers = locale.navigation.loginMenu.providers;
-  const isLocked = Boolean(chat.isCtaLocked);
-  const containerClasses = [
-    'chat-cta-stack',
-    'flex flex-wrap gap-3 text-sm text-(--text-primary) transition-all duration-300',
-  ];
-  if (chat.ctaRevealStyle === 'fade') {
-    containerClasses.push('chat-cta-stack--fade');
-  }
-  const buttons = Object.entries(providers)
-    .map(([provider, label]) => {
-      const icon = getOAuthIcon(provider);
-      return `
-        <button
-          type="button"
-          class="chat-cta-button ${isLocked ? 'is-disabled' : ''} ${chat.selectedCta === provider ? 'is-selected' : ''}"
-          data-action="chat-oauth"
-          data-provider="${provider}"
-          ${isLocked ? 'disabled' : ''}
-          aria-disabled="${isLocked}"
-          aria-pressed="${chat.selectedCta === provider}"
-        >
-          <span class="chat-cta-button__icon" aria-hidden="true">
-            ${icon}
-          </span>
-          ${escapeHtml(label)}
-        </button>
-      `;
-    })
-    .join('');
-
-  return `
-    <div class="${containerClasses.join(' ')}">
-      ${buttons}
-    </div>
-  `;
-};
+import type { ChatSession } from '../../app/state';
 
 // ── Chat Composer (input field) ─────────────────────────────────────────
 
 export const renderChatComposer = (
-  mc: AiChat,
+  mc: ChatSession,
   locale: LocaleContent,
   modeLocale: ChatModeLocale,
 ): string => {
@@ -115,7 +63,7 @@ export const renderChatComposer = (
 // ── Hero Header ─────────────────────────────────────────────────────────
 
 export const renderHeroHeader = (
-  mc: AiChat,
+  mc: ChatSession,
   modeLocale: ChatModeLocale,
 ): string => {
   const isEmptyState = mc.messages.length === 0;

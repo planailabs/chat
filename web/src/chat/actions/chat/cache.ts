@@ -1,92 +1,119 @@
 /**
- * Chat Cache — sessionStorage persistence for AI chat messages, JWT cache,
- * and pending sales prompt (anonymous → post-login send).
+ * Chat Cache — the conversation per user and mode in sessionStorage (shown
+ * instantly on reload while the server's history loads), and the anonymous
+ * prompt carried over sign-in.
  */
 
 import { store } from '../../app/store';
-import { chatStorageKey, STORAGE_KEYS, type ClientChatModeId } from '../../constants';
+import { STORAGE_KEYS } from '../../constants';
+import type { ChatMessage } from '../../app/state';
+import type { ChatModeId } from '../../api';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// AI Chat Persistence (server-side via Supabase, sessionStorage as cache)
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Conversation cache ─────────────────────────────────────────────────────
 
-export type StoredMessage = { id?: string; role: 'user' | 'assistant' | 'cancel'; content: string };
+const messagesKey = (mode: ChatModeId) => `${STORAGE_KEYS.CHAT_PREFIX}${store.state.userId ?? 'anonymous'}-${mode}`;
 
-export const cacheAIChatMessages = (messages: StoredMessage[], modeId?: ClientChatModeId) => {
+export const cacheChatMessages = (messages: ChatMessage[], mode: ChatModeId = store.state.activeChatMode) => {
+  if (!store.state.isAuthenticated) return;
   try {
-    const key = chatStorageKey(modeId ?? store.state.activeChatMode);
-    sessionStorage.setItem(key, JSON.stringify(messages));
+    sessionStorage.setItem(messagesKey(mode), JSON.stringify(messages));
   } catch {
     // sessionStorage full or unavailable — silently ignore
   }
 };
 
-export const readCachedAIChatMessages = (modeId?: ClientChatModeId): StoredMessage[] | null => {
+export const readCachedChatMessages = (mode: ChatModeId = store.state.activeChatMode): ChatMessage[] => {
   try {
-    const key = chatStorageKey(modeId ?? store.state.activeChatMode);
-    const raw = sessionStorage.getItem(key);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    const parsed: unknown = JSON.parse(sessionStorage.getItem(messagesKey(mode)) ?? '[]');
+    if (Array.isArray(parsed)) return parsed as ChatMessage[];
   } catch {
     // corrupt data — ignore
   }
-  return null;
+  return [];
 };
 
-export const clearAIChatMessages = (modeId?: ClientChatModeId) => {
+export const clearCachedChatMessages = (mode: ChatModeId) => {
   try {
-    const key = chatStorageKey(modeId ?? store.state.activeChatMode);
-    sessionStorage.removeItem(key);
+    sessionStorage.removeItem(messagesKey(mode));
   } catch {
     // ignore
   }
 };
 
-// Legacy aliases for backwards compat
-export const cacheMachineConfigMessages = cacheAIChatMessages;
-export const readCachedMachineConfigMessages = readCachedAIChatMessages;
-export const clearMachineConfigMessages = () => clearAIChatMessages('machine_config');
+/** Forgets every cached conversation (sign-out). */
+export const clearAllCachedChatMessages = () => {
+  try {
+    const keys = Array.from({ length: sessionStorage.length }, (_, i) => sessionStorage.key(i));
+    for (const key of keys) {
+      if (key?.startsWith(STORAGE_KEYS.CHAT_PREFIX)) sessionStorage.removeItem(key);
+    }
+  } catch {
+    // ignore
+  }
+};
 
-// ─── Pending Sales Prompt (anonymous → post-login send) ─────────────────────
+// ─── Pending sales prompt (anonymous → sent after sign-in) ──────────────────
+
+/** A stashed prompt older than this is dropped. */
+const PENDING_PROMPT_MAX_AGE_MS = 30 * 60 * 1000;
+
+interface PendingPrompt {
+  prompt: string;
+  savedAt: number;
+}
+
+const storages = (): Storage[] => {
+  const out: Storage[] = [];
+  try {
+    out.push(window.sessionStorage);
+  } catch {
+    /* unavailable */
+  }
+  try {
+    out.push(window.localStorage);
+  } catch {
+    /* unavailable */
+  }
+  return out;
+};
 
 export const savePendingSalesPrompt = (prompt: string) => {
-  try {
-    sessionStorage.setItem(STORAGE_KEYS.PENDING_SALES_PROMPT, prompt);
-  } catch { /* ignore */ }
+  const value = JSON.stringify({ prompt, savedAt: Date.now() } satisfies PendingPrompt);
+  for (const storage of storages()) {
+    try {
+      storage.setItem(STORAGE_KEYS.PENDING_SALES_PROMPT, value);
+    } catch {
+      /* ignore */
+    }
+  }
 };
 
 export const readPendingSalesPrompt = (): string | null => {
-  try {
-    return sessionStorage.getItem(STORAGE_KEYS.PENDING_SALES_PROMPT);
-  } catch {
-    return null;
+  for (const storage of storages()) {
+    try {
+      const parsed = JSON.parse(storage.getItem(STORAGE_KEYS.PENDING_SALES_PROMPT) ?? 'null') as PendingPrompt | null;
+      if (parsed && typeof parsed.prompt === 'string' && Date.now() - parsed.savedAt < PENDING_PROMPT_MAX_AGE_MS) {
+        return parsed.prompt;
+      }
+    } catch {
+      /* corrupt or unavailable */
+    }
+  }
+  return null;
+};
+
+export const clearPendingSalesPrompt = () => {
+  for (const storage of storages()) {
+    try {
+      storage.removeItem(STORAGE_KEYS.PENDING_SALES_PROMPT);
+    } catch {
+      /* ignore */
+    }
   }
 };
 
 export const consumePendingSalesPrompt = (): string | null => {
-  try {
-    const prompt = sessionStorage.getItem(STORAGE_KEYS.PENDING_SALES_PROMPT);
-    if (prompt) {
-      sessionStorage.removeItem(STORAGE_KEYS.PENDING_SALES_PROMPT);
-    }
-    return prompt;
-  } catch {
-    return null;
-  }
-};
-
-// ─── JWT Cache ──────────────────────────────────────────────────────────────
-
-export let cachedJwt: { token: string; expiresAt: number } | null = null;
-
-export const clearCachedJwt = () => { cachedJwt = null; };
-
-export const getJwt = async (): Promise<string | null> => {
-  if (cachedJwt && Date.now() < cachedJwt.expiresAt) return cachedJwt.token;
-  const { supabaseClient } = await import('../../supabase/client');
-  const session = await supabaseClient?.auth.getSession();
-  const token = session?.data?.session?.access_token ?? null;
-  if (token) cachedJwt = { token, expiresAt: Date.now() + 30_000 };
-  return token;
+  const prompt = readPendingSalesPrompt();
+  clearPendingSalesPrompt();
+  return prompt;
 };

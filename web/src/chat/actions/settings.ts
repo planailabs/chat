@@ -1,92 +1,68 @@
 /**
  * Settings Actions
  *
- * Handles user settings operations:
  * - Newsletter subscription toggle
  * - Account deletion request
- * - Data export (GDPR compliance)
+ * - Data export (GDPR)
  *
- * All state transitions go through the profile state machine.
+ * State transitions go through the profile state machine.
  */
 
 import { store } from '../app/store';
-import { persistProfilePreferences } from '../supabase/profile';
-import {
-  persistNewsletterPreference,
-  type NewsletterSource,
-} from '../supabase/newsletter';
-import { exportUserData, downloadJson } from '../supabase/export';
-import { isSupabaseConfigured } from '../supabase/client';
-import { getLocaleDateString } from '../utils/date';
-import { handleSignOut } from './auth';
-import { setNewsletterStatus } from './profile';
-import { tryStartPostLoginSequence } from './chat';
+import { api } from '../api';
 import type { LocaleContent } from '../content';
-import { isImpersonating } from '../impersonation';
-import {
-  profileSetNewsletterSyncing,
-  profileSetDataExport,
-  profileSetDeletion,
-} from '../app/profileState';
-
+import { getLocaleDateString } from '../utils/date';
+import { downloadJson } from '../utils/download';
+import { profileSetDataExport, profileSetDeletion, profileSetNewsletterSyncing } from '../app/profileState';
+import { handleSignOut } from './auth';
+import { persistNewsletterChoice } from './profile';
 
 // ─── Account Deletion ───────────────────────────────────────────────────────
 
 export const requestAccountDeletion = async (locale: LocaleContent) => {
-  if (isImpersonating()) return;
   const state = store.state;
-  if (!state.userId || !state.isAuthenticated) return;
-  if (typeof window === 'undefined' ||
-      !window.confirm(locale.settings.sections.privacy.deleteConfirmation)) {
-    return;
-  }
+  if (!state.isAuthenticated || state.impersonating) return;
+  if (!window.confirm(locale.settings.sections.privacy.deleteConfirmation)) return;
 
   const ps = state.profile;
   profileSetNewsletterSyncing(ps, true);
   store.notify();
 
   try {
-    const timestamp = new Date().toISOString();
-    await persistProfilePreferences({
-      userId: state.userId,
-      pendingDeletion: true,
-      deletionRequestedAt: timestamp,
-    });
-    const scheduledMessage =
-      locale.settings.sections.privacy.deleteScheduledInfo.replace(
-        '{{date}}',
-        getLocaleDateString(Date.parse(timestamp), state.localeKey) ?? '30 days',
-      );
-    alert(scheduledMessage);
-    profileSetDeletion(ps, true, Date.parse(timestamp));
-    store.notify();
-    await handleSignOut();
+    await api.profile.requestDeletion();
   } catch (error) {
     console.error('[settings] Account deletion request failed', error);
-    alert('Unable to schedule account deletion right now. Please try again.');
-  } finally {
+    alert(locale.settings.sections.privacy.deleteError);
     profileSetNewsletterSyncing(ps, false);
     store.notify();
+    return;
   }
+  const requestedAt = Date.now();
+  profileSetDeletion(ps, true, requestedAt);
+  profileSetNewsletterSyncing(ps, false);
+  store.notify();
+  alert(
+    locale.settings.sections.privacy.deleteScheduledInfo.replace(
+      '{{date}}',
+      getLocaleDateString(requestedAt, state.localeKey) ?? '30 days',
+    ),
+  );
+  handleSignOut();
 };
 
-// ─── Data Export ─────────────────────────────────────────────────────────────
+// ─── Data Export ────────────────────────────────────────────────────────────
 
 export const handleDataExport = async (locale: LocaleContent) => {
   const state = store.state;
   const ps = state.profile;
-  if (!state.userId || !state.isAuthenticated ||
-      ps.dataExportInFlight || ps.dataExportStatus !== 'idle') {
-    return;
-  }
+  if (!state.isAuthenticated || ps.dataExportInFlight || ps.dataExportStatus !== 'idle') return;
 
   profileSetDataExport(ps, 'started', true);
   store.notify();
 
   try {
-    const exportPayload = await exportUserData({ userId: state.userId });
-    const filename = `planai-export-${new Date().toISOString().split('T')[0]}.json`;
-    downloadJson(exportPayload, filename);
+    const data = await api.profile.export();
+    downloadJson(data, `planai-export-${new Date().toISOString().split('T')[0]}.json`);
     profileSetDataExport(ps, 'done', false);
   } catch (error) {
     console.error('[settings] Data export failed', error);
@@ -97,50 +73,13 @@ export const handleDataExport = async (locale: LocaleContent) => {
   }
 };
 
-// ─── Newsletter ──────────────────────────────────────────────────────────────
-
-export const persistNewsletterChoice = async (
-  choice: 'yes' | 'no',
-  source: NewsletterSource,
-): Promise<boolean> => {
-  if (isImpersonating()) return true;
-  const subscribe = choice === 'yes';
-  const state = store.state;
-  if (!state.userId) return false;
-  if (!isSupabaseConfigured) {
-    setNewsletterStatus(subscribe ? 'subscribed' : 'unsubscribed');
-    tryStartPostLoginSequence();
-    return true;
-  }
-
-  const ps = state.profile;
-  profileSetNewsletterSyncing(ps, true);
-  store.notify();
-
-  try {
-    await persistNewsletterPreference({
-      userId: state.userId,
-      localeKey: state.localeKey,
-      subscribe,
-      source,
-    });
-    setNewsletterStatus(subscribe ? 'subscribed' : 'unsubscribed');
-    tryStartPostLoginSequence();
-    return true;
-  } catch (error) {
-    console.error('[supabase] Failed to persist newsletter preference', error);
-    return false;
-  } finally {
-    profileSetNewsletterSyncing(ps, false);
-    store.notify();
-  }
-};
+// ─── Newsletter ─────────────────────────────────────────────────────────────
 
 export const handleSettingsNewsletterToggle = (checked: boolean) => {
-  const choice = checked ? 'yes' : 'no';
   const targetStatus = checked ? 'subscribed' : 'unsubscribed';
   if (store.state.profile.newsletterStatus === targetStatus) return;
-  void persistNewsletterChoice(choice, 'settings_overlay').then((didPersist) => {
-    if (!didPersist) store.notify();
+  // On failure (or while impersonating) the re-render restores the toggle.
+  void persistNewsletterChoice(checked, 'settings').then((saved) => {
+    if (!saved) store.notify();
   });
 };

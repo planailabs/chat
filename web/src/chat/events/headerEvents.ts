@@ -4,17 +4,14 @@ import { cycleThemeMode } from '../actions/theme';
 import { locales, type LocaleKey } from '../content/index';
 import { persistLocaleSelection } from '../app/state';
 import { persistLanguagePreference } from '../actions/profile';
-import { launchOAuthFlow, handleSignOut } from '../actions/auth';
-import type { AuthProvider } from '../auth/controller';
+import { handleSignIn, handleSignOut, handleStopImpersonation } from '../actions/auth';
 import { openSettingsOverlay } from '../actions/overlay';
-import { nukeChat } from '../actions/chat';
+import { startNewConversation } from '../actions/chat';
 
 export const registerHeaderEvents = (app: HTMLElement) => {
   // Header: Theme Toggle
   delegateEvent(app, 'click', '[data-action="theme-toggle"]', () => {
     cycleThemeMode();
-    // Persist handled inside setThemeMode now, but we can trigger profile sync if needed.
-    // cycleThemeMode in actions/theme.ts calls persistProfilePreferences internally.
   });
 
   // Header: Language Toggle
@@ -49,32 +46,11 @@ export const registerHeaderEvents = (app: HTMLElement) => {
     },
   );
 
-  // Header: Auth Toggle
-  delegateEvent(app, 'click', '[data-action="auth-toggle"]', (event) => {
+  // Header: Sign In
+  delegateEvent(app, 'click', '[data-action="sign-in"]', (event) => {
     event.stopPropagation();
-    const state = store.state;
-    store.setState({
-      isLanguageMenuOpen: false,
-      isAuthMenuOpen: !state.isAuthMenuOpen,
-    });
+    handleSignIn();
   });
-
-  // Header: OAuth Provider Click
-  delegateEvent(
-    app,
-    'click',
-    '[data-action="oauth-provider"]',
-    (event, target) => {
-      event.stopPropagation();
-      const provider = target.getAttribute(
-        'data-provider',
-      ) as AuthProvider | null;
-      store.setState({ isAuthMenuOpen: false });
-      if (provider) {
-        void launchOAuthFlow(provider, 'nav');
-      }
-    },
-  );
 
   // Header: User Menu Toggle
   delegateEvent(app, 'click', '[data-action="user-menu-toggle"]', (event) => {
@@ -97,20 +73,20 @@ export const registerHeaderEvents = (app: HTMLElement) => {
   delegateEvent(app, 'click', '[data-action="sign-out"]', (event) => {
     event.stopPropagation();
     store.setState({ isAuthMenuOpen: false });
-    void handleSignOut();
+    handleSignOut();
   });
 
-  // Header: Nuke Chat (dev only)
-  delegateEvent(app, 'click', '[data-action="nuke-chat"]', (event) => {
+  // Header: New Conversation
+  delegateEvent(app, 'click', '[data-action="new-conversation"]', (event) => {
     event.stopPropagation();
     store.setState({ isAuthMenuOpen: false });
-    void nukeChat();
+    void startNewConversation();
   });
 
-  // Header: Stop Impersonation (navigates to home, removing ?impersonate param)
+  // Header: Stop Impersonation (menu entry and banner)
   delegateEvent(app, 'click', '[data-action="stop-impersonation"]', (event) => {
     event.stopPropagation();
     store.setState({ isAuthMenuOpen: false });
-    window.location.href = '/';
+    handleStopImpersonation();
   });
 };

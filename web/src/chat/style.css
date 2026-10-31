@@ -112,7 +112,7 @@ body {
   }
 }
 
-/* Fade-in effect on load/refresh, skipped after OAuth redirect */
+/* Fade-in effect on the first visit in a session */
 html.is-first-visit #app {
   opacity: 0;
   transition: none;
@@ -537,41 +537,6 @@ html.is-first-visit #app {
     border-radius: 999px;
   }
 
-  .composer-limit {
-    font-size: 0.75rem;
-    text-align: right;
-    color: var(--text-muted);
-    min-height: 1rem;
-    opacity: 0;
-    margin-top: 0.5rem;
-    padding-right: 0.5rem;
-    transition: opacity 0.15s ease;
-  }
-
-  .composer-limit[data-visible='true'] {
-    opacity: 1;
-  }
-
-  .chat-cta-button__icon {
-    display: inline-flex;
-    width: 18px;
-    height: 18px;
-    flex: 0 0 18px;
-  }
-
-  .chat-cta-button__icon svg {
-    width: 100%;
-    height: 100%;
-    filter: grayscale(1) opacity(0.85);
-    transition: filter 150ms ease;
-  }
-
-  .chat-cta-button:hover .chat-cta-button__icon svg,
-  .chat-cta-button:focus-visible .chat-cta-button__icon svg,
-  .chat-cta-button.is-selected .chat-cta-button__icon svg {
-    filter: none;
-  }
-
   .chat-cta-stack--fade {
     animation: chat-cta-fade-in 240ms ease forwards;
   }
@@ -677,32 +642,7 @@ html.is-first-visit #app {
     position: relative;
   }
 
-  .settings-avatar img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-
-  /* Fallback icon - hidden by default when sibling image present */
-  .settings-avatar img + .settings-avatar-fallback {
-    display: none;
-    position: absolute;
-    inset: 0;
-    align-items: center;
-    justify-content: center;
-  }
-
-  /* Show fallback when image fails */
-  .settings-avatar[data-error='true'] img {
-    display: none;
-  }
-
-  .settings-avatar[data-error='true'] .settings-avatar-fallback {
-    display: flex;
-  }
-
-  /* Default fallback (when no image at all) */
-  .settings-avatar > .settings-avatar-fallback:only-child {
+  .settings-avatar > .settings-avatar-fallback {
     display: flex;
     width: 100%;
     height: 100%;
@@ -882,40 +822,6 @@ html.is-first-visit #app {
     position: relative;
   }
 
-  .avatar-shell img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    pointer-events: none;
-  }
-
-  /* Fallback icon container - hidden by default when image present */
-  .avatar-shell .avatar-fallback-icon {
-    display: none;
-    position: absolute;
-    inset: 0;
-    align-items: center;
-    justify-content: center;
-    background: color-mix(in lab, var(--surface-hover) 80%, transparent);
-    border-radius: 999px;
-  }
-
-  .avatar-shell .avatar-fallback-icon svg {
-    width: 70%;
-    height: 70%;
-    color: var(--text-muted);
-  }
-
-  /* Show fallback when image fails to load */
-  .avatar-shell[data-error='true'] img {
-    display: none;
-  }
-
-  .avatar-shell[data-error='true'] .avatar-fallback-icon {
-    display: flex;
-  }
-
-  /* Fallback for avatar shells without images (default fallback state) */
   .avatar-shell.avatar-fallback {
     background: color-mix(in lab, var(--surface-hover) 80%, transparent);
   }
@@ -924,31 +830,6 @@ html.is-first-visit #app {
     width: 70%;
     height: 70%;
     color: var(--text-muted);
-  }
-
-  @keyframes bubble-in {
-    from {
-      opacity: 0;
-      transform: translateY(8px) scale(0.97);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0) scale(1);
-    }
-  }
-
-  .bubble-animate {
-    will-change: opacity, transform;
-  }
-
-  .bubble-animate.just-entered {
-    animation: bubble-in 220ms ease forwards;
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .bubble-animate.just-entered {
-      animation: none;
-    }
   }
 
   button,
@@ -1004,19 +885,6 @@ html.is-first-visit #app {
     z-index: 40;
   }
 
-  .dropdown-header {
-    font-size: 0.85rem;
-    font-weight: 600;
-    color: var(--text-primary);
-    margin-bottom: 0.75rem;
-  }
-
-  .dropdown-divider {
-    height: 1px;
-    background: color-mix(in lab, var(--border-muted) 85%, transparent);
-    margin: 0 -1rem 0.75rem;
-  }
-
   .dropdown-option {
     width: 100%;
     text-align: left;
@@ -1042,26 +910,6 @@ html.is-first-visit #app {
   .dropdown-option .check-icon {
     width: 1rem;
     height: 1rem;
-  }
-
-  .dropdown-option__icon {
-    display: inline-flex;
-    width: 18px;
-    height: 18px;
-    margin-right: 0.45rem;
-    flex: 0 0 18px;
-  }
-
-  .dropdown-option__icon svg {
-    width: 100%;
-    height: 100%;
-    filter: grayscale(1) opacity(0.8);
-    transition: filter 150ms ease;
-  }
-
-  .dropdown-option:hover .dropdown-option__icon svg,
-  .dropdown-option:focus-visible .dropdown-option__icon svg {
-    filter: none;
   }
 
   /* ─────────────────────────────────────────────────────────────────────────

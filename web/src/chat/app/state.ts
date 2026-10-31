@@ -1,188 +1,124 @@
 /**
  * Application State Types and Initialization
  *
- * Defines the shape of global application state and provides
- * factory functions for creating initial state.
- *
  * State is divided into:
- * - UI state (menus, overlays, phases)
- * - User state (authentication, profile)
- * - Chat state (conversation, streaming)
+ * - UI state (menus, overlay)
+ * - User state (from GET /api/v1/profile/me, cached for the first render)
+ * - Chat state (the conversation in the active mode)
  * - Preference state (theme, locale, newsletter)
  */
 
-import {
-  defaultLocale,
-  supportedLocales,
-  type LocaleKey,
-  type ScenarioId,
-  type StepCta,
-  type StreamConfig,
-} from '../content';
-import { STORAGE_KEYS, type ClientChatModeId } from '../constants';
+import { defaultLocale, supportedLocales, type LocaleKey, type StreamConfig } from '../content';
+import { STORAGE_KEYS } from '../constants';
+import type { ChatModeId } from '../api';
 import { createProfileState, type ProfileState } from './profileState';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Type Definitions
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Phases of the hero/composer section */
-export type HeroPhase = 'composer' | 'fading' | 'chat';
-
 /** Theme mode preference */
 export type ThemeMode = 'system' | 'light' | 'dark';
 
 /**
- * Chat conversation state.
- * Tracks the current conversation, streaming state, and CTAs.
+ * Chat phases:
+ *   idle      → composer visible
+ *   waiting   → thinking indicator, waiting for the assistant
+ *   streaming → the assistant's text arrives
+ *   tool      → the assistant runs a tool (spinner)
+ *   question  → ask_question / prompt_preference UI
+ *   approval  → tool calls wait for the user's approval
+ *   login     → anonymous user prompt submitted, showing sign-in invite
+ *   error     → error message + composer
  */
-export interface ChatState {
-  /** The user's submitted prompt */
-  userPrompt: string;
-  /** Currently visible portion of assistant's response (for streaming) */
-  assistantVisibleText: string;
-  /** Full assistant response text */
-  assistantFullText: string;
-  /** Streaming configuration for this response */
-  stream: StreamConfig;
-  /** Whether the assistant response is currently streaming */
-  isStreaming: boolean;
-  /** Whether CTAs (call-to-action buttons) are visible */
-  ctaVisible: boolean;
-  /** Animation style for CTA reveal */
-  ctaRevealStyle?: 'fade' | 'instant';
-  /** Currently selected CTA (e.g., OAuth provider) */
-  selectedCta?: string | null;
-  /** Whether CTAs are locked (disabled during auth flow) */
-  isCtaLocked?: boolean;
-  /** Animation flag: user bubble just appeared */
-  userBubbleJustAppeared?: boolean;
-  /** Animation flag: assistant bubble just appeared */
-  assistantBubbleJustAppeared?: boolean;
-  /** Whether this chat was restored from pre-auth cache */
-  restoredFromChatCta?: boolean;
-  /** Current CTA configuration */
-  cta?: StepCta;
-  /** Current position in the conversation scenario */
-  conversation?: {
-    scenarioId: ScenarioId;
-    stepId: string;
-  };
-  /** AI chat state (machine config, sales, newsletter, etc.) */
-  aiChat?: {
-    messages: Array<{ id?: string; role: 'user' | 'assistant' | 'cancel'; content: string }>;
-    /**
-     * State machine phase:
-     *   idle      → composer visible
-     *   waiting   → thinking indicator, waiting for server
-     *   streaming → word-by-word reveal of assistant text
-     *   tool      → executing a server-side tool (spinner indicator)
-     *   question  → showing ask_question UI (buttons or text input)
-     *   login     → anonymous user prompt submitted, showing sign-in invite
-     *   error     → error message + composer
-     */
-    phase: 'idle' | 'waiting' | 'streaming' | 'tool' | 'question' | 'login' | 'error';
-    /** Word-by-word streaming reveal of the last assistant message */
-    streamingText?: { full: string; visible: string };
-    error?: string;
-    /** Active client-side tool prompt (waiting for user input) */
-    clientPrompt?: {
-      toolName: string;
-      input: Record<string, unknown>;
-      preference?: {
-        subPhase: 'streaming_question' | 'awaiting_choice' | 'persisting' | 'streaming_followup' | 'done';
-        questionText: string;
-        visibleQuestionText: string;
-        followupText?: string;
-        visibleFollowupText?: string;
-        stream: StreamConfig;
-        choice?: 'yes' | 'no';
-        ctaLocked?: boolean;
-      };
-    };
-    /** Login invite state (anonymous user submitted prompt, showing sign-in) */
-    loginInvite?: {
-      text: string;
-      visibleText: string;
-      stream: StreamConfig;
-      isStreaming: boolean;
-      ctaVisible: boolean;
-      selectedProvider?: string | null;
-      ctaLocked?: boolean;
-    };
-    /** Name of currently executing tool (set during 'tool' phase) */
-    toolName?: string;
-  };
-  /** Post-login UI state (signed-in bubble, newsletter prompt) */
-  postLogin?: {
-    signedInBubbleVisible: boolean;
-    signedInBubbleJustAppeared?: boolean;
-    newsletter?: {
-      visibleText: string;
-      fullText: string;
-      stream: StreamConfig;
-      isStreaming: boolean;
-      ctaVisible: boolean;
-      enableCtas?: boolean;
-      ctaLocked?: boolean;
-      choice?: 'yes' | 'no';
-      response?: 'yes' | 'no';
-      responseBubble?: string;
-      followup?: {
-        visibleText: string;
-        fullText: string;
-        stream: StreamConfig;
-        isStreaming: boolean;
-      };
-    };
-  };
+export type ChatPhase = 'idle' | 'waiting' | 'streaming' | 'tool' | 'question' | 'approval' | 'login' | 'error';
+
+export type ApprovalDecision = 'approved' | 'denied';
+
+/** A tool call the assistant wants to make, waiting for the user. */
+export interface PendingApproval {
+  callId: string;
+  name: string;
+  input: unknown;
+  reason: string | null;
 }
 
-/**
- * Root application state interface.
- * Contains all UI, user, and preference state.
- */
+export type ChatMessage =
+  | { role: 'user' | 'assistant' | 'cancel'; content: string }
+  /** A past approval request; `decision` is known for the ones made here. */
+  | ({ role: 'approval'; decision: ApprovalDecision | null } & PendingApproval);
+
+/** prompt_preference: scripted question with yes/no buttons and a follow-up. */
+export interface PreferencePrompt {
+  subPhase: 'streaming_question' | 'awaiting_choice' | 'persisting' | 'streaming_followup' | 'done';
+  questionText: string;
+  visibleQuestionText: string;
+  followupText?: string;
+  visibleFollowupText?: string;
+  stream: StreamConfig;
+  choice?: 'yes' | 'no';
+  ctaLocked?: boolean;
+}
+
+/** A client-side tool call (question) waiting for the user's answer. */
+export interface ClientPrompt {
+  callId: string;
+  toolName: string;
+  input: Record<string, unknown>;
+  preference?: PreferencePrompt;
+}
+
+export interface LoginInvite {
+  text: string;
+  visibleText: string;
+  stream: StreamConfig;
+  isStreaming: boolean;
+  ctaVisible: boolean;
+  ctaLocked?: boolean;
+}
+
+/** The conversation in the active chat mode. */
+export interface ChatSession {
+  messages: ChatMessage[];
+  phase: ChatPhase;
+  /** The assistant's text block arriving right now */
+  streamingText?: string;
+  error?: string;
+  clientPrompt?: ClientPrompt;
+  /** Tool calls waiting for approval (shown in the 'approval' phase) */
+  approvals: PendingApproval[];
+  loginInvite?: LoginInvite;
+  /** Name of the running tool (set during 'tool' phase) */
+  toolName?: string;
+}
+
 export interface AppState {
   // ─── Preferences ───────────────────────────────────────────────────────────
-  /** Selected locale key */
   localeKey: LocaleKey;
-  /** Theme mode preference */
   themeMode: ThemeMode;
 
   // ─── UI State ──────────────────────────────────────────────────────────────
-  /** Whether the language dropdown is open */
   isLanguageMenuOpen: boolean;
-  /** Whether the auth/user dropdown is open */
   isAuthMenuOpen: boolean;
-  /** Whether the settings overlay is visible */
   isSettingsOverlayOpen: boolean;
-  /** Current hero section phase */
-  heroPhase: HeroPhase;
 
   // ─── User State ────────────────────────────────────────────────────────────
-  /** Whether user is authenticated */
   isAuthenticated: boolean;
-  /** Supabase user ID (if authenticated) */
   userId: string | null;
-  /** User's email address */
   userEmail: string | null;
-  /** User's avatar URL from OAuth provider */
-  userAvatarUrl: string | null;
-  /** User's display name from OAuth provider */
   userDisplayName: string | null;
-  /** Whether user is an admin */
   isAdmin: boolean;
-  /** mac-mgmt customer token (if user has one) */
-  customerToken: string | null;
+  /** An admin looks at this user's account (read-only). */
+  impersonating: boolean;
+  /** Chat modes offered to the user */
+  availableModes: ChatModeId[];
 
   // ─── Chat State ────────────────────────────────────────────────────────────
-  /** Active AI chat mode */
-  activeChatMode: ClientChatModeId;
-  /** Current chat conversation state (null when not in chat phase) */
-  chat: ChatState | null;
+  activeChatMode: ChatModeId;
+  /** null until the chat is set up on load */
+  chat: ChatSession | null;
 
   // ─── Profile State Machine ─────────────────────────────────────────────────
-  /** Profile preferences lifecycle (idle → loading → ready | error) */
   profile: ProfileState;
 }
 
@@ -190,10 +126,6 @@ export interface AppState {
 // Locale Detection
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Reads stored locale preference from sessionStorage.
- * Returns null if not found or invalid.
- */
 const readStoredLocale = (): LocaleKey | null => {
   try {
     const stored = sessionStorage.getItem(STORAGE_KEYS.LANGUAGE);
@@ -206,15 +138,10 @@ const readStoredLocale = (): LocaleKey | null => {
   return null;
 };
 
-/**
- * Detects browser locale from navigator.language.
- * Falls back to default locale if detection fails.
- */
 const detectBrowserLocale = (): LocaleKey => {
   if (typeof navigator === 'undefined') {
     return defaultLocale;
   }
-
   const lang = navigator.language || navigator.languages?.[0];
   if (lang && lang.toLowerCase().startsWith('de')) {
     return 'de';
@@ -226,74 +153,54 @@ const detectBrowserLocale = (): LocaleKey => {
 // User State Cache (prevents header layout shift on reload)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Cached user state for instant header render */
-interface CachedUserState {
+export interface CachedUserState {
   isAuthenticated: boolean;
   userId: string | null;
   userEmail: string | null;
-  userAvatarUrl: string | null;
   userDisplayName: string | null;
   isAdmin: boolean;
-  customerToken: string | null;
-  timestamp: number;
+  impersonating: boolean;
+  availableModes: ChatModeId[];
 }
 
-/** Max age for cached user state (5 minutes) */
+/** Max age for a cached signed-in state (5 minutes) */
 const USER_CACHE_MAX_AGE_MS = 5 * 60 * 1000;
 
-/**
- * Reads cached user state from sessionStorage.
- * Returns null if not found, invalid, or expired.
- */
-const readCachedUserState = (): Partial<CachedUserState> | null => {
+const readCachedUserState = (): CachedUserState | null => {
   try {
     const stored = sessionStorage.getItem(STORAGE_KEYS.USER_CACHE);
     if (!stored) return null;
-
-    const parsed = JSON.parse(stored) as CachedUserState;
-
-    // Validate structure
-    if (typeof parsed.isAuthenticated !== 'boolean') return null;
-
-    // Check expiration (only if authenticated - we want to remember logged-out state)
-    if (parsed.isAuthenticated && parsed.timestamp) {
-      const age = Date.now() - parsed.timestamp;
-      if (age > USER_CACHE_MAX_AGE_MS) return null;
+    const parsed = JSON.parse(stored) as CachedUserState & { timestamp?: number };
+    if (typeof parsed.isAuthenticated !== 'boolean' || !Array.isArray(parsed.availableModes)) return null;
+    // Signed-in state expires; the signed-out state is remembered.
+    if (parsed.isAuthenticated && (!parsed.timestamp || Date.now() - parsed.timestamp > USER_CACHE_MAX_AGE_MS)) {
+      return null;
     }
-
     return parsed;
   } catch {
     return null;
   }
 };
 
-/**
- * Saves user state to sessionStorage for instant header render on reload.
- */
-export const cacheUserState = (state: {
-  isAuthenticated: boolean;
-  userId: string | null;
-  userEmail: string | null;
-  userAvatarUrl: string | null;
-  userDisplayName: string | null;
-  isAdmin: boolean;
-  customerToken?: string | null;
-}): void => {
+/** Saves the user state from AppState for instant header render on reload. */
+export const cacheUserState = (state: AppState): void => {
+  const cached: CachedUserState & { timestamp: number } = {
+    isAuthenticated: state.isAuthenticated,
+    userId: state.userId,
+    userEmail: state.userEmail,
+    userDisplayName: state.userDisplayName,
+    isAdmin: state.isAdmin,
+    impersonating: state.impersonating,
+    availableModes: state.availableModes,
+    timestamp: Date.now(),
+  };
   try {
-    const cached: CachedUserState = {
-      ...state,
-      customerToken: state.customerToken ?? null,
-      timestamp: Date.now(),
-    };
     sessionStorage.setItem(STORAGE_KEYS.USER_CACHE, JSON.stringify(cached));
   } catch {
     // Ignore storage errors
   }
 };
 
-/**
- * Clears cached user state (call on sign out).
- */
 export const clearCachedUserState = (): void => {
   try {
     sessionStorage.removeItem(STORAGE_KEYS.USER_CACHE);
@@ -306,45 +213,46 @@ export const clearCachedUserState = (): void => {
 // State Factory
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** The signed-out user state. */
+export const signedOutUserState = (): Pick<
+  AppState,
+  'isAuthenticated' | 'userId' | 'userEmail' | 'userDisplayName' | 'isAdmin' | 'impersonating' | 'availableModes'
+> => ({
+  isAuthenticated: false,
+  userId: null,
+  userEmail: null,
+  userDisplayName: null,
+  isAdmin: false,
+  impersonating: false,
+  availableModes: ['sales'],
+});
+
 /**
- * Creates the initial application state.
- * Uses cached user state from sessionStorage to prevent header layout shift.
+ * Creates the initial application state, with the cached user state so the
+ * header doesn't flash "Sign in" before the profile loads.
  */
 export const createInitialState = (): AppState => {
-  // Read cached user state for instant header render
   const cachedUser = readCachedUserState();
-
+  const user = cachedUser ?? signedOutUserState();
   return {
     localeKey: readStoredLocale() ?? detectBrowserLocale(),
-    themeMode: 'system', // Initial default, will be updated by initTheme
+    themeMode: 'system', // Updated by initTheme
     isLanguageMenuOpen: false,
     isAuthMenuOpen: false,
     isSettingsOverlayOpen: false,
-    // Use cached auth state to prevent "Sign in" → avatar flash
-    isAuthenticated: cachedUser?.isAuthenticated ?? false,
-    userId: cachedUser?.userId ?? null,
-    userEmail: cachedUser?.userEmail ?? null,
-    userAvatarUrl: cachedUser?.userAvatarUrl ?? null,
-    userDisplayName: cachedUser?.userDisplayName ?? null,
-    isAdmin: cachedUser?.isAdmin ?? false,
-    customerToken: cachedUser?.customerToken ?? null,
-    heroPhase: 'composer',
-    activeChatMode: cachedUser?.isAuthenticated && cachedUser?.customerToken ? 'machine_config' : 'sales',
+    ...user,
+    // Machine configuration is the default where it's offered.
+    activeChatMode: user.isAuthenticated && user.availableModes.includes('machine_config') ? 'machine_config' : 'sales',
     chat: null,
     profile: createProfileState(),
   };
 };
 
-/**
- * Persists locale selection to sessionStorage and updates document lang.
- * Fails silently if storage is unavailable.
- */
+/** Persists locale selection to sessionStorage and updates document lang. */
 export const persistLocaleSelection = (locale: LocaleKey): void => {
-  // Update document lang attribute for accessibility and SEO
   if (typeof document !== 'undefined') {
     document.documentElement.lang = locale;
   }
-
   try {
     sessionStorage.setItem(STORAGE_KEYS.LANGUAGE, locale);
   } catch {

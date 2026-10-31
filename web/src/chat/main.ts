@@ -1,18 +1,13 @@
 import './style.css';
-import './style.css';
 import { locales } from './content/index';
 import { renderHeader } from './ui/header';
 import { renderSettingsOverlay } from './ui/settingsOverlay';
-import { renderHeroSection, attachComposerInteractions } from './ui/hero';
 import { renderChatSection } from './ui/chat';
-import { initAuthController } from './auth/controller';
-import { isSupabaseConfigured } from './supabase/client';
 import { store } from './app/store';
-import { streamingController } from './chat/streaming';
 
 // Actions
-import { applySessionToState } from './actions/auth';
-import { handlePromptSubmit, restoreChatSession, restoreAIChatSession } from './actions/chat';
+import { startSession } from './actions/auth';
+import { showCachedChat } from './actions/chat';
 import { initTheme } from './actions/theme';
 
 import { registerAllEvents } from './events';
@@ -54,41 +49,24 @@ const initApp = () => {
       headerRegion.innerHTML = renderHeader({ locale, state });
     }
 
-    // 2. Update Main Region (Hero or Chat)
+    // 2. Update Main Region (the chat; empty, it is the hero)
     if (mainRegion) {
-      const isChat = state.heroPhase === 'chat';
-      const isChatEmpty =
-        isChat && state.chat?.aiChat?.messages.length === 0;
-      // Empty chat (e.g. sales initial): use justify-center to vertically center content
-      // Chat with messages: use pt-10 and start from top with scrollable content
-      const mainClasses =
-        !isChat || isChatEmpty
-          ? 'flex min-h-0 flex-1 flex-col items-center justify-center px-6 py-6'
-          : 'flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-6 pt-10 pb-6';
+      const mc = state.chat;
+      const isEmpty = !mc || mc.messages.length === 0;
+      // Empty chat: content vertically centered.
+      // Chat with messages: starts from the top and scrolls.
+      const mainClasses = isEmpty
+        ? 'flex min-h-0 flex-1 flex-col items-center justify-center px-6 py-6'
+        : 'flex min-h-0 flex-1 flex-col items-center overflow-y-auto px-6 pt-10 pb-6';
 
       if (mainRegion.className !== mainClasses) {
         mainRegion.className = mainClasses;
       }
 
-      if (isChat) {
-        // Update Chat
-        mainRegion.innerHTML = renderChatSection(locale, state);
-        // Auto-scroll to bottom during streaming, waiting, or just after
-        const mc = state.chat?.aiChat;
-        if (mc?.phase === 'streaming' || mc?.phase === 'waiting'
-          || mc?.phase === 'idle' || mc?.phase === 'question' || mc?.phase === 'login') {
-          mainRegion.scrollTop = mainRegion.scrollHeight;
-        }
-      } else {
-        // Update Hero
-        const heroMarkup = renderHeroSection(locale, state);
-        if (mainRegion.innerHTML !== heroMarkup) {
-          mainRegion.innerHTML = heroMarkup;
-          // Re-attach specific hero interactions that can't be easily delegated
-          attachComposerInteractions(app, locale, state, (value) =>
-            handlePromptSubmit(value, locale),
-          );
-        }
+      mainRegion.innerHTML = renderChatSection(locale, state);
+      // Keep the newest part of the conversation in view
+      if (mc && mc.phase !== 'error' && mc.phase !== 'tool') {
+        mainRegion.scrollTop = mainRegion.scrollHeight;
       }
     }
 
@@ -116,9 +94,6 @@ const initApp = () => {
         overlayRegion.innerHTML = overlayMarkup;
       }
     }
-
-    // Reset animations after render
-    streamingController.scheduleBubbleAnimationReset();
   }
 
   // --- Event Delegation Setup ---
@@ -127,24 +102,13 @@ const initApp = () => {
     registerAllEvents(app);
   }
 
-  // Initialization
+  // Initialization: the last known state right away, then the server's
   initTheme();
-  if (isSupabaseConfigured) {
-    initAuthController(applySessionToState);
-  } else {
-    console.warn(
-      '[auth] Supabase not configured — set VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY to enable sign-in.',
-    );
-  }
-
-  restoreChatSession();
-  restoreAIChatSession();
-  store.notify(); // Initial render via subscription (since render is subscribed)
-  // We can also explicitly call render() if store.subscribe doesn't fire on init
-  // But subscribe only fires on changes. So we do need an initial render.
+  showCachedChat();
   render();
+  void startSession();
 
-  // Trigger fade-in effect (on load/refresh, not OAuth redirect)
+  // Trigger fade-in effect (first visit in this session)
   // This runs after the initial render is complete
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {

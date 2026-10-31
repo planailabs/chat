@@ -11,12 +11,7 @@
  * - Mutable state object for performance (shallow copy on setState)
  */
 
-import {
-  createInitialState,
-  clearCachedUserState,
-  type AppState,
-} from './state';
-import { createProfileState } from './profileState';
+import { createInitialState, type AppState } from './state';
 
 /** Listener callback type for store subscriptions */
 type StoreListener = () => void;
@@ -85,31 +80,6 @@ class Store {
     const updates =
       typeof updater === 'function' ? updater(this.state) : updater;
     this.state = { ...this.state, ...updates };
-    this.notify();
-  }
-
-  /**
-   * Resets state to initial values, preserving user-independent settings.
-   * Used for sign-out to clear user data while keeping preferences like locale.
-   */
-  reset(): void {
-    // Clear cached user state first so createInitialState doesn't restore it
-    clearCachedUserState();
-
-    const currentLocale = this.state.localeKey;
-    const currentTheme = this.state.themeMode;
-    this.state = {
-      ...createInitialState(),
-      localeKey: currentLocale,
-      themeMode: currentTheme,
-      profile: createProfileState(),
-      // Explicitly clear user state (in case cache wasn't cleared)
-      isAuthenticated: false,
-      userId: null,
-      userEmail: null,
-      userAvatarUrl: null,
-      userDisplayName: null,
-    };
     this.notify();
   }
 }

@@ -1,58 +1,57 @@
 /**
- * Chat State Machine — transition(), sendChatMessage, answerChatQuestion,
- * cancelChatQuestion, sendPendingSalesPrompt, legacy aliases.
+ * Chat State Machine — transition(), and the user's side of the conversation:
+ * sending messages, answering or dismissing questions, approving tool calls,
+ * and the sign-in invite for anonymous users.
+ *
+ * The assistant's side arrives over the event stream (events.ts).
  */
 
 import { store } from '../../app/store';
+import type { ChatMessage, ChatPhase, ChatSession } from '../../app/state';
 import { locales } from '../../content';
+import { ApiError, api } from '../../api';
 import { startCharacterStream } from '../../utils/stream';
-import { cacheAIChatMessages, savePendingSalesPrompt, type StoredMessage } from './cache';
-import { connectEvents, postMessage } from './sse';
+import { cacheChatMessages, savePendingSalesPrompt } from './cache';
+import { connectEvents } from './sse';
 import { clearPreferenceTimers } from './preference';
-import { fetchAIChatHistory, initAIChat } from './session';
+
+const locale = () => locales[store.state.localeKey];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Login Invite Stream (anonymous user prompt → sign-in invite)
 // ─────────────────────────────────────────────────────────────────────────────
+
 let loginInviteStreamCancel: (() => void) | null = null;
 
-export const clearLoginInviteTimer = () => {
-  if (loginInviteStreamCancel) {
-    loginInviteStreamCancel();
-    loginInviteStreamCancel = null;
-  }
+const clearLoginInviteTimer = () => {
+  loginInviteStreamCancel?.();
+  loginInviteStreamCancel = null;
 };
 
 const startLoginInviteStream = () => {
-  const invite = store.state.chat?.aiChat?.loginInvite;
+  const invite = store.state.chat?.loginInvite;
   if (!invite) return;
-
-  if (loginInviteStreamCancel) {
-    loginInviteStreamCancel();
-    loginInviteStreamCancel = null;
-  }
-
-  const totalLength = invite.text.length;
+  clearLoginInviteTimer();
   loginInviteStreamCancel = startCharacterStream(
-    totalLength,
+    invite.text.length,
     invite.stream.chunkSize,
     invite.stream.intervalMs,
     (index) => {
-      const cur = store.state.chat?.aiChat?.loginInvite;
+      const cur = store.state.chat?.loginInvite;
       if (!cur) return;
       cur.visibleText = cur.text.slice(0, index);
       store.notify();
     },
     () => {
       loginInviteStreamCancel = null;
-      const cur = store.state.chat?.aiChat?.loginInvite;
+      const cur = store.state.chat?.loginInvite;
       if (!cur) return;
       cur.visibleText = cur.text;
       cur.isStreaming = false;
       store.notify();
-      // Reveal OAuth CTAs after a short delay
+      // Reveal the sign-in button after a short delay
       setTimeout(() => {
-        const curInvite = store.state.chat?.aiChat?.loginInvite;
+        const curInvite = store.state.chat?.loginInvite;
         if (curInvite) {
           curInvite.ctaVisible = true;
           store.notify();
@@ -63,32 +62,30 @@ const startLoginInviteStream = () => {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AI Chat State Machine
+// Phases
 //
-// Phases: idle → waiting → streaming → question → waiting → ...
-//                                    → idle (done)
-//         any  → error
+// idle → waiting → streaming → question | approval → waiting → ... → idle
+// any  → error
 //
-// transition() is the single entry point for all phase changes. It cleans up
-// the previous phase (cancels streaming, clears question/error) before
-// entering the new one, which prevents stale UI from leaking across phases.
+// transition() is the single entry point for phase changes. It cleans up the
+// previous phase (finishes streamed text, clears question/error) before
+// entering the new one, so stale UI can't leak across phases.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Pending delayed transition from tool → waiting */
 let toolTransitionTimer: ReturnType<typeof setTimeout> | null = null;
 const TOOL_TRANSITION_DELAY_MS = 500;
 
-/**
- * Transition to a new phase, cleaning up any state from the previous one.
- * Always call this instead of setting phase/fields directly.
- */
-export const transition = (
-  mc: NonNullable<typeof store.state.chat>['aiChat'],
-  phase: 'idle' | 'waiting' | 'streaming' | 'tool' | 'question' | 'login' | 'error',
-) => {
-  if (!mc) return;
+/** Ends a streamed text block: it becomes an assistant message. */
+export const finishStreamingText = (mc: ChatSession) => {
+  if (mc.streamingText) {
+    mc.messages.push({ role: 'assistant', content: mc.streamingText });
+    cacheChatMessages(mc.messages);
+  }
+  mc.streamingText = undefined;
+};
 
-  // Always cancel a pending tool→waiting transition
+export const transition = (mc: ChatSession, phase: ChatPhase) => {
   if (toolTransitionTimer) {
     clearTimeout(toolTransitionTimer);
     toolTransitionTimer = null;
@@ -98,8 +95,7 @@ export const transition = (
   if (mc.phase === 'tool' && phase === 'waiting') {
     toolTransitionTimer = setTimeout(() => {
       toolTransitionTimer = null;
-      const cur = store.state.chat?.aiChat;
-      // Only transition if still in tool phase (another event may have moved us)
+      const cur = store.state.chat;
       if (cur?.phase === 'tool') {
         cur.phase = 'waiting';
         cur.toolName = undefined;
@@ -109,165 +105,182 @@ export const transition = (
     return;
   }
 
-  // tool → tool: new tool starting while still showing previous — just update name
+  // tool → tool: another tool starts while the spinner shows — caller updates the name
   if (mc.phase === 'tool' && phase === 'tool') {
     return;
   }
 
-  // Finalize any pending streaming text before leaving the phase
-  if (mc.streamingText?.full) {
-    mc.messages.push({ role: 'assistant', content: mc.streamingText.full });
-    cacheAIChatMessages(mc.messages);
-  }
-
-  // Clear transient state from any previous phase
-  mc.streamingText = undefined;
+  finishStreamingText(mc);
   mc.clientPrompt = undefined;
   mc.error = undefined;
   mc.toolName = undefined;
-
-  // Cancel any preference streaming timers
   clearPreferenceTimers();
   clearLoginInviteTimer();
   mc.loginInvite = undefined;
-
   mc.phase = phase;
 };
 
+/** Cancels every chat timer (mode switch, new conversation). */
+export const clearChatTimers = () => {
+  if (toolTransitionTimer) {
+    clearTimeout(toolTransitionTimer);
+    toolTransitionTimer = null;
+  }
+  clearPreferenceTimers();
+  clearLoginInviteTimer();
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
-// Chat Message Sending
+// Errors
 // ─────────────────────────────────────────────────────────────────────────────
+
+const errorText = (error: unknown): string => {
+  const errors = locale().chat.errors;
+  if (!(error instanceof ApiError)) return errors.generic;
+  switch (error.status) {
+    case 401:
+      return errors.signedOut;
+    case 402:
+      return errors.rateLimited;
+    case 403:
+      return store.state.impersonating ? errors.readOnly : errors.unavailable;
+    case 413:
+      return errors.tooLong;
+    default:
+      return errors.generic;
+  }
+};
+
+/** Shows a failed request in the chat. */
+export const showChatError = (error: unknown) => {
+  console.error('[chat] request failed', error);
+  const mc = store.state.chat;
+  if (!mc) return;
+  transition(mc, 'error');
+  mc.error = errorText(error);
+  store.notify();
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sending
+// ─────────────────────────────────────────────────────────────────────────────
+
+const showLoginInvite = (mc: ChatSession, message: string) => {
+  const invite = locale().chat.loginInvite;
+  // Sent to the sales chat after sign-in
+  savePendingSalesPrompt(message);
+  transition(mc, 'login');
+  mc.messages.push({ role: 'user', content: message });
+  mc.loginInvite = {
+    text: invite.text,
+    visibleText: '',
+    stream: invite.stream,
+    isStreaming: true,
+    ctaVisible: false,
+  };
+  store.notify();
+  setTimeout(() => startLoginInviteStream(), invite.stream.initialDelayMs);
+};
 
 export const sendChatMessage = async (message: string) => {
   const state = store.state;
-  if (!state.chat?.aiChat) return;
+  const mc = state.chat;
+  if (!mc) return;
 
-  // Anonymous user: save prompt and show sign-in invite within aiChat
-  if (!state.isAuthenticated || !state.userId) {
-    const mc = state.chat.aiChat;
-    const currentLocale = locales[state.localeKey];
-    // Save the prompt for post-login send to sales bot
-    savePendingSalesPrompt(message);
-    // Add as user message and transition to login phase
-    mc.messages.push({ role: 'user', content: message });
-    const inviteStep = currentLocale.conversationScenarios.anonymousInvite.steps['invite-intro'];
-    mc.loginInvite = {
-      text: inviteStep.text,
-      visibleText: '',
-      stream: inviteStep.stream,
-      isStreaming: true,
-      ctaVisible: false,
-    };
-    mc.phase = 'login';
-    cacheAIChatMessages(mc.messages);
-    store.notify();
-    // Start streaming the sign-in invite text
-    setTimeout(() => startLoginInviteStream(), inviteStep.stream.initialDelayMs);
+  if (!state.isAuthenticated) {
+    showLoginInvite(mc, message);
     return;
   }
 
-  const mc = state.chat.aiChat;
-
-  // If there's an active question, route as answer
+  // A text question is answered through the composer
   if (mc.phase === 'question') {
-    answerChatQuestion(message);
+    await answerChatQuestion(message);
     return;
   }
 
+  const mode = state.activeChatMode;
   transition(mc, 'waiting');
   mc.messages.push({ role: 'user', content: message });
+  cacheChatMessages(mc.messages);
   store.notify();
 
-  // Ensure EventSource is connected before posting
+  // The reply streams over the event stream: be listening before it starts.
   await connectEvents();
-
-  // POST the message — events arrive via SSE
-  void postMessage({ type: 'message', text: message });
+  try {
+    await api.chat.send(mode, message, state.localeKey);
+  } catch (error) {
+    showChatError(error);
+  }
 };
-
-// Legacy alias
-export const sendMachineConfigMessage = sendChatMessage;
 
 /**
- * Sends the user's answer to a pending question via POST.
+ * Answers the pending question; `content` undefined dismisses it.
+ * `bubble` is what the chat shows for the answer.
  */
-export const answerChatQuestion = async (text: string) => {
-  const mc = store.state.chat?.aiChat;
-  if (!mc) return;
-
-  transition(mc, 'waiting');
-  mc.messages.push({ role: 'user', content: text });
-  cacheAIChatMessages(mc.messages);
-  store.notify();
-
-  await connectEvents();
-  void postMessage({ type: 'answer', text });
-};
-
-// Legacy alias
-export const answerMachineConfigQuestion = answerChatQuestion;
-
-export const cancelChatQuestion = async () => {
-  const mc = store.state.chat?.aiChat;
-  if (!mc || mc.phase !== 'question') return;
+const submitAnswer = async (content: string | undefined, bubbles: ChatMessage[]) => {
+  const mc = store.state.chat;
+  const prompt = mc?.clientPrompt;
+  if (!mc || !prompt) return;
 
   const mode = store.state.activeChatMode;
-  const cancelLabel = locales[store.state.localeKey].chatModes[mode].cancelLabel;
   transition(mc, 'waiting');
-  mc.messages.push({ role: 'cancel', content: cancelLabel });
-  cacheAIChatMessages(mc.messages);
+  mc.messages.push(...bubbles);
+  cacheChatMessages(mc.messages);
   store.notify();
 
   await connectEvents();
-  void postMessage({ type: 'answer', text: '__cancel__' });
+  try {
+    await api.chat.answer(mode, prompt.callId, content);
+  } catch (error) {
+    showChatError(error);
+  }
 };
 
-// Legacy alias
-export const cancelMachineConfigQuestion = cancelChatQuestion;
+export const answerChatQuestion = (text: string) => submitAnswer(text, [{ role: 'user', content: text }]);
 
-/**
- * Sends a pending sales prompt after login. Handles the full lifecycle:
- * inits sales chat → fetches history → cancels any pending question → sends prompt.
- */
-export const sendPendingSalesPrompt = async (prompt: string): Promise<void> => {
-  const state = store.state;
+export const cancelChatQuestion = () => {
+  const mc = store.state.chat;
+  if (mc?.phase !== 'question') return Promise.resolve();
+  const cancelLabel = locale().chatModes[store.state.activeChatMode].cancelLabel;
+  return submitAnswer(undefined, [{ role: 'cancel', content: cancelLabel }]);
+};
 
-  // Switch to sales mode and init empty chat
-  state.activeChatMode = 'sales';
-  state.chat = null;
-  state.heroPhase = 'composer';
-  store.notify();
+/** Answers a prompt_preference question whose exchange is already in the chat. */
+export const answerPreference = (choice: 'yes' | 'no', exchange: ChatMessage[]) =>
+  submitAnswer(choice === 'yes' ? 'subscribed' : 'declined', exchange);
 
-  // Init the AI chat UI immediately (shows empty state)
-  initAIChat([], 'idle');
-  store.notify();
+// ─────────────────────────────────────────────────────────────────────────────
+// Approvals
+// ─────────────────────────────────────────────────────────────────────────────
 
-  // Connect SSE and fetch server history
-  await connectEvents();
-  const result = await fetchAIChatHistory('sales');
+export type ApprovalAction = 'approve' | 'deny' | 'approve_all';
 
-  const mc = store.state.chat?.aiChat;
+export const decideApproval = async (callId: string, action: ApprovalAction) => {
+  const mc = store.state.chat;
   if (!mc) return;
+  const approval = mc.approvals.find((a) => a.callId === callId);
+  if (!approval) return;
 
-  // Apply server history
-  if (result && result.messages.length > 0) {
-    const cancelLabel = locales[state.localeKey].chatModes.sales.cancelLabel;
-    mc.messages = result.messages.map((m) =>
-      m.role === 'cancel' ? { ...m, content: m.content || cancelLabel } : m,
-    );
+  const mode = store.state.activeChatMode;
+  const approved = action !== 'deny';
+  // "Approve all" also covers the other calls waiting right now.
+  const decided = action === 'approve_all' ? mc.approvals : [approval];
+  mc.approvals = mc.approvals.filter((a) => !decided.includes(a));
+  for (const a of decided) {
+    mc.messages.push({ role: 'approval', ...a, decision: approved ? 'approved' : 'denied' });
   }
-
-  // If server is waiting for an answer, cancel it first
-  if (result?.phase === 'waiting_for_answer') {
-    mc.phase = 'idle';
-    store.notify();
-    await postMessage({ type: 'answer', text: '__cancel__' });
-    // Brief wait for server to process cancellation
-    await new Promise((r) => setTimeout(r, 500));
+  cacheChatMessages(mc.messages);
+  if (mc.approvals.length === 0) {
+    transition(mc, 'waiting');
   }
-
-  // Now send the actual prompt
-  mc.phase = 'idle';
   store.notify();
-  void sendChatMessage(prompt);
+
+  await connectEvents();
+  try {
+    for (const a of decided) {
+      await api.chat.approve(mode, a.callId, approved, a === approval && action === 'approve_all' ? { all: true } : {});
+    }
+  } catch (error) {
+    showChatError(error);
+  }
 };

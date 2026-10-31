@@ -41,9 +41,8 @@
         root.lang = resolveLanguage();
 
         // Fade-in logic: show only on first visit within session
-        // Skip for: OAuth redirects, back navigation, or returning from external pages (legal docs)
+        // Skip for: returning from sign-in, back navigation, or external pages (legal docs)
         const VISITED_KEY = 'planai-visited';
-        const isOAuthRedirect = window.location.hash.includes('access_token');
         let hasVisitedBefore = false;
         try {
           hasVisitedBefore = sessionStorage.getItem(VISITED_KEY) === '1';
@@ -51,7 +50,7 @@
         } catch {
           /* ignore sessionStorage errors */
         }
-        if (!isOAuthRedirect && !hasVisitedBefore) {
+        if (!hasVisitedBefore) {
           root.classList.add('is-first-visit');
         }
 

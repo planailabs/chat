@@ -1,42 +1,45 @@
 /**
- * Chat Bubbles — renders user, assistant, and cancel message bubbles
- * for the AI chat conversation.
+ * Chat Bubbles — renders the conversation: user, assistant (markdown),
+ * dismissed questions and approval records.
  */
 
 import { escapeHtml } from '../../utils/html';
 import { renderMarkdown } from '../../utils/markdown';
+import { renderApprovalRecord } from './approvals';
 
-import type { ChatState } from '../../app/state';
+import type { LocaleContent } from '../../content';
+import type { ChatSession } from '../../app/state';
 
-type AiChat = NonNullable<ChatState['aiChat']>;
-
-export const renderMessageBubbles = (mc: AiChat): string =>
+export const renderMessageBubbles = (mc: ChatSession, locale: LocaleContent): string =>
   mc.messages
     .map((msg) => {
-      if (msg.role === 'cancel') {
-        return `
+      switch (msg.role) {
+        case 'approval':
+          return renderApprovalRecord(msg, locale);
+        case 'cancel':
+          return `
             <div class="flex justify-end">
               <p class="max-w-[min(100%,640px)] rounded-3xl px-5 py-3 text-sm italic text-(--text-muted)">
                 ${escapeHtml(msg.content)}
               </p>
             </div>
           `;
-      }
-      if (msg.role === 'user') {
-        return `
+        case 'user':
+          return `
             <div class="flex justify-end">
               <p class="max-w-[min(100%,640px)] rounded-3xl bg-(--surface-elevated) px-5 py-3 text-base text-(--text-primary)">
                 ${escapeHtml(msg.content)}
               </p>
             </div>
           `;
-      }
-      return `
-          <div class="flex justify-start">
-            <div class="chat-markdown max-w-[min(100%,640px)] text-base leading-relaxed text-(--text-primary)">
-              ${renderMarkdown(msg.content)}
+        case 'assistant':
+          return `
+            <div class="flex justify-start">
+              <div class="chat-markdown max-w-[min(100%,640px)] text-base leading-relaxed text-(--text-primary)">
+                ${renderMarkdown(msg.content)}
+              </div>
             </div>
-          </div>
-        `;
+          `;
+      }
     })
     .join('');

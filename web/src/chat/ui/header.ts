@@ -15,11 +15,10 @@ import {
   type LocaleContent,
 } from '../content';
 import type { AppState } from '../app/state';
-import { getOAuthIcon } from './oauthIcons';
+import type { ChatModeId } from '../api';
 import { escapeHtml } from '../utils/html';
 import { store } from '../app/store';
-import { APP_VERSION, type ClientChatModeId } from '../constants';
-import { getImpersonateId } from '../impersonation';
+import { APP_VERSION } from '../constants';
 
 /**
  * Counter for unique SVG mask IDs to prevent DOM conflicts.
@@ -136,43 +135,19 @@ const renderLanguageOptions = (currentLocale: LocaleKey): string =>
     })
     .join('');
 
-const renderAuthOptions = (locale: LocaleContent): string =>
-  Object.entries(locale.navigation.loginMenu.providers)
-    .map(([provider, label]) => {
-      const icon = getOAuthIcon(provider);
-      return `<button
-        type="button"
-        class="dropdown-option"
-        data-action="oauth-provider"
-        data-provider="${provider}"
-        role="menuitem">
-        <span class="dropdown-option__icon" aria-hidden="true">${icon}</span>
-        <span>${escapeHtml(label)}</span>
-      </button>`;
-    })
-    .join('');
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Mode Switcher
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface ChatModeOption {
-  id: ClientChatModeId;
-  label: string;
-  requiresToken: boolean;
-}
-
-const getModeOptions = (locale: LocaleContent): ChatModeOption[] => [
-  { id: 'machine_config', label: locale.chatModes.machine_config.heroBadgeLabel, requiresToken: true },
-  { id: 'sales', label: locale.chatModes.sales.heroBadgeLabel, requiresToken: false },
-];
+const MODE_ORDER: ChatModeId[] = ['machine_config', 'sales'];
 
 const renderModeSwitcher = (locale: LocaleContent, state: AppState): string => {
   if (!state.isAuthenticated) return '';
 
-  const options = getModeOptions(locale).filter(
-    (opt) => !opt.requiresToken || state.customerToken,
-  );
+  const options = MODE_ORDER.filter((id) => state.availableModes.includes(id)).map((id) => ({
+    id,
+    label: locale.chatModes[id].heroBadgeLabel,
+  }));
 
   // Don't show switcher if only one option available
   if (options.length <= 1) return '';
@@ -250,23 +225,7 @@ export const renderHeader = ({ locale, state }: HeaderParams): string => {
     ? ''
     : `data-tooltip="${escapeHtml(navigation.settingsLabel)}"`;
 
-  // Avatar content: user image with fallback on error, or default icon
-  // The fallback SVG is always present but hidden; shown via CSS when image fails
-  // referrerpolicy="no-referrer" is required for Google avatars (they block unknown referrers)
-  const avatarContent = state.userAvatarUrl
-    ? `<span class="avatar-shell">
-        <img
-          src="${escapeHtml(state.userAvatarUrl)}"
-          alt="${escapeHtml(navigation.settingsLabel)}"
-          decoding="async"
-          loading="eager"
-          referrerpolicy="no-referrer"
-          onload="this.parentElement.dataset.loaded='true'"
-          onerror="this.parentElement.dataset.error='true'"
-        />
-        <span class="avatar-fallback-icon" aria-hidden="true">${getUserIconSvg()}</span>
-      </span>`
-    : `<span class="avatar-shell avatar-fallback">${getUserIconSvg()}</span>`;
+  const avatarContent = `<span class="avatar-shell avatar-fallback">${getUserIconSvg()}</span>`;
 
   // Dropdown menus
   const languageDropdown = state.isLanguageMenuOpen
@@ -275,14 +234,20 @@ export const renderHeader = ({ locale, state }: HeaderParams): string => {
       </div>`
     : '';
 
-  const authDropdown = !state.isAuthMenuOpen
-    ? ''
-    : state.isAuthenticated
+  const authDropdown =
+    state.isAuthMenuOpen && state.isAuthenticated
       ? `<div class="dropdown-panel" role="menu">
           <div class="flex flex-col gap-1">
             <button type="button" class="dropdown-option" data-action="settings-link">
               <span>${navigation.settingsLabel}</span>
             </button>
+            ${
+              state.impersonating
+                ? ''
+                : `<button type="button" class="dropdown-option" data-action="new-conversation">
+                    <span>${escapeHtml(navigation.newConversationLabel)}</span>
+                  </button>`
+            }
             ${
               state.isAdmin
                 ? `<a href="/dashboard/" class="dropdown-option" data-action="dashboard-link">
@@ -290,19 +255,12 @@ export const renderHeader = ({ locale, state }: HeaderParams): string => {
                    </a>`
                 : ''
             }
-            ${import.meta.env.DEV ? `<button type="button" class="dropdown-option text-red-500" data-action="nuke-chat">
-                <span>Nuke</span>
-              </button>` : ''}
-            <button type="button" class="dropdown-option" data-action="${getImpersonateId() ? 'stop-impersonation' : 'sign-out'}">
-              <span>${getImpersonateId() ? 'Stop impersonation' : navigation.loginMenu.signOutLabel}</span>
+            <button type="button" class="dropdown-option" data-action="${state.impersonating ? 'stop-impersonation' : 'sign-out'}">
+              <span>${state.impersonating ? 'Stop impersonation' : navigation.loginMenu.signOutLabel}</span>
             </button>
           </div>
         </div>`
-      : `<div class="dropdown-panel" role="menu">
-          <div class="dropdown-header">${navigation.loginMenu.title}</div>
-          <div class="dropdown-divider"></div>
-          <div class="flex flex-col gap-1">${renderAuthOptions(locale)}</div>
-        </div>`;
+      : '';
 
   // Auth button: avatar for authenticated, sign-in pill for guests
   const authButton = state.isAuthenticated
@@ -318,21 +276,14 @@ export const renderHeader = ({ locale, state }: HeaderParams): string => {
     : `<button
         class="pill-button"
         type="button"
-        data-action="auth-toggle"
-        aria-haspopup="menu"
-        aria-expanded="${state.isAuthMenuOpen}">
+        data-action="sign-in">
         ${navigation.loginMenu.labelLoggedOut}
       </button>`;
 
-  // Impersonation banner — show email if loaded, fall back to truncated ID
-  const impersonateId = getImpersonateId();
-  const impersonateLabel = impersonateId
-    ? (state.userEmail ?? `${impersonateId.slice(0, 12)}...`)
-    : '';
-  const impersonateBanner = impersonateId
+  const impersonateBanner = state.impersonating
     ? `<div class="w-full bg-amber-500/10 border-b border-amber-500/30 text-amber-400 text-xs text-center py-1.5 px-4">
-        Impersonating <span class="font-medium">${escapeHtml(impersonateLabel)}</span>
-        <a href="/" class="ml-2 underline hover:text-amber-300">Exit</a>
+        Impersonating <span class="font-medium">${escapeHtml(state.userEmail ?? '…')}</span>
+        <button type="button" class="ml-2 underline hover:text-amber-300" data-action="stop-impersonation">Exit</button>
       </div>`
     : '';
 

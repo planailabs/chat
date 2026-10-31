@@ -1,56 +1,27 @@
 import { store } from '../app/store';
 import { delegateEvent } from '../utils/dom';
-import { launchOAuthFlow } from '../actions/auth';
-import type { AuthProvider } from '../auth/controller';
-import { ctaController } from '../chat/ctaController';
+import { handleSignIn } from '../actions/auth';
 import {
   sendChatMessage,
   answerChatQuestion,
   cancelChatQuestion,
   switchChatMode,
   answerPreferencePrompt,
-  handleChatNewsletterChoice,
+  decideApproval,
+  type ApprovalAction,
 } from '../actions/chat';
-import type { ClientChatModeId } from '../constants';
+import type { ChatModeId } from '../api';
 
 export const registerChatEvents = (app: HTMLElement) => {
-  // Chat: Login Invite OAuth (anonymous sales chat sign-in)
-  delegateEvent(
-    app,
-    'click',
-    '[data-action="login-invite-oauth"]',
-    (event, target) => {
-      event.stopPropagation();
-      const provider = target.getAttribute('data-provider') as AuthProvider | null;
-      const invite = store.state.chat?.aiChat?.loginInvite;
-      if (!provider || !invite || invite.ctaLocked) return;
-      // Lock CTAs and show selected state
-      invite.ctaLocked = true;
-      invite.selectedProvider = provider;
-      store.notify();
-      void launchOAuthFlow(provider, 'chat');
-    },
-  );
-
-  // Chat: OAuth
-  delegateEvent(
-    app,
-    'click',
-    '[data-action="chat-oauth"]',
-    (event, target) => {
-      event.stopPropagation();
-      const provider = target.getAttribute(
-        'data-provider',
-      ) as AuthProvider | null;
-      const state = store.state;
-      const chat = state.chat;
-      if (!provider || !chat || chat.isCtaLocked) {
-        return;
-      }
-      ctaController.selectAuthProvider(provider);
-      void launchOAuthFlow(provider, 'chat');
-    },
-  );
+  // Chat: Login Invite (anonymous sales chat sign-in)
+  delegateEvent(app, 'click', '[data-action="login-invite-sign-in"]', (event) => {
+    event.stopPropagation();
+    const invite = store.state.chat?.loginInvite;
+    if (!invite || invite.ctaLocked) return;
+    invite.ctaLocked = true;
+    store.notify();
+    handleSignIn();
+  });
 
   // Chat: Machine Config — helpers for contenteditable input
   const getMachineConfigInput = () =>
@@ -193,7 +164,7 @@ export const registerChatEvents = (app: HTMLElement) => {
     '[data-action="switch-chat-mode"]',
     (event, target) => {
       event.stopPropagation();
-      const modeId = target.getAttribute('data-mode') as ClientChatModeId | null;
+      const modeId = target.getAttribute('data-mode') as ChatModeId | null;
       if (modeId) {
         const dropdown = app.querySelector<HTMLElement>('[data-mode-dropdown]');
         if (dropdown) dropdown.classList.add('hidden');
@@ -202,17 +173,13 @@ export const registerChatEvents = (app: HTMLElement) => {
     },
   );
 
-  // Chat: Newsletter Choice
-  delegateEvent(
-    app,
-    'click',
-    '[data-action="newsletter-choice"]',
-    (event, target) => {
-      event.stopPropagation();
-      const choice = target.getAttribute('data-choice');
-      if (choice === 'yes' || choice === 'no') {
-        handleChatNewsletterChoice(choice);
-      }
-    },
-  );
+  // Chat: Approval decision (approve / deny / approve all)
+  delegateEvent(app, 'click', '[data-action="approval-decision"]', (event, target) => {
+    event.stopPropagation();
+    const callId = target.getAttribute('data-call-id');
+    const decision = target.getAttribute('data-decision');
+    if (callId && (decision === 'approve' || decision === 'deny' || decision === 'approve_all')) {
+      void decideApproval(callId, decision as ApprovalAction);
+    }
+  });
 };

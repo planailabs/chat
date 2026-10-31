@@ -20,7 +20,7 @@ export const registerSettingsEvents = (app: HTMLElement) => {
   delegateEvent(app, 'click', '[data-action="overlay-sign-out"]', (event) => {
     event.preventDefault();
     closeSettingsOverlay();
-    void handleSignOut();
+    handleSignOut();
   });
 
   // Settings: Delete Account

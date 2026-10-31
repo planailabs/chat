@@ -1,147 +1,101 @@
 /**
- * Chat SSE — EventSource lifecycle: connect, disconnect, reconnection backoff, postMessage.
+ * Chat SSE — the EventSource on /api/v1/chat/events for the active mode
+ * (cookie session): connect, reconnect with backoff, disconnect.
  */
 
 import { store } from '../../app/store';
-import { withImpersonate } from '../../impersonation';
-import { getJwt, clearCachedJwt } from './cache';
+import { api, CHAT_EVENT_NAMES, type ChatModeId } from '../../api';
 import { handleServerEvent } from './events';
-import { transition } from './stateMachine';
+import { resyncHistory } from './session';
 
-/** Persistent EventSource connection */
 let eventSource: EventSource | null = null;
+let eventSourceMode: ChatModeId | null = null;
 
-/** Whether the close was intentional (sign-out) — suppress reconnect */
+/** Whether the close was intentional (sign-out, mode switch) — suppress reconnect */
 let intentionalClose = false;
 
-/** Reconnection backoff state */
 let reconnectAttempt = 0;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
-/** Promise that resolves when the current EventSource is open */
+/** Resolves when the current EventSource is open (or failed to open) */
 let connectPromise: Promise<void> | null = null;
 
-/**
- * POST a message/answer to the server. Events arrive via SSE.
- */
-export const postMessage = async (payload: { type: string; text: string }) => {
-  const jwt = await getJwt();
-  if (!jwt) return;
-
-  const lang = document.documentElement.lang || navigator.language || 'en';
-  const mode = store.state.activeChatMode;
-  const res = await fetch(withImpersonate(`/api/chat/message/?lang=${encodeURIComponent(lang)}&mode=${encodeURIComponent(mode)}`), {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${jwt}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(payload),
-  });
-
-  if (res.status === 409) {
-    // Already processing in another tab — SSE will deliver events
-    return;
-  }
-
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}));
-    const mc = store.state.chat?.aiChat;
-    if (mc) {
-      transition(mc, 'error');
-      mc.error = (data as any).error ?? 'Something went wrong';
-      store.notify();
-    }
-  }
-  // 202 — events arrive via EventSource
+const scheduleReconnect = () => {
+  if (intentionalClose || reconnectTimer) return;
+  const delay = Math.min(1000 * 2 ** reconnectAttempt, 30_000);
+  reconnectAttempt++;
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    void connectEvents();
+  }, delay);
 };
 
 /**
- * Opens a persistent EventSource connection for receiving server events.
- * Returns a promise that resolves when the connection is open.
+ * Opens the event stream for the active mode. Resolves once it is open, so
+ * a message sent afterwards can't miss its reply.
  */
 export const connectEvents = (): Promise<void> => {
-  if (eventSource?.readyState === EventSource.OPEN) return Promise.resolve();
+  const mode = store.state.activeChatMode;
+  if (eventSource && eventSourceMode === mode && eventSource.readyState === EventSource.OPEN) return Promise.resolve();
   if (connectPromise) return connectPromise;
+  if (!store.state.isAuthenticated) return Promise.resolve();
 
   intentionalClose = false;
+  eventSource?.close();
+  const es = new EventSource(api.chat.eventsUrl(mode));
+  eventSource = es;
+  eventSourceMode = mode;
+  const isReconnect = reconnectAttempt > 0;
 
-  connectPromise = (async () => {
-    try {
-      const jwt = await getJwt();
-      if (!jwt) return;
-
-      const mode = store.state.activeChatMode;
-      const es = new EventSource(withImpersonate(`/api/chat/events/?token=${encodeURIComponent(jwt)}&mode=${encodeURIComponent(mode)}`));
-      eventSource = es;
-
-      // Register event listeners BEFORE waiting for open — avoids missing
-      // events that arrive between onopen and listener registration
-      const eventTypes = ['thinking', 'text_delta', 'text_done', 'tool_start', 'tool_end', 'question', 'done', 'error'];
-      for (const type of eventTypes) {
-        es.addEventListener(type, (event) => {
-          try {
-            const data = JSON.parse((event as MessageEvent).data);
-            handleServerEvent(type, data);
-          } catch (err) {
-            console.error('[sse-client] Failed to parse event:', err);
-          }
-        });
+  // Listeners before open: nothing between open and registration is lost.
+  for (const name of CHAT_EVENT_NAMES) {
+    es.addEventListener(name, (event) => {
+      // The connection's own 'error' events carry no data.
+      if (!(event instanceof MessageEvent) || typeof event.data !== 'string') return;
+      try {
+        handleServerEvent(name, JSON.parse(event.data));
+      } catch (err) {
+        console.error('[sse-client] Failed to handle event:', name, err);
       }
+    });
+  }
 
-      await new Promise<void>((resolve) => {
-        es.onopen = () => {
-          console.log('[sse-client] EventSource connected');
-          reconnectAttempt = 0;
-          resolve();
-        };
-
-        // Also resolve on first error to avoid hanging forever
-        const errorOnce = () => {
-          es.removeEventListener('error', errorOnce);
-          resolve();
-        };
-        es.addEventListener('error', errorOnce);
-      });
-
-      es.onerror = () => {
-        console.warn('[sse-client] EventSource error/disconnected');
-        if (eventSource === es) {
-          eventSource = null;
-          connectPromise = null;
-          es.close();
-        }
-
-        if (!intentionalClose) {
-          const delay = Math.min(1000 * Math.pow(2, reconnectAttempt), 30_000);
-          reconnectAttempt++;
-          console.log(`[sse-client] Reconnecting in ${delay}ms (attempt ${reconnectAttempt})`);
-          reconnectTimer = setTimeout(() => { void connectEvents(); }, delay);
-        }
-      };
-    } catch (err) {
-      console.error('[sse-client] Failed to connect:', err);
-    } finally {
-      connectPromise = null;
-    }
-  })();
-
-  return connectPromise;
+  const opened = new Promise<void>((resolve) => {
+    es.onopen = () => {
+      reconnectAttempt = 0;
+      // Events may have been missed while disconnected.
+      if (isReconnect) void resyncHistory();
+      resolve();
+    };
+    es.onerror = (event) => {
+      // The server's own `error` events (a failed reply) arrive here too.
+      if (event instanceof MessageEvent) return;
+      resolve();
+      if (eventSource !== es) return;
+      console.warn('[sse-client] EventSource error/disconnected');
+      es.close();
+      eventSource = null;
+      eventSourceMode = null;
+      scheduleReconnect();
+    };
+  });
+  connectPromise = opened;
+  void opened.finally(() => {
+    if (connectPromise === opened) connectPromise = null;
+  });
+  return opened;
 };
 
-/**
- * Intentionally close the EventSource (sign-out). Suppresses reconnect.
- */
+/** Closes the event stream and suppresses reconnects (sign-out, mode switch). */
 export const disconnectEvents = () => {
   intentionalClose = true;
+  reconnectAttempt = 0;
   connectPromise = null;
-  clearCachedJwt();
   if (reconnectTimer) {
     clearTimeout(reconnectTimer);
     reconnectTimer = null;
   }
-  if (eventSource) {
-    eventSource.close();
-    eventSource = null;
-  }
+  eventSource?.close();
+  eventSource = null;
+  eventSourceMode = null;
 };

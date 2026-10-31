@@ -4,16 +4,14 @@
  * Handles theme mode switching (system/light/dark):
  * - Applies theme to document
  * - Persists to sessionStorage
- * - Syncs to user profile (if authenticated)
+ * - Saves to the user's profile (if signed in)
  * - Listens for system preference changes
  */
 
 import { store } from '../app/store';
-import { persistProfilePreferences } from '../supabase/profile';
-import { isSupabaseConfigured } from '../supabase/client';
+import type { ThemeMode } from '../app/state';
 import { STORAGE_KEYS } from '../constants';
-
-export type ThemeMode = 'system' | 'light' | 'dark';
+import { persistThemePreference } from './profile';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // System Preference Detection
@@ -62,30 +60,21 @@ export const initTheme = () => {
   });
 };
 
-export const setThemeMode = (mode: ThemeMode) => {
+/** Shows and remembers a theme for this session (the profile's, on load). */
+export const applyThemeMode = (mode: ThemeMode) => {
   store.setState({ themeMode: mode });
-
-  // Update DOM
-  const effective = mode === 'system' ? getSystemPreference() : mode;
-  applyDocumentTheme(effective);
-
-  // Persist to Session
+  applyDocumentTheme(mode === 'system' ? getSystemPreference() : mode);
   try {
     sessionStorage.setItem(STORAGE_KEYS.THEME, mode);
   } catch {
     // Ignore storage errors
   }
+};
 
-  // Persist to Profile (if logged in)
-  const state = store.state;
-  if (state.isAuthenticated && state.userId && isSupabaseConfigured) {
-    void persistProfilePreferences({
-      userId: state.userId,
-      themePreference: mode,
-    }).catch((error) => {
-      console.error('[supabase] Failed to persist theme preference', error);
-    });
-  }
+/** The user picked a theme: also saved to their profile. */
+export const setThemeMode = (mode: ThemeMode) => {
+  applyThemeMode(mode);
+  persistThemePreference(mode);
 };
 
 export const cycleThemeMode = () => {

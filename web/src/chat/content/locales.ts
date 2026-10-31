@@ -1,40 +1,11 @@
-export type LocaleKey = 'en' | 'de';
-type OAuthProviderName = 'google' | 'apple' | 'microsoft' | 'github';
-type ChatModeKey = 'machine_config' | 'sales';
+import type { ChatModeId } from '../api';
 
-export type ScenarioId = 'anonymousInvite' | 'postLoginNewsletter';
+export type LocaleKey = 'en' | 'de';
 
 export interface StreamConfig {
   initialDelayMs: number;
   chunkSize: number;
   intervalMs: number;
-}
-
-type StepRole = 'assistant' | 'system';
-
-export type StepCta =
-  | {
-      type: 'oauth_providers';
-    }
-  | {
-      type: 'newsletter_prompt';
-      positiveStepId: string;
-      negativeStepId: string;
-    };
-
-export interface ConversationStep {
-  id: string;
-  role: StepRole;
-  text: string;
-  stream: StreamConfig;
-  cta?: StepCta;
-  nextStepId?: string;
-}
-
-export interface ConversationScenario {
-  id: ScenarioId;
-  entryStepId: string;
-  steps: Record<string, ConversationStep>;
 }
 
 export interface ChatModeLocale {
@@ -43,13 +14,22 @@ export interface ChatModeLocale {
   placeholder: string;
   cancelLabel: string;
   configuringLabel: string;
+  /** Sent for the user when the conversation is empty ('' = none). */
   greeting: string;
+}
+
+export interface PreferencePromptLocale {
+  question: string;
+  ctaYesLabel: string;
+  ctaNoLabel: string;
+  confirmText: string;
+  declineText: string;
+  stream: StreamConfig;
 }
 
 export interface LocaleContent {
   languageNativeName: string;
   locale: string;
-  heroBadgeLabel: string;
   navigation: {
     themeToggle: {
       label: string;
@@ -61,32 +41,37 @@ export interface LocaleContent {
     };
     loginMenu: {
       labelLoggedOut: string;
-      title: string;
       signOutLabel: string;
-      providers: Partial<Record<OAuthProviderName, string>>;
     };
     settingsLabel: string;
+    newConversationLabel: string;
   };
   composer: {
-    heading: string;
-    placeholder: string;
     submitLabel: string;
-    maxCharacters: number;
-    limitReachedLabel: string;
   };
   chat: {
-    signedInWith: string;
-    postLogin: {
-      alreadySubscribedQuestion: string;
+    /** Shown to anonymous users after their first prompt. */
+    loginInvite: {
+      text: string;
+      stream: StreamConfig;
     };
-    afterPrompt: {
-      subscribedThanks: string;
-      unsubscribedThanks: string;
+    approval: {
+      title: string;
+      approve: string;
+      deny: string;
+      approveAll: string;
+      approved: string;
+      denied: string;
+      requested: string;
     };
-  };
-  newsletter: {
-    ctaYesLabel: string;
-    ctaNoLabel: string;
+    errors: {
+      rateLimited: string;
+      tooLong: string;
+      unavailable: string;
+      readOnly: string;
+      signedOut: string;
+      generic: string;
+    };
   };
   settings: {
     title: string;
@@ -108,6 +93,7 @@ export interface LocaleContent {
         deleteConfirmation: string;
         deleteScheduledInfo: string;
         deletePendingLogin: string;
+        deleteError: string;
       };
     };
     savedLabel: string;
@@ -119,23 +105,8 @@ export interface LocaleContent {
     termsUrl: string;
     privacyUrl: string;
   };
-  machineConfig: {
-    heroBadgeLabel: string;
-    heading: string;
-    placeholder: string;
-    cancelLabel: string;
-    configuringLabel: string;
-  };
-  chatModes: Record<ChatModeKey, ChatModeLocale>;
-  conversationScenarios: Record<ScenarioId, ConversationScenario>;
-  preferencePrompts: Record<string, {
-    question: string;
-    ctaYesLabel: string;
-    ctaNoLabel: string;
-    confirmText: string;
-    declineText: string;
-    stream: StreamConfig;
-  }>;
+  chatModes: Record<ChatModeId, ChatModeLocale>;
+  preferencePrompts: Record<string, PreferencePromptLocale>;
 }
 
 const defaultStream: StreamConfig = {
@@ -147,7 +118,6 @@ const defaultStream: StreamConfig = {
 const en: LocaleContent = {
   languageNativeName: 'English',
   locale: 'en-US',
-  heroBadgeLabel: 'Get a plan by email',
   navigation: {
     themeToggle: {
       label: 'Theme',
@@ -159,40 +129,36 @@ const en: LocaleContent = {
     },
     loginMenu: {
       labelLoggedOut: 'Sign in',
-      title: 'Sign in with…',
       signOutLabel: 'Sign out',
-      providers: {
-        // v1 ships with Google + GitHub only; keep entries nearby so adding
-        // Apple/Microsoft in v2 is a single-line change.
-        google: 'Google',
-        github: 'GitHub',
-      },
     },
     settingsLabel: 'Settings',
+    newConversationLabel: 'New conversation',
   },
   composer: {
-    heading: 'What’s your next goal?',
-    placeholder: "Let's create a plan...",
     submitLabel: 'Send',
-    maxCharacters: 1024,
-    limitReachedLabel: 'You’ve reached the {{max}} character limit.',
   },
   chat: {
-    signedInWith: 'Signed in as {{email}}',
-    postLogin: {
-      alreadySubscribedQuestion:
-        'Awesome, you’re on the list. We’ll let you know as soon as there’s something new.',
+    loginInvite: {
+      text: 'Please sign in to chat with our assistant.',
+      stream: defaultStream,
     },
-    afterPrompt: {
-      subscribedThanks:
-        'Keep it coming! 🤩 We have a lot of requests at the moment, but we’ll send your plan as soon as possible by email...',
-      unsubscribedThanks:
-        'Thanks! We’ll email your plan as soon as it’s ready.',
+    approval: {
+      title: 'Approval needed',
+      approve: 'Approve',
+      deny: 'Deny',
+      approveAll: 'Approve all in this conversation',
+      approved: 'Approved',
+      denied: 'Denied',
+      requested: 'Approval requested',
     },
-  },
-  newsletter: {
-    ctaYesLabel: 'Yes, please',
-    ctaNoLabel: 'No, thank you',
+    errors: {
+      rateLimited: 'You’ve reached the hourly message limit. Please try again later.',
+      tooLong: 'This message is too long. Please shorten it.',
+      unavailable: 'This chat isn’t available for your account.',
+      readOnly: 'Read-only while impersonating.',
+      signedOut: 'Your session has expired. Please sign in again.',
+      generic: 'Something went wrong. Please try again.',
+    },
   },
   settings: {
     title: 'Settings',
@@ -218,6 +184,8 @@ const en: LocaleContent = {
           'Account scheduled for deletion. You cannot sign in during this period.',
         deletePendingLogin:
           'This account is scheduled for deletion and cannot be accessed. Please wait or contact support.',
+        deleteError:
+          'Unable to schedule account deletion right now. Please try again.',
       },
     },
     savedLabel: 'Saved',
@@ -229,13 +197,6 @@ const en: LocaleContent = {
     privacyLabel: 'Privacy&nbsp;Policy',
     termsUrl: '/legal-en.md',
     privacyUrl: '/legal-en.md',
-  },
-  machineConfig: {
-    heroBadgeLabel: 'Machine configuration',
-    heading: 'What should your Mac do?',
-    placeholder: 'Install dev tools, add MCP servers, show my config...',
-    cancelLabel: 'Skip',
-    configuringLabel: 'Configuring…',
   },
   chatModes: {
     machine_config: {
@@ -255,63 +216,6 @@ const en: LocaleContent = {
       greeting: '',
     },
   },
-  conversationScenarios: {
-    anonymousInvite: {
-      id: 'anonymousInvite',
-      entryStepId: 'invite-intro',
-      steps: {
-        'invite-intro': {
-          id: 'invite-intro',
-          role: 'assistant',
-          text: 'Please sign in to chat with our assistant.',
-          stream: defaultStream,
-          cta: {
-            type: 'oauth_providers',
-          },
-        },
-      },
-    },
-    postLoginNewsletter: {
-      id: 'postLoginNewsletter',
-      entryStepId: 'newsletter-question',
-      steps: {
-        'newsletter-question': {
-          id: 'newsletter-question',
-          role: 'assistant',
-          text: 'Thank you for signing in! We’ll email your plan in the next days. Get the newsletter to stay updated?',
-          stream: defaultStream,
-          cta: {
-            type: 'newsletter_prompt',
-            positiveStepId: 'newsletter-confirm',
-            negativeStepId: 'newsletter-decline',
-          },
-        },
-        'newsletter-reconsider': {
-          id: 'newsletter-reconsider',
-          role: 'assistant',
-          text: 'Get the newsletter to stay on top of new features and upgrades?',
-          stream: defaultStream,
-          cta: {
-            type: 'newsletter_prompt',
-            positiveStepId: 'newsletter-confirm',
-            negativeStepId: 'newsletter-decline',
-          },
-        },
-        'newsletter-confirm': {
-          id: 'newsletter-confirm',
-          role: 'assistant',
-          text: 'Perfect. We’ll email your plan and keep you updated.',
-          stream: defaultStream,
-        },
-        'newsletter-decline': {
-          id: 'newsletter-decline',
-          role: 'assistant',
-          text: 'No problem. You will still get the plan by mail.',
-          stream: defaultStream,
-        },
-      },
-    },
-  },
   preferencePrompts: {
     newsletter: {
       question: 'Would you like to subscribe to our newsletter to stay updated on new features and upgrades?',
@@ -327,7 +231,6 @@ const en: LocaleContent = {
 const de: LocaleContent = {
   languageNativeName: 'Deutsch',
   locale: 'de-DE',
-  heroBadgeLabel: 'Optimierung mit KI',
   navigation: {
     themeToggle: {
       label: 'Theme',
@@ -339,39 +242,36 @@ const de: LocaleContent = {
     },
     loginMenu: {
       labelLoggedOut: 'Anmelden',
-      title: 'Anmelden mit…',
       signOutLabel: 'Abmelden',
-      providers: {
-        // V1: Only Google + GitHub are live; re-add Apple/Microsoft when ready.
-        google: 'Google',
-        github: 'GitHub',
-      },
     },
     settingsLabel: 'Einstellungen',
+    newConversationLabel: 'Neues Gespräch',
   },
   composer: {
-    heading: 'Was ist dein Plan?',
-    placeholder: 'Ich plane zurzeit...',
     submitLabel: 'Senden',
-    maxCharacters: 1024,
-    limitReachedLabel: 'Die maximale Zeichenanzahl ({{max}}) ist erreicht.',
   },
   chat: {
-    signedInWith: 'Angemeldet als {{email}}',
-    postLogin: {
-      alreadySubscribedQuestion:
-        'Du stehst auf unserer Warteliste und wir informieren dich gerne, sobald die nächste Version verfügbar ist. :)',
+    loginInvite: {
+      text: 'Bitte melde dich an, um mit unserem Assistenten zu chatten.',
+      stream: defaultStream,
     },
-    afterPrompt: {
-      subscribedThanks:
-        'Immer her damit! 🤩 Die Nachfrage ist gerade ziemlich groß, aber wir bemühen uns um eine zügige Abwicklung. Dein Plan kommt per Mail.',
-      unsubscribedThanks:
-        'Danke! Wir schicken dir den Plan sobald wie möglich per Mail.',
+    approval: {
+      title: 'Freigabe erforderlich',
+      approve: 'Freigeben',
+      deny: 'Ablehnen',
+      approveAll: 'Alles in diesem Gespräch freigeben',
+      approved: 'Freigegeben',
+      denied: 'Abgelehnt',
+      requested: 'Freigabe angefragt',
     },
-  },
-  newsletter: {
-    ctaYesLabel: 'Ja, bitte',
-    ctaNoLabel: 'Nein, danke',
+    errors: {
+      rateLimited: 'Du hast das stündliche Nachrichtenlimit erreicht. Bitte versuche es später noch einmal.',
+      tooLong: 'Diese Nachricht ist zu lang. Bitte kürze sie.',
+      unavailable: 'Dieser Chat ist für dein Konto nicht verfügbar.',
+      readOnly: 'Beim Impersonieren ist nur Lesen möglich.',
+      signedOut: 'Deine Sitzung ist abgelaufen. Bitte melde dich erneut an.',
+      generic: 'Etwas ist schiefgelaufen. Bitte versuche es noch einmal.',
+    },
   },
   settings: {
     title: 'Einstellungen',
@@ -397,6 +297,8 @@ const de: LocaleContent = {
           'Dieses Konto wurde zur Löschung eingeplant. Eine erneute Anmeldung ist bis dahin nicht möglich.',
         deletePendingLogin:
           'Dieses Konto ist zur Löschung vorgesehen. Bitte warte oder kontaktiere den Support.',
+        deleteError:
+          'Die Kontolöschung kann gerade nicht eingeplant werden. Bitte versuche es noch einmal.',
       },
     },
     savedLabel: 'Gespeichert',
@@ -408,13 +310,6 @@ const de: LocaleContent = {
     privacyLabel: 'Datenschutzrichtlinien',
     termsUrl: '/legal-de.md',
     privacyUrl: '/legal-de.md',
-  },
-  machineConfig: {
-    heroBadgeLabel: 'Maschinenkonfiguration',
-    heading: 'Was soll dein Mac können?',
-    placeholder: 'Dev-Tools installieren, MCP-Server hinzufügen, Config anzeigen...',
-    cancelLabel: 'Überspringen',
-    configuringLabel: 'Konfiguriere…',
   },
   chatModes: {
     machine_config: {
@@ -432,63 +327,6 @@ const de: LocaleContent = {
       cancelLabel: 'Überspringen',
       configuringLabel: 'Denke nach…',
       greeting: '',
-    },
-  },
-  conversationScenarios: {
-    anonymousInvite: {
-      id: 'anonymousInvite',
-      entryStepId: 'invite-intro',
-      steps: {
-        'invite-intro': {
-          id: 'invite-intro',
-          role: 'assistant',
-          text: 'Bitte melde dich an, um mit unserem Assistenten zu chatten.',
-          stream: defaultStream,
-          cta: {
-            type: 'oauth_providers',
-          },
-        },
-      },
-    },
-    postLoginNewsletter: {
-      id: 'postLoginNewsletter',
-      entryStepId: 'newsletter-question',
-      steps: {
-        'newsletter-question': {
-          id: 'newsletter-question',
-          role: 'assistant',
-          text: 'Danke für deine Anmeldung! Wir senden dir deinen Plan in den nächsten Tagen per Mail. Möchtest du auch den Newsletter erhalten?',
-          stream: defaultStream,
-          cta: {
-            type: 'newsletter_prompt',
-            positiveStepId: 'newsletter-confirm',
-            negativeStepId: 'newsletter-decline',
-          },
-        },
-        'newsletter-reconsider': {
-          id: 'newsletter-reconsider',
-          role: 'assistant',
-          text: 'Möchtest du auch die neuesten Updates und Features als Newsletter erhalten?',
-          stream: defaultStream,
-          cta: {
-            type: 'newsletter_prompt',
-            positiveStepId: 'newsletter-confirm',
-            negativeStepId: 'newsletter-decline',
-          },
-        },
-        'newsletter-confirm': {
-          id: 'newsletter-confirm',
-          role: 'assistant',
-          text: 'Perfekt. Wir melden uns, sobald es Neuigkeiten gibt.',
-          stream: defaultStream,
-        },
-        'newsletter-decline': {
-          id: 'newsletter-decline',
-          role: 'assistant',
-          text: 'Alles klar. Wir senden dir den Plan in Bälde.',
-          stream: defaultStream,
-        },
-      },
     },
   },
   preferencePrompts: {

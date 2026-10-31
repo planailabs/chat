@@ -3,17 +3,14 @@
  */
 
 import { escapeHtml } from '../../utils/html';
-import { getOAuthIcon } from '../oauthIcons';
 
 import type { LocaleContent, ChatModeLocale } from '../../content';
-import type { ChatState } from '../../app/state';
-
-type AiChat = NonNullable<ChatState['aiChat']>;
+import type { ChatSession } from '../../app/state';
 
 // ── Question UI (ask_question) ──────────────────────────────────────────
 
 export const renderQuestionUI = (
-  mc: AiChat,
+  mc: ChatSession,
   modeLocale: ChatModeLocale,
 ): { questionLabel: string; questionButtons: string } => {
   const prompt = mc.phase === 'question' ? mc.clientPrompt : undefined;
@@ -57,7 +54,7 @@ export const renderQuestionUI = (
 // ── Preference Block (prompt_preference) ────────────────────────────────
 
 export const renderPreferenceBlock = (
-  mc: AiChat,
+  mc: ChatSession,
   locale: LocaleContent,
 ): string => {
   const prompt = mc.phase === 'question' ? mc.clientPrompt : undefined;
@@ -135,7 +132,7 @@ export const renderPreferenceBlock = (
 // ── Login Invite (anonymous user sign-in) ───────────────────────────────
 
 export const renderLoginInvite = (
-  mc: AiChat,
+  mc: ChatSession,
   locale: LocaleContent,
 ): string => {
   let loginInviteBlock = '';
@@ -151,32 +148,17 @@ export const renderLoginInvite = (
       </div>`;
 
     if (invite.ctaVisible) {
-      const providers = locale.navigation.loginMenu.providers;
       const isLocked = Boolean(invite.ctaLocked);
-      const buttons = Object.entries(providers)
-        .map(([provider, label]) => {
-          const icon = getOAuthIcon(provider);
-          return `
-              <button
-                type="button"
-                class="chat-cta-button ${isLocked ? 'is-disabled' : ''} ${invite.selectedProvider === provider ? 'is-selected' : ''}"
-                data-action="login-invite-oauth"
-                data-provider="${provider}"
-                ${isLocked ? 'disabled' : ''}
-                aria-disabled="${isLocked}"
-                aria-pressed="${invite.selectedProvider === provider}"
-              >
-                <span class="chat-cta-button__icon" aria-hidden="true">
-                  ${icon}
-                </span>
-                ${escapeHtml(label)}
-              </button>
-            `;
-        })
-        .join('');
       loginInviteBlock += `
           <div class="chat-cta-stack flex flex-wrap gap-3 text-sm text-(--text-primary) transition-all duration-300 chat-cta-stack--fade">
-            ${buttons}
+            <button
+              type="button"
+              class="chat-cta-button ${isLocked ? 'is-disabled is-selected' : ''}"
+              data-action="login-invite-sign-in"
+              ${isLocked ? 'disabled' : ''}
+              aria-disabled="${isLocked}">
+              ${escapeHtml(locale.navigation.loginMenu.labelLoggedOut)}
+            </button>
           </div>
         `;
     }

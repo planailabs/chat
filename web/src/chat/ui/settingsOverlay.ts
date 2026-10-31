@@ -2,7 +2,7 @@
  * Settings Overlay Component
  *
  * Renders the settings modal with:
- * - User profile section (avatar, name, email)
+ * - User identity (name, email)
  * - Newsletter subscription toggle
  * - Privacy controls (data export, account deletion)
  * - Sign out button
@@ -41,20 +41,7 @@ export const renderSettingsOverlay = (params: {
     state.userEmail ||
     locale.settings.sections.profile.fields.name;
   const email = state.userEmail ?? 'Not signed in';
-  // Avatar with error fallback: if image fails, show SVG icon instead
-  // referrerpolicy="no-referrer" is required for Google avatars (they block unknown referrers)
-  const avatar = state.userAvatarUrl
-    ? `<img
-        src="${escapeHtml(state.userAvatarUrl)}"
-        alt="${escapeHtml(email)}"
-        decoding="async"
-        loading="eager"
-        referrerpolicy="no-referrer"
-        onload="this.parentElement.dataset.loaded='true'"
-        onerror="this.parentElement.dataset.error='true'"
-      />
-      <span class="settings-avatar-fallback" aria-hidden="true">${userIcon()}</span>`
-    : `<span class="settings-avatar-fallback">${userIcon()}</span>`;
+  const avatar = `<span class="settings-avatar-fallback">${userIcon()}</span>`;
   const closeLabel = 'Close overlay';
   const signOutDisabled = state.isAuthenticated ? '' : 'disabled';
   const profileSection = locale.settings.sections.profile;

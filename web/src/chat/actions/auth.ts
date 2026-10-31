@@ -1,293 +1,140 @@
 /**
  * Authentication Actions
  *
- * Handles OAuth sign-in/out flows and session state management.
- * Coordinates between Supabase auth, UI state, and profile sync.
+ * The server owns the session (cookie). On load the profile tells who is
+ * signed in; a 401 means nobody is. Signing in and out are page navigations.
  */
 
 import { store } from '../app/store';
-import { cacheUserState, clearCachedUserState } from '../app/state';
-import {
-  signOut,
-  type AuthProvider,
-  checkAdminStatus,
-} from '../auth/controller';
-import {
-  createOAuthLauncher,
-  type OAuthLaunchResult,
-} from '../auth/oauthLauncher';
-import { clearPreAuthState } from '../auth/preAuthCache';
-import { ctaController } from '../chat/ctaController';
-import { syncCachedPromptsToSupabase } from './messages';
-import { loadProfilePreferences } from './profile';
-import { persistProfilePreferences } from '../supabase/profile';
+import { cacheUserState, clearCachedUserState, persistLocaleSelection, signedOutUserState } from '../app/state';
+import { profileLoadError, profileLoadSuccess, profileStartLoading } from '../app/profileState';
+import { api, isUnauthorized, signIn, signOut, stopImpersonation, type Profile } from '../api';
 import { locales } from '../content';
-import type { Session } from '@supabase/supabase-js';
+import { getLocaleDateString } from '../utils/date';
+import { applyThemeMode } from './theme';
 import {
-  tryStartPostLoginSequence,
-  setShouldRunPostLoginSequence,
-  clearMachineConfigMessages,
-  disconnectEvents,
+  clearAllCachedChatMessages,
+  clearPendingSalesPrompt,
   consumePendingSalesPrompt,
+  disconnectEvents,
+  openChat,
   sendPendingSalesPrompt,
-  restoreAIChatSession,
+  showAnonymousChat,
 } from './chat';
-import {
-  USER_METADATA_NAME_KEYS,
-  USER_METADATA_AVATAR_KEYS,
-} from '../constants';
-import { isImpersonating } from '../impersonation';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// OAuth Flow
-// ─────────────────────────────────────────────────────────────────────────────
+// ─── Sign-in / sign-out ─────────────────────────────────────────────────────
 
-const oauthLauncher = createOAuthLauncher();
+/** Sends the browser to sign-in; it comes back to the chat. */
+export const handleSignIn = () => {
+  store.setState({ isAuthMenuOpen: false });
+  signIn('/');
+};
 
-export const handleSignOut = async () => {
-  clearPreAuthState();
+/** Forgets everything stored for the user in this browser, then signs out. */
+export const handleSignOut = () => {
+  clearPendingSalesPrompt();
   clearCachedUserState();
-  clearMachineConfigMessages();
+  clearAllCachedChatMessages();
   disconnectEvents();
-  try {
-    await signOut();
-  } catch (error) {
-    console.error('Sign out failed', error);
-  } finally {
-    const win = typeof window !== 'undefined' ? window : undefined;
-    if (win?.location) {
-      win.location.reload();
-    } else {
-      store.reset();
-    }
-  }
+  signOut();
 };
 
-export const handleOAuthLaunchResult = (
-  result: OAuthLaunchResult,
-  origin: 'chat' | 'nav',
-) => {
-  if (result.status === 'error') {
-    console.error('OAuth sign-in failed', result.error);
-    if (origin === 'chat') {
-      ctaController.resetAuthCtas();
-    }
-  }
+/** Admins: back to being themselves. */
+export const handleStopImpersonation = () => {
+  stopImpersonation();
+  clearCachedUserState();
+  disconnectEvents();
+  window.location.href = '/';
 };
 
-export const launchOAuthFlow = async (
-  provider: AuthProvider,
-  origin: 'chat' | 'nav',
-) => {
-  const state = store.state;
-  const result = await oauthLauncher.launch(provider, {
-    origin,
-    localeKey: state.localeKey,
-    heroPhase: state.heroPhase,
-    prompt: state.chat?.userPrompt ?? null,
-    selectedProvider: state.chat?.selectedCta ?? null,
-  });
-  handleOAuthLaunchResult(result, origin);
+/** A user whose deletion is pending can't use the account: tell them and sign out. */
+export const handlePendingDeletionSignOut = (requestedAt: number | null) => {
+  const { localeKey } = store.state;
+  const dateText = getLocaleDateString(requestedAt, localeKey) ?? '30 days';
+  alert(locales[localeKey].settings.sections.privacy.deletePendingLogin.replace('{{date}}', dateText));
+  handleSignOut();
 };
 
-/**
- * Extracts display name from OAuth provider metadata.
- * Searches through common metadata keys in priority order.
- */
-const extractUserDisplayName = (
-  metadata: Record<string, unknown> | undefined | null,
-): string | null => {
-  if (!metadata) {
-    return null;
-  }
-  for (const key of USER_METADATA_NAME_KEYS) {
-    const value = metadata[key];
-    if (typeof value === 'string') {
-      const trimmed = value.trim();
-      if (trimmed.length > 0) {
-        return trimmed;
-      }
-    }
-  }
-  return null;
-};
+// ─── Session start ──────────────────────────────────────────────────────────
 
-/**
- * Extracts avatar URL from OAuth provider metadata.
- * Searches through common metadata keys in priority order.
- */
-const extractUserAvatarUrl = (
-  metadata: Record<string, unknown> | undefined | null,
-): string | null => {
-  if (!metadata) {
-    return null;
-  }
-  for (const key of USER_METADATA_AVATAR_KEYS) {
-    const value = metadata[key];
-    if (typeof value === 'string') {
-      const trimmed = value.trim();
-      if (trimmed.length > 0) {
-        return trimmed;
-      }
-    }
-  }
-  return null;
-};
-
-const buildProviderIdentity = (
-  session: Session | null,
-  displayName: string | null,
-  avatarUrl: string | null,
-) => {
-  const user = session?.user;
-  if (!user) {
-    return {};
-  }
-  return {
-    provider: user.app_metadata?.provider ?? null,
-    email: user.email ?? null,
-    name: displayName,
-    avatar_url: avatarUrl,
-    metadata: user.user_metadata ?? null,
-    identities: user.identities ?? null,
-  };
-};
-
-export const applySessionToState = (session: Session | null) => {
+const applySignedOut = () => {
   const state = store.state;
   const wasAuthenticated = state.isAuthenticated;
-  const nextAuthenticated = Boolean(session?.user);
-  const nextEmail = session?.user?.email ?? null;
-  const nextUserId = session?.user?.id ?? null;
-  const userMetadata = (session?.user?.user_metadata ?? null) as Record<
-    string,
-    unknown
-  > | null;
-  const nextAvatar = extractUserAvatarUrl(userMetadata);
-  const nextDisplayName = extractUserDisplayName(userMetadata);
-
-  // Optimistically keep admin status if user hasn't changed to prevent flicker
-  // If user changed or logged out, reset to false until verified
-  let nextIsAdmin = false;
-  if (nextAuthenticated && state.userId === nextUserId && state.isAdmin) {
-    nextIsAdmin = true;
+  Object.assign(state, signedOutUserState(), { activeChatMode: 'sales' });
+  cacheUserState(state);
+  if (wasAuthenticated) {
+    // The cached conversation belonged to a session that has ended.
+    showAnonymousChat();
   }
-
-  // Update state — when impersonating, defer identity to profile load
-  state.isAuthenticated = nextAuthenticated;
-  state.userId = nextUserId;
-  state.isAdmin = nextIsAdmin;
-  if (isImpersonating()) {
-    // Keep identity null until impersonated user's profile loads
-    state.userEmail = null;
-    state.userAvatarUrl = null;
-    state.userDisplayName = null;
-  } else {
-    state.userEmail = nextEmail;
-    state.userAvatarUrl = nextAvatar;
-    state.userDisplayName = nextDisplayName;
-  }
-
-  // Cache user state for instant header render on page reload
-  // Preserve existing customerToken — it's set later by loadProfilePreferences
-  cacheUserState({
-    isAuthenticated: nextAuthenticated,
-    userId: nextUserId,
-    userEmail: nextEmail,
-    userAvatarUrl: nextAvatar,
-    userDisplayName: nextDisplayName,
-    isAdmin: nextIsAdmin,
-    customerToken: state.customerToken,
-  });
-
-  // Verify admin status asynchronously if authenticated
-  if (nextAuthenticated) {
-    checkAdminStatus().then((isAdmin) => {
-      // Only update if changed (and user is still the same - check if needed? store.state is live)
-      if (
-        store.state.isAdmin !== isAdmin &&
-        store.state.userId === nextUserId
-      ) {
-        store.setState({ isAdmin });
-        // Update cache with verified status
-        cacheUserState({
-          isAuthenticated: store.state.isAuthenticated,
-          userId: store.state.userId,
-          userEmail: store.state.userEmail,
-          userAvatarUrl: store.state.userAvatarUrl,
-          userDisplayName: store.state.userDisplayName,
-          isAdmin: isAdmin,
-          customerToken: store.state.customerToken,
-        });
-      }
-    });
-  }
-
-  if (nextAuthenticated && nextUserId && !isImpersonating()) {
-    const providerIdentity = buildProviderIdentity(
-      session,
-      nextDisplayName,
-      nextAvatar,
-    );
-    void persistProfilePreferences({
-      userId: nextUserId,
-      providerIdentity,
-    });
-  }
-
-  if (nextAuthenticated) {
-    state.isAuthMenuOpen = false;
-
-    // Lock auth CTAs now that sign-in is confirmed
-    // (buttons stay clickable until this point for iOS back-navigation)
-    if (state.chat?.ctaVisible && !state.chat.isCtaLocked) {
-      ctaController.lockAuthCtas();
-    }
-
-    // Clean up URL hash if it contains auth tokens
-    if (
-      typeof window !== 'undefined' &&
-      window.location.hash &&
-      window.location.hash.includes('access_token')
-    ) {
-      window.history.replaceState(
-        null,
-        '',
-        window.location.pathname + window.location.search,
-      );
-    }
-
-    syncCachedPromptsToSupabase();
-    const maybePromise = loadProfilePreferences(locales[state.localeKey]);
-
-    // Check for a pending sales prompt saved before sign-in
-    const pendingSalesPrompt = consumePendingSalesPrompt();
-    if (pendingSalesPrompt) {
-      // Init sales chat, cancel any pending question, then send the prompt
-      void sendPendingSalesPrompt(pendingSalesPrompt);
-    } else if (state.chat?.restoredFromChatCta && !state.chat.postLogin) {
-      // Only trigger post-login sequence if we are restoring AND it hasn't started yet.
-      setShouldRunPostLoginSequence(true);
-
-      // We must wait for profile preferences to load (newsletter status) before starting.
-      if (maybePromise) {
-        void maybePromise.then(() => {
-          tryStartPostLoginSequence();
-        });
-      } else {
-        // If no promise (already loaded or not needed), try immediately.
-        tryStartPostLoginSequence();
-      }
-    } else if (!wasAuthenticated) {
-      // Newly authenticated (was anonymous before).
-      // Re-init AI chat to load server-side history now that we're authenticated.
-      // Reset the anonymous chat state so restoreAIChatSession can re-run.
-      if (state.chat?.aiChat) {
-        state.chat.aiChat = undefined;
-      }
-      restoreAIChatSession();
-    }
-  }
-
   store.notify();
+};
+
+const applyProfile = (profile: Profile) => {
+  const state = store.state;
+  state.isAuthenticated = true;
+  state.userId = profile.user_id;
+  state.userEmail = profile.email;
+  state.userDisplayName = profile.name.trim() || null;
+  state.isAdmin = profile.is_admin;
+  state.impersonating = profile.impersonating;
+  state.isAuthMenuOpen = false;
+  profileLoadSuccess(state.profile, profile);
+
+  // New profiles start out as 'en': only another language is a choice the
+  // user made, which then wins over the browser's language.
+  if (profile.language !== 'en' && profile.language !== state.localeKey) {
+    state.localeKey = profile.language;
+    persistLocaleSelection(profile.language);
+  }
+  if (profile.theme !== state.themeMode) {
+    applyThemeMode(profile.theme);
+  }
+};
+
+const loadModes = async () => {
+  const state = store.state;
+  try {
+    const modes = await api.chat.modes();
+    state.availableModes = modes.filter((m) => m.available).map((m) => m.id);
+  } catch (error) {
+    console.error('[chat] loading the chat modes failed', error);
+    state.availableModes = ['sales'];
+  }
+  if (!state.availableModes.includes(state.activeChatMode)) {
+    state.activeChatMode = 'sales';
+  }
+};
+
+/** Loads who is signed in, then their conversation. */
+export const startSession = async () => {
+  const state = store.state;
+  profileStartLoading(state.profile);
+
+  let profile: Profile;
+  try {
+    profile = await api.profile.me();
+  } catch (error) {
+    if (!isUnauthorized(error)) {
+      console.error('[auth] loading the profile failed', error);
+      profileLoadError(state.profile, error instanceof Error ? error.message : String(error));
+    }
+    applySignedOut();
+    return;
+  }
+
+  applyProfile(profile);
+  if (profile.deletion_requested_at && !profile.impersonating) {
+    handlePendingDeletionSignOut(state.profile.deletionRequestedAt);
+    return;
+  }
+  await loadModes();
+  cacheUserState(state);
+  store.notify();
+
+  const pendingPrompt = profile.impersonating ? null : consumePendingSalesPrompt();
+  if (pendingPrompt) {
+    await sendPendingSalesPrompt(pendingPrompt);
+  } else {
+    await openChat();
+  }
 };

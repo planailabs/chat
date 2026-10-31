@@ -6,20 +6,18 @@ import { escapeHtml } from '../../utils/html';
 import { renderMarkdown } from '../../utils/markdown';
 
 import type { ChatModeLocale } from '../../content';
-import type { ChatState } from '../../app/state';
+import type { ChatSession } from '../../app/state';
 
-type AiChat = NonNullable<ChatState['aiChat']>;
-
-export const renderStreamingBubble = (mc: AiChat): string =>
+export const renderStreamingBubble = (mc: ChatSession): string =>
   mc.phase === 'streaming' && mc.streamingText
     ? `<div class="flex justify-start">
           <div class="chat-markdown chat-markdown--streaming max-w-[min(100%,640px)] text-base leading-relaxed text-(--text-primary)">
-            ${renderMarkdown(mc.streamingText.visible)}
+            ${renderMarkdown(mc.streamingText)}
           </div>
         </div>`
     : '';
 
-export const renderThinkingIndicator = (mc: AiChat): string =>
+export const renderThinkingIndicator = (mc: ChatSession): string =>
   mc.phase === 'waiting'
     ? `<div class="flex justify-start">
           <div class="max-w-[min(100%,640px)] text-base leading-relaxed text-(--text-muted)">
@@ -33,7 +31,7 @@ export const renderThinkingIndicator = (mc: AiChat): string =>
     : '';
 
 export const renderToolIndicator = (
-  mc: AiChat,
+  mc: ChatSession,
   modeLocale: ChatModeLocale,
 ): string =>
   mc.phase === 'tool'
@@ -45,7 +43,7 @@ export const renderToolIndicator = (
         </div>`
     : '';
 
-export const renderErrorMessage = (mc: AiChat): string =>
+export const renderErrorMessage = (mc: ChatSession): string =>
   mc.phase === 'error' && mc.error
     ? `<div class="flex justify-start">
           <p class="max-w-[min(100%,640px)] text-base leading-relaxed text-red-500">
