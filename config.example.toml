@@ -57,7 +57,12 @@ max_chars = 2048
 #
 # [[connector.targets]]
 # name = "mac-mgmt"
-# description = "Your plan.ai machine: config, skills, bundles, MCP servers, SSH keys"
+# description = "plan.ai machine management (mgmt.plan.ai): your clusters' config, skills, bundles, MCP servers, SSH keys"
 # kind = "mac-mgmt"
 # mcp_url = "https://mgmt.plan.ai/mcp"
-# audience_project_id = "xxx"
+# audience_project_id = "397603440676569224"   # Zitadel project "mgmt.plan.ai API"
+#
+# # Each user's plan-ai-cloud deployments, listed by the console for them.
+# [connector.console]
+# url = "https://cloud.plan.ai"
+# audience_project_id = "397603595463164040"   # Zitadel project "cloud.plan.ai API"

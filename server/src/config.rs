@@ -40,6 +40,18 @@ pub struct Connector {
     // plan-ai-cloud TargetSource once the console lists them.
     #[serde(default)]
     pub targets: Vec<plan_ai_connector::Target>,
+    /// plan-ai-cloud's console: lists each user's deployments
+    /// (`GET /api/v1/connector_targets`, called as the user).
+    pub console: Option<Console>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Console {
+    /// e.g. `https://cloud.plan.ai`
+    pub url: String,
+    /// The console API's Zitadel project (audience of the user's token).
+    pub audience_project_id: String,
 }
 
 #[derive(Debug, Deserialize)]
