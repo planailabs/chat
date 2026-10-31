@@ -179,7 +179,17 @@ pub struct ModeInfo {
 #[derive(Deserialize, JsonSchema)]
 pub struct UserSearch {
     /// Substring of the email or name.
+    #[serde(deserialize_with = "text")]
+    #[schemars(with = "String")]
     q: String,
+}
+
+/// Query strings arrive coerced (`?q=123` is a number); a search term is text.
+fn text<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    Ok(match Value::deserialize(d)? {
+        Value::String(s) => s,
+        other => other.to_string(),
+    })
 }
 
 #[derive(Serialize, JsonSchema, sqlx::FromRow)]
@@ -442,4 +452,13 @@ pub fn registry(auth: Arc<dyn plan_ai_api_mcp::Authenticator>) -> Registry<AppSt
     });
 
     reg
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn numeric_search_terms_stay_text() {
+        let s: super::UserSearch = serde_json::from_value(serde_json::json!({ "q": 123 })).unwrap();
+        assert_eq!(s.q, "123");
+    }
 }

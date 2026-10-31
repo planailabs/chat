@@ -135,7 +135,7 @@ pub async fn send(app: &App, user: Uuid, mode: &str, text: &str, lang: &str) -> 
 pub async fn history(app: &App, user: Uuid, mode: &str) -> Result<Value, ApiError> {
     agent_type(app, mode)?;
     let Some((agent, auto_approve)) = current_agent(app, user, mode).await? else {
-        return Ok(json!({ "messages": [], "pending": [] }));
+        return Ok(json!({ "messages": [], "phase": null, "pending_questions": null, "pending_approvals": null, "auto_approve": false }));
     };
     let rows: Vec<(i64, String, String, Option<Value>, chrono::DateTime<chrono::Utc>)> =
         sqlx::query_as("SELECT id, role, content, data, created_at FROM chat_messages WHERE agent_id = $1 ORDER BY seq").bind(&agent).fetch_all(&app.pool).await.map_err(internal)?;
