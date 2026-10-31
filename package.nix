@@ -31,6 +31,7 @@ in
         ./config.example.toml
         ./server
         ./common
+        ./subnet
       ];
     };
     cargoLock.lockFile = ./Cargo.lock;
@@ -38,6 +39,10 @@ in
     # Like the other plan.ai servers: utoipa-swagger-ui's build script fails in
     # the check phase's rebuild; `cargo test` runs in the dev shell instead.
     doCheck = false;
+    # The agents' cluster file, run by the module's hub.
+    postInstall = ''
+      install -Dm644 subnet/chat.hcl $out/share/plan-ai-chat/chat.hcl
+    '';
     meta.mainProgram = "plan-ai-chat-server";
   };
 

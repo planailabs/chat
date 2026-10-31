@@ -49,6 +49,7 @@
         in {
           plan-ai-chat = chat.server;
           plan-ai-chat-web = chat.web;
+          subnet = subagent-net.packages.${final.stdenv.hostPlatform.system}.default;
         };
 
       nixosModules.default = import ./module.nix;
