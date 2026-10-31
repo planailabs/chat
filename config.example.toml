@@ -21,7 +21,7 @@ static_dir = "web/dist"
 # client_id = "xxx"                 # project "plan.ai chat" in the plan.ai org
 # client_secret = "xxx"
 # allow_all = true
-# scopes = ["openid", "email", "profile", "urn:zitadel:iam:org:id:397597061693833352"]
+# zitadel_org = "397597061693833352"   # only plan.ai org accounts sign in
 
 [accounts]
 admin_emails = []
