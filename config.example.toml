@@ -1,0 +1,48 @@
+# Copy to config.toml (or point CONFIG_PATH at it).
+
+[database]
+url = "postgres://postgres@127.0.0.1:5433/postgres"
+
+[web]
+listen = "127.0.0.1:8080"
+static_dir = "web/dist"
+
+# Zitadel sign-in. Leave out locally: a debug build with DEV_ONLY_NO_AUTH=1
+# signs everyone in as dev@localhost (admin).
+# [auth]
+# cookie_secret = "CHANGE_ME_64_hex_chars"   # openssl rand -hex 32
+# external_url = "https://chat.plan.ai"
+# admin_emails = ["you@plan.ai"]
+#
+# [[auth.providers]]
+# slug = "zitadel"
+# name = "plan.ai"
+# issuer = "https://auth.plan.ai"
+# client_id = "xxx"
+# client_secret = "xxx"
+# allow_all = true
+
+[accounts]
+admin_emails = []
+
+[subnet]
+url = "http://127.0.0.1:7070"
+token = "CHANGE_ME"              # subnet issue_token for client "chat"
+callback_secret = "CHANGE_ME"    # also in subnet/chat.hcl's env (CHAT_CALLBACK_SECRET)
+types = { sales = "chat-sales", machine_config = "chat-machine-config" }
+
+[approval]
+# Validator model (layer 2), via LiteLLM. Unset: static checks, then the user.
+# validator_url = "https://litellm.plan.ai/v1"
+# validator_api_key = "sk-xxx"
+# validator_model = "claude-haiku-4-5"
+
+[chat]
+hourly_input_tokens = 100000
+hourly_output_tokens = 20000
+max_chars = 2048
+
+# The sales assistant reads mac-mgmt's catalog with this service token.
+# [catalog]
+# url = "https://mgmt.plan.ai/daemon/"
+# token = "CHANGE_ME"

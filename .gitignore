@@ -47,3 +47,7 @@ local
 
 result*
 .temp
+
+# Rust
+/target
+config.toml

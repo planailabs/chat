@@ -1,0 +1,8 @@
+[workspace]
+members = ["server"]
+resolver = "3"
+
+# common's crates take these from the consuming workspace.
+[workspace.dependencies]
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "json", "query"] }
+rmcp = { version = "0.17", default-features = false, features = ["server", "transport-io", "macros"] }
