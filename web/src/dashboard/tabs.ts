@@ -1,4 +1,4 @@
-const TAB_NAMES = ['overview', 'messages', 'impersonate', 'tokens', 'pings', 'prompts'] as const;
+const TAB_NAMES = ['overview', 'messages', 'impersonate', 'pings', 'prompts'] as const;
 type TabName = (typeof TAB_NAMES)[number];
 
 const initialized = new Set<TabName>();
@@ -41,18 +41,13 @@ async function initTabModule(tab: TabName) {
       break;
     }
     case 'messages': {
-      const { initDashboard } = await import('./app');
-      initDashboard();
+      const { initMessages } = await import('./app');
+      initMessages();
       break;
     }
     case 'impersonate': {
       const { initImpersonate } = await import('./impersonate');
       initImpersonate(document.getElementById('tab-impersonate')!);
-      break;
-    }
-    case 'tokens': {
-      const { initTokens } = await import('./tokens');
-      initTokens(document.getElementById('tab-tokens')!);
       break;
     }
     case 'pings': {

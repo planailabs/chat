@@ -63,7 +63,6 @@
         <button data-tab="overview" class="px-4 py-2 text-sm font-medium border-b-2 border-transparent rounded-t-lg hover:bg-white/5 transition-colors whitespace-nowrap">Overview</button>
         <button data-tab="messages" class="px-4 py-2 text-sm font-medium border-b-2 border-transparent rounded-t-lg hover:bg-white/5 transition-colors whitespace-nowrap">Messages</button>
         <button data-tab="impersonate" class="px-4 py-2 text-sm font-medium border-b-2 border-transparent rounded-t-lg hover:bg-white/5 transition-colors whitespace-nowrap">Impersonate</button>
-        <button data-tab="tokens" class="px-4 py-2 text-sm font-medium border-b-2 border-transparent rounded-t-lg hover:bg-white/5 transition-colors whitespace-nowrap">Customer Tokens</button>
         <button data-tab="pings" class="px-4 py-2 text-sm font-medium border-b-2 border-transparent rounded-t-lg hover:bg-white/5 transition-colors whitespace-nowrap">Pings</button>
         <button data-tab="prompts" class="px-4 py-2 text-sm font-medium border-b-2 border-transparent rounded-t-lg hover:bg-white/5 transition-colors whitespace-nowrap">System Prompts</button>
       </nav>
@@ -81,13 +80,13 @@
         <section class="grid grid-cols-1 lg:grid-cols-2 gap-8">
           <div class="p-6 rounded-xl border border-white/10 bg-white/5 h-[400px] flex flex-col shadow-sm hover:border-white/20 transition-colors">
             <div class="flex justify-between items-center mb-4 opacity-70">
-              <h3 class="text-sm font-medium">Activity (Prompts)</h3>
+              <h3 class="text-sm font-medium">Activity (user messages, hourly, last 48 hours)</h3>
               <div class="text-xs flex items-center opacity-70">
                 <span>Drag to zoom</span>
                 <span class="mx-2 opacity-50">&bull;</span>
                 <span>Hold Shift to pan</span>
                 <span class="mx-2 opacity-50">&bull;</span>
-                <a href="#" id="chart-reset" class="underline hover:text-white transition-colors">Refresh</a>
+                <a href="#" id="chart-reset" class="underline hover:text-white transition-colors">Reset zoom</a>
               </div>
             </div>
             <div id="chart-activity" class="flex-1 w-full h-full relative">
@@ -96,49 +95,17 @@
           </div>
 
           <div class="p-6 rounded-xl border border-white/10 bg-white/5 h-[400px] flex flex-col shadow-sm hover:border-white/20 transition-colors">
-            <h3 class="text-sm font-medium opacity-70 mb-4">Top Users</h3>
+            <h3 class="text-sm font-medium opacity-70 mb-4">Top Users (tokens, last 24 hours)</h3>
             <div id="chart-users" class="flex-1 w-full h-full relative">
               <div class="absolute inset-0 flex items-center justify-center text-xs opacity-40">Loading chart...</div>
             </div>
           </div>
         </section>
 
-        <!-- Token Usage Charts -->
-        <section class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <section class="grid grid-cols-1 gap-8">
           <div class="p-6 rounded-xl border border-white/10 bg-white/5 h-[400px] flex flex-col shadow-sm hover:border-white/20 transition-colors">
-            <h3 class="text-sm font-medium opacity-70 mb-4">Input Tokens per User (hourly)</h3>
-            <div id="chart-token-input" class="flex-1 w-full h-full relative">
-              <div class="absolute inset-0 flex items-center justify-center text-xs opacity-40">Loading chart...</div>
-            </div>
-          </div>
-
-          <div class="p-6 rounded-xl border border-white/10 bg-white/5 h-[400px] flex flex-col shadow-sm hover:border-white/20 transition-colors">
-            <h3 class="text-sm font-medium opacity-70 mb-4">Output Tokens per User (hourly)</h3>
-            <div id="chart-token-output" class="flex-1 w-full h-full relative">
-              <div class="absolute inset-0 flex items-center justify-center text-xs opacity-40">Loading chart...</div>
-            </div>
-          </div>
-
-          <div class="p-6 rounded-xl border border-white/10 bg-white/5 h-[400px] flex flex-col shadow-sm hover:border-white/20 transition-colors lg:col-span-2">
-            <h3 class="text-sm font-medium opacity-70 mb-4">Total Tokens per User (hourly)</h3>
-            <div id="chart-token-total" class="flex-1 w-full h-full relative">
-              <div class="absolute inset-0 flex items-center justify-center text-xs opacity-40">Loading chart...</div>
-            </div>
-          </div>
-        </section>
-
-        <!-- Aggregate Token + Message Charts -->
-        <section class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-          <div class="p-6 rounded-xl border border-white/10 bg-white/5 h-[400px] flex flex-col shadow-sm hover:border-white/20 transition-colors">
-            <h3 class="text-sm font-medium opacity-70 mb-4">Input / Output Tokens (hourly)</h3>
-            <div id="chart-token-agg" class="flex-1 w-full h-full relative">
-              <div class="absolute inset-0 flex items-center justify-center text-xs opacity-40">Loading chart...</div>
-            </div>
-          </div>
-
-          <div class="p-6 rounded-xl border border-white/10 bg-white/5 h-[400px] flex flex-col shadow-sm hover:border-white/20 transition-colors">
-            <h3 class="text-sm font-medium opacity-70 mb-4">User Messages per User (hourly)</h3>
-            <div id="chart-message-count" class="flex-1 w-full h-full relative">
+            <h3 class="text-sm font-medium opacity-70 mb-4">Tokens (hourly, last 48 hours)</h3>
+            <div id="chart-tokens" class="flex-1 w-full h-full relative">
               <div class="absolute inset-0 flex items-center justify-center text-xs opacity-40">Loading chart...</div>
             </div>
           </div>
@@ -155,7 +122,7 @@
               <option value="100">100</option>
               <option value="200">200</option>
               <option value="500">500</option>
-              <option value="10000">All</option>
+              <option value="1000">1000</option>
             </select>
           </div>
         </div>
@@ -166,7 +133,7 @@
               <tr>
                 <th class="p-4 font-medium border-b border-white/10 w-[180px]">Time</th>
                 <th class="p-4 font-medium border-b border-white/10 w-[250px]">User</th>
-                <th class="p-4 font-medium border-b border-white/10">Prompt Preview</th>
+                <th class="p-4 font-medium border-b border-white/10">Message</th>
               </tr>
             </thead>
             <tbody id="messages-table-body" class="divide-y divide-white/5">
@@ -183,11 +150,11 @@
 
       <!-- Impersonate Tab -->
       <div id="tab-impersonate" class="tab-panel hidden flex flex-col gap-6">
-        <p class="text-sm opacity-50">Search for a user by email, then open the chat UI as that user. All API endpoints will return their data.</p>
+        <p class="text-sm opacity-50">Search for a user by email, then open the chat UI as that user. The server treats you as that user (read-only) until you stop impersonating from the chat's user menu.</p>
 
         <div class="flex gap-3 items-end">
           <div class="flex-1">
-            <label class="text-xs opacity-50 block mb-1">Search by email</label>
+            <label class="text-xs opacity-50 block mb-1">Search by email or name</label>
             <input
               type="text"
               placeholder="user@example.com"
@@ -202,29 +169,6 @@
         <div class="results hidden flex flex-col gap-2">
           <div class="user-list"></div>
         </div>
-      </div>
-
-      <!-- Tokens Tab -->
-      <div id="tab-tokens" class="tab-panel hidden flex flex-col gap-6">
-        <div class="flex gap-3 items-end">
-          <div class="flex-1">
-            <label class="text-xs opacity-50 block mb-1">Search by email</label>
-            <input
-              type="text"
-              placeholder="user@example.com"
-              class="search-input w-full bg-transparent border border-white/10 rounded-lg px-4 py-2.5 text-sm outline-none focus:border-white/30 transition-colors"
-            />
-          </div>
-          <button class="search-btn px-4 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-sm transition-colors">
-            Search
-          </button>
-        </div>
-
-        <div class="results hidden flex flex-col gap-3">
-          <div class="user-cards"></div>
-        </div>
-
-        <div class="status-msg hidden text-sm text-center py-2 rounded-lg"></div>
       </div>
 
       <!-- Pings Tab -->
@@ -244,7 +188,7 @@
       <div id="tab-prompts" class="tab-panel hidden flex flex-col gap-6">
         <div class="flex gap-3 items-end">
           <div class="flex-1">
-            <label class="text-xs opacity-50 block mb-1">Search by email</label>
+            <label class="text-xs opacity-50 block mb-1">Search by email or name</label>
             <input
               type="text"
               placeholder="user@example.com"
@@ -310,7 +254,7 @@
           <button id="modal-close" class="absolute top-4 right-4 text-white/50 hover:text-white p-2">&#10005;</button>
 
           <div class="p-6 border-b border-white/10">
-             <h3 class="text-lg font-semibold">Full Prompt</h3>
+             <h3 class="text-lg font-semibold">Full Message</h3>
              <div id="modal-meta" class="text-xs opacity-50 mt-1">User info here</div>
           </div>
 
@@ -324,33 +268,6 @@
              </button>
           </div>
        </div>
-    </div>
-
-    <!-- Set Token Modal -->
-    <div id="token-modal" class="fixed inset-0 z-[100] hidden items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-      <div class="bg-[var(--surface-base,#1e1e1e)] border border-white/10 rounded-xl w-full max-w-lg flex flex-col shadow-2xl">
-        <div class="p-6 border-b border-white/10">
-          <h3 class="text-lg font-semibold">Set Customer Token</h3>
-          <div id="modal-user-info" class="text-xs opacity-50 mt-1"></div>
-        </div>
-        <div class="p-6 flex flex-col gap-4">
-          <div>
-            <label for="token-input" class="text-xs opacity-50 block mb-1">mac-mgmt customer token</label>
-            <input
-              id="token-input"
-              type="text"
-              placeholder="Paste token here..."
-              class="w-full bg-transparent border border-white/10 rounded-lg px-4 py-2.5 text-sm outline-none focus:border-white/30 transition-colors font-mono"
-            />
-          </div>
-          <p class="text-xs opacity-40">Token will be validated against mac-mgmt before saving.</p>
-          <div id="modal-error" class="hidden text-xs text-red-400 bg-red-500/10 rounded-lg px-3 py-2"></div>
-        </div>
-        <div class="p-4 border-t border-white/10 flex justify-end gap-3">
-          <button id="modal-cancel" class="px-4 py-2 rounded-lg text-sm hover:bg-white/5 transition-colors">Cancel</button>
-          <button id="modal-save" class="px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-sm transition-colors font-medium">Save Token</button>
-        </div>
-      </div>
     </div>
 
     <!-- Client Logic -->
