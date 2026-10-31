@@ -1,10 +1,13 @@
 /**
  * Markdown Rendering for Chat Messages
  *
- * Uses `marked` to convert assistant markdown to sanitized HTML.
+ * Uses `marked` to convert assistant markdown to HTML and DOMPurify to strip
+ * anything executable from it before it reaches innerHTML: the assistant's
+ * text is model output and must be treated as untrusted.
  * Only used for assistant messages — user messages remain plain text.
  */
 
+import DOMPurify from 'dompurify';
 import { Marked } from 'marked';
 
 const marked = new Marked({
@@ -12,16 +15,14 @@ const marked = new Marked({
   gfm: true,
 });
 
-/**
- * Renders markdown to HTML.
- * Links open in a new tab with rel="noopener noreferrer".
- */
-export const renderMarkdown = (text: string): string => {
-  const html = marked.parse(text) as string;
+// Links open in a new tab without access to this window.
+DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+  if (node.tagName === 'A' && node.hasAttribute('href')) {
+    node.setAttribute('target', '_blank');
+    node.setAttribute('rel', 'noopener noreferrer');
+  }
+});
 
-  // Open links in new tab
-  return html.replace(
-    /<a /g,
-    '<a target="_blank" rel="noopener noreferrer" ',
-  );
-};
+/** Renders markdown to sanitized HTML. */
+export const renderMarkdown = (text: string): string =>
+  DOMPurify.sanitize(marked.parse(text, { async: false }));
