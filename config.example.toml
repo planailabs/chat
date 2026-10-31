@@ -27,7 +27,7 @@ static_dir = "web/dist"
 admin_emails = []
 
 [subnet]
-url = "http://127.0.0.1:7070"
+url = "http://127.0.0.1:7700"
 token = "CHANGE_ME"              # subnet issue_token for client "chat"
 callback_secret = "CHANGE_ME_at_least_32_chars"   # openssl rand -hex 32; subnet sends it as CHAT_CALLBACK_SECRET
 types = { sales = "chat-sales", machine_config = "chat-machine-config" }

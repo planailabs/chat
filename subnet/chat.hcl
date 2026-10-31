@@ -5,12 +5,14 @@
 # CHAT_URL below is where the chat server listens; adjust per deployment.
 
 client "chat" { role = "operator" }   # the chat server: `subnet issue_token client chat`
+node "chat" {}                        # runs the agents and reaches the chat server
 
 # --- tools ---------------------------------------------------------------------
 # The chat server's own tools: product docs, the public catalog, staff pings.
 mcp "chat" {
   url        = "http://127.0.0.1:8080/agent/mcp"
   credential = { header = "Authorization", env = "CHAT_CALLBACK_SECRET", prefix = "Bearer " }
+  nodes      = ["chat"]
   lazy       = false
   idempotent = ["product_get", "catalog_get"]
 }
@@ -19,6 +21,7 @@ mcp "chat" {
 mcp "connector" {
   url        = "http://127.0.0.1:8080/connector/mcp"
   credential = { header = "Authorization", env = "CHAT_CALLBACK_SECRET", prefix = "Bearer " }
+  nodes      = ["chat"]
   lazy       = false
   idempotent = ["list_services", "list_tools"]
 }
@@ -42,6 +45,7 @@ agent "chat-sales-agent" {
     base_url = "https://codex.plan.ai/v1"
   }
   model  = "claude-sonnet-4-5"
+  nodes  = ["chat"]
   params = { max_tokens = 2048 }
   budget = { max_tokens = 2000000, max_depth = 0, max_children = 0 }
 
@@ -97,6 +101,7 @@ agent "chat-machine-config-agent" {
     base_url = "https://codex.plan.ai/v1"
   }
   model        = "claude-sonnet-4-5"
+  nodes        = ["chat"]
   params       = { max_tokens = 2048 }
   budget       = { max_tokens = 4000000, max_depth = 0, max_children = 0 }
   hooks        = ["approval"]

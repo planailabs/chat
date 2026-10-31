@@ -1,91 +1,65 @@
+# The Rust chat server and its static UI (web/), as two packages: the
+# module points the server at the UI (`web.static_dir`).
 {
   lib,
+  rustPlatform,
   stdenv,
   nodejs_22,
   pnpm,
   pnpmConfigHook,
   fetchPnpmDeps,
-  envVars ? {},
+  fetchurl,
 }:
 
 let
-  envFile = builtins.toFile ".env"
-    (lib.concatStringsSep "\n" (lib.mapAttrsToList (k: v: "${k}=${v}") envVars));
+  version = "0.8.0";
+  # utoipa-swagger-ui's build.rs downloads Swagger UI unless pointed at a copy.
+  swagger-ui = fetchurl {
+    url = "https://github.com/swagger-api/swagger-ui/archive/refs/tags/v5.17.14.zip";
+    hash = "sha256-SBJE0IEgl7Efuu73n3HZQrFxYX+cn5UU5jrL4T5xzNw=";
+  };
 in
-stdenv.mkDerivation (finalAttrs: {
-  pname = "plan-ai-chat";
-  version = "0.7.2";
-
-  src = lib.fileset.toSource {
-    root = ./.;
-    fileset = lib.fileset.difference ./. (
-      lib.fileset.unions (
-        map lib.fileset.maybeMissing [
-          ./dist
-          ./.env.local
-        ] ++ [
-          ./flake.nix
-          ./flake.lock
-          ./package.nix
-          ./module.nix
-          ./.env.local.example
-        ]
-      )
-    );
+{
+  server = rustPlatform.buildRustPackage {
+    pname = "plan-ai-chat";
+    inherit version;
+    src = lib.fileset.toSource {
+      root = ./.;
+      fileset = lib.fileset.unions [
+        ./Cargo.toml
+        ./Cargo.lock
+        ./config.example.toml
+        ./server
+        ./common
+      ];
+    };
+    cargoLock.lockFile = ./Cargo.lock;
+    SWAGGER_UI_DOWNLOAD_URL = "file://${swagger-ui}";
+    # Like the other plan.ai servers: utoipa-swagger-ui's build script fails in
+    # the check phase's rebuild; `cargo test` runs in the dev shell instead.
+    doCheck = false;
+    meta.mainProgram = "plan-ai-chat-server";
   };
 
-  nativeBuildInputs = [
-    nodejs_22
-    pnpm
-    pnpmConfigHook
-  ];
-
-  pnpmDeps = fetchPnpmDeps {
-    inherit (finalAttrs) pname version src;
-    # 3 is refused with pnpm_11 (nixpkgs 26.11); the hash below is
-    # fetcherVersion 4's.
-    fetcherVersion = 4;
-    hash = "sha256-gkzDAg/GVIoAcQKQqNTyZQ05jq9SJ9sEg9RMG4uuSbo=";
-  };
-
-  buildPhase = ''
-    runHook preBuild
-    ${lib.optionalString (envVars != {}) "cp ${envFile} .env"}
-    ${lib.concatStringsSep "\n" (lib.mapAttrsToList (k: v: "export ${k}=${lib.escapeShellArg v}") envVars)}
-    pnpm build
-    runHook postBuild
-  '';
-
-  installPhase = ''
-    runHook preInstall
-
-    mkdir -p $out/share/plan-ai-chat/dist
-
-    # Server entry + chunks
-    cp -r dist/server $out/share/plan-ai-chat/dist/server
-
-    # Static client assets
-    cp -r dist/client $out/share/plan-ai-chat/dist/client
-
-    # Runtime deps (Astro SSR externalises @anthropic-ai/sdk, @supabase/supabase-js, etc.)
-    cp -r node_modules $out/share/plan-ai-chat/node_modules
-
-    # Production server wrapper (imports from ./dist/)
-    cp server.mjs $out/share/plan-ai-chat/server.mjs
-
-    # Wrapper script to start the production server
-    mkdir -p $out/bin
-    cat > $out/bin/plan-ai-chat <<EOF
-#!/usr/bin/env bash
-exec ${nodejs_22}/bin/node $out/share/plan-ai-chat/server.mjs "\$@"
-EOF
-    chmod +x $out/bin/plan-ai-chat
-
-    runHook postInstall
-  '';
-
-  meta = {
-    description = "The plan.ai chat (Astro + Node SSR)";
-    mainProgram = "plan-ai-chat";
-  };
-})
+  web = stdenv.mkDerivation (finalAttrs: {
+    pname = "plan-ai-chat-web";
+    inherit version;
+    src = ./web;
+    nativeBuildInputs = [ nodejs_22 pnpm pnpmConfigHook ];
+    pnpmDeps = fetchPnpmDeps {
+      inherit (finalAttrs) pname version src;
+      fetcherVersion = 4;
+      hash = "sha256-/Tho0QTPBD5HNJ/WV/MGnHW3ehChh84HoJ/1FV8p/3g=";
+    };
+    buildPhase = ''
+      runHook preBuild
+      pnpm build
+      runHook postBuild
+    '';
+    installPhase = ''
+      runHook preInstall
+      cp -r dist $out
+      runHook postInstall
+    '';
+  });
+}

@@ -2,6 +2,8 @@
 
 let
   cfg = config.services.plan-ai-chat;
+  settingsFormat = pkgs.formats.toml { };
+  configFile = settingsFormat.generate "plan-ai-chat.toml" (lib.recursiveUpdate { web.static_dir = "${cfg.webPackage}"; } cfg.settings);
 in
 {
   options.services.plan-ai-chat = {
@@ -9,41 +11,61 @@ in
 
     package = lib.mkOption {
       type = lib.types.package;
-      description = "The plan-ai-chat package to use.";
+      default = pkgs.plan-ai-chat;
+      description = "The chat server.";
     };
 
-    host = lib.mkOption {
-      type = lib.types.str;
-      default = "127.0.0.1";
-      description = "Address to bind the server to.";
+    webPackage = lib.mkOption {
+      type = lib.types.package;
+      default = pkgs.plan-ai-chat-web;
+      description = "The chat UI it serves (web.static_dir).";
     };
 
-    port = lib.mkOption {
-      type = lib.types.port;
-      default = 4321;
-      description = "Port to listen on.";
+    settings = lib.mkOption {
+      type = settingsFormat.type;
+      default = { };
+      description = ''
+        config.toml (see config.example.toml). It lands in the world-readable
+        Nix store; put secrets in {option}`secretsFile` to keep them out.
+      '';
     };
 
-    environmentFile = lib.mkOption {
+    secretsFile = lib.mkOption {
       type = lib.types.nullOr lib.types.path;
       default = null;
-      description = ''
-        Path to an environment file containing secrets.
-        Should define: VITE_SUPABASE_URL, VITE_SUPABASE_PUBLISHABLE_KEY,
-        SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, ANTHROPIC_API_KEY, MAC_MGMT_URL.
-      '';
+      example = "/run/secrets/plan-ai-chat.toml";
+      description = "TOML merged over the settings at start (CONFIG_SECRETS_PATH), read as a systemd credential.";
+    };
+
+    createDatabase = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Create a local Postgres database and role `plan-ai-chat` (peer auth); point settings.database.url at it.";
     };
   };
 
   config = lib.mkIf cfg.enable {
+    services.plan-ai-chat.settings.database.url = lib.mkIf cfg.createDatabase (lib.mkDefault "postgres:///plan-ai-chat?host=/run/postgresql");
+
+    services.postgresql = lib.mkIf cfg.createDatabase {
+      enable = true;
+      ensureDatabases = [ "plan-ai-chat" ];
+      ensureUsers = [{ name = "plan-ai-chat"; ensureDBOwnership = true; }];
+    };
+
+    users.users.plan-ai-chat = { isSystemUser = true; group = "plan-ai-chat"; };
+    users.groups.plan-ai-chat = { };
+
     systemd.services.plan-ai-chat = {
       description = "plan.ai chat";
       wantedBy = [ "multi-user.target" ];
-      after = [ "network.target" ];
+      after = [ "network.target" ] ++ lib.optional cfg.createDatabase "postgresql.service";
+      requires = lib.optional cfg.createDatabase "postgresql.service";
 
       environment = {
-        /* HOST = cfg.host;
-        PORT = toString cfg.port; */
+        CONFIG_PATH = configFile;
+      } // lib.optionalAttrs (cfg.secretsFile != null) {
+        CONFIG_SECRETS_PATH = "%d/secrets";
       };
 
       serviceConfig = {
@@ -51,8 +73,8 @@ in
         ExecStart = lib.getExe cfg.package;
         Restart = "on-failure";
         RestartSec = 5;
-
-        DynamicUser = true;
+        User = "plan-ai-chat";
+        Group = "plan-ai-chat";
         NoNewPrivileges = true;
         ProtectSystem = "strict";
         ProtectHome = true;
@@ -63,9 +85,8 @@ in
         ProtectControlGroups = true;
         RestrictNamespaces = true;
         RestrictSUIDSGID = true;
-        MemoryDenyWriteExecute = false; # Node.js JIT needs this
-      } // lib.optionalAttrs (cfg.environmentFile != null) {
-        EnvironmentFile = cfg.environmentFile;
+      } // lib.optionalAttrs (cfg.secretsFile != null) {
+        LoadCredential = "secrets:${cfg.secretsFile}";
       };
     };
   };

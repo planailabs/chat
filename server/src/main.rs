@@ -56,7 +56,13 @@ async fn main() -> anyhow::Result<()> {
 
     let dist = &cfg.web.static_dir;
     let spa = ServeDir::new(dist).fallback(ServeFile::new(dist.join("index.html")));
-    let mut web = Router::new().merge(api).fallback_service(spa);
+    // The dashboard's tabs are client-side paths under /dashboard/.
+    let dashboard = ServeFile::new(dist.join("dashboard").join("index.html"));
+    let mut web = Router::new()
+        .merge(api)
+        .route_service("/dashboard", dashboard.clone())
+        .nest_service("/dashboard/", dashboard)
+        .fallback_service(spa);
     if !auth_layers.is_empty() {
         web = web.route("/auth/login", get(plan_ai_auth::login_page)).route("/auth/logout", get(plan_ai_auth::logout_handler));
     }
