@@ -26,6 +26,14 @@ const approvalStatus = (decision: 'approved' | 'denied' | null) => {
         <span class="whitespace-nowrap">· {{ approvalStatus(msg.decision) }}</span>
       </p>
     </div>
+    <div v-else-if="msg.role === 'qa'" class="flex justify-start">
+      <p class="chat-qa max-w-[min(100%,640px)] text-sm leading-relaxed text-(--text-muted)">
+        <span>{{ msg.question }}</span>
+        <span class="mx-1.5" aria-hidden="true">→</span>
+        <span v-if="msg.answer !== null" class="font-medium text-(--text-primary)">{{ msg.answer }}</span>
+        <span v-else class="italic">{{ locale.chat.skipLabel }}</span>
+      </p>
+    </div>
     <div v-else-if="msg.role === 'cancel'" class="flex justify-end">
       <p class="max-w-[min(100%,640px)] rounded-3xl px-5 py-3 text-sm text-(--text-muted) italic">{{ msg.content }}</p>
     </div>

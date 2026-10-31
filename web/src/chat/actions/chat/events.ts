@@ -138,14 +138,9 @@ export const handleServerEvent = <E extends ChatEventName>(type: E, data: ChatEv
       const { call_id, toolName, input } = data as ChatEvents['question'];
       transition(mc, 'question');
       mc.clientPrompt = questionPrompt(call_id, toolName, input ?? {}, true);
-      if (toolName === 'ask_question') {
-        // The question is part of the conversation
-        const question = input?.question;
-        const last = mc.messages[mc.messages.length - 1];
-        if (typeof question === 'string' && !(last?.role === 'assistant' && last.content === question)) {
-          mc.messages.push({ role: 'assistant', content: question });
-        }
-      } else if (mc.clientPrompt.preference) {
+      // An ask_question is shown by its prompt while pending, then as
+      // "question → answer" (stateMachine's answerBubble).
+      if (toolName !== 'ask_question' && mc.clientPrompt.preference) {
         setTimeout(() => startPreferenceQuestionStream(), 0);
       }
       cacheChatMessages(mc.messages);

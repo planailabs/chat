@@ -46,6 +46,8 @@ export interface PendingApproval {
 export type ChatMessage =
   /** `id`: the server's message id (from the history; search hits point at it). */
   | { role: 'user' | 'assistant' | 'cancel'; content: string; id?: number }
+  /** An answered question: the question and the answer (null: dismissed). */
+  | { role: 'qa'; question: string; answer: string | null }
   /** A past approval request; `decision` is known for the ones made here. */
   | ({ role: 'approval'; decision: ApprovalDecision | null } & PendingApproval);
 

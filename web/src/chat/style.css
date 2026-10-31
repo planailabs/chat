@@ -1387,6 +1387,11 @@ html.is-first-visit #app {
     -webkit-box-orient: vertical;
   }
 
+  /* Group headers: the whole title on one line (ellipsized), matches marked. */
+  .search-hit--title .search-hit__text {
+    -webkit-line-clamp: 1;
+  }
+
   .search-hit .sidebar-icon {
     margin-top: 0.1rem;
   }

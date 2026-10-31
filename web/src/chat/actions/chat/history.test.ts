@@ -48,11 +48,25 @@ describe('historyToChat', () => {
       en,
     );
     expect(snapshot.messages).toEqual([
-      { role: 'assistant', content: 'Which editor?' },
-      { role: 'user', content: 'Zed' },
-      { role: 'assistant', content: 'Your name?' },
-      { role: 'cancel', content: 'Skip' },
+      { role: 'qa', question: 'Which editor?', answer: 'Zed' },
+      { role: 'qa', question: 'Your name?', answer: null },
     ]);
+  });
+
+  it('shows a pending question only as its prompt', () => {
+    const input = { type: 'multiple_choice', question: 'Demo or callback?', options: ['Demo', 'Callback'] };
+    const snapshot = historyToChat(
+      history(
+        [
+          msg({ role: 'assistant', content: 'Want a demo?', data: null }),
+          msg({ role: 'question', content: 'Demo or callback?', data: { call_id: 'q9', toolName: 'ask_question', input } }),
+        ],
+        { pending_questions: [{ call_id: 'q9', name: 'ask_question', input }] },
+      ),
+      en,
+    );
+    expect(snapshot.messages.map((m) => m.role)).toEqual(['assistant']);
+    expect(snapshot.pendingQuestion).toEqual({ callId: 'q9', toolName: 'ask_question', input });
   });
 
   it('replays an answered newsletter preference in the UI language', () => {

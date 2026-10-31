@@ -2,7 +2,10 @@
  * Application-wide constants
  */
 
-export const APP_VERSION = 'v0.7.3';
+import packageJson from '../../package.json';
+
+/** The version badge: package.json's version, read at build time. */
+export const APP_VERSION = `v${packageJson.version}`;
 
 /**
  * Keys used for browser storage. Everything lives in sessionStorage except

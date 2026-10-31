@@ -21,7 +21,7 @@ const questionText = (input: Record<string, unknown>): string | null =>
 const preferenceOf = (input: Record<string, unknown>, locale: LocaleContent) =>
   typeof input.preference_id === 'string' ? locale.preferencePrompts[input.preference_id] : undefined;
 
-/** A dismissed question shows as the Skip label. */
+/** A dismissed question shows as the Skip label; an answered one as "question → answer". */
 export const historyToChat = (history: History, locale: LocaleContent): ChatSnapshot => {
   const pending = history.pending_questions?.[0];
   const pendingQuestion: ClientPrompt | null = pending ? { callId: pending.call_id, toolName: pending.name, input: pending.input ?? {} } : null;
@@ -34,6 +34,8 @@ export const historyToChat = (history: History, locale: LocaleContent): ChatSnap
   const pendingApprovalIds = new Set(approvals.map((a) => a.callId));
 
   const questions = new Map<string, QuestionData>();
+  /** Answered-or-not ask_question entries, by call id (filled by their answer). */
+  const asked = new Map<string, Extract<ChatMessage, { role: 'qa' }>>();
   const messages: ChatMessage[] = [];
 
   for (const m of history.messages) {
@@ -52,14 +54,25 @@ export const historyToChat = (history: History, locale: LocaleContent): ChatSnap
           if (pref && m.data.call_id !== pendingQuestion?.callId) {
             messages.push({ role: 'assistant', content: pref.question });
           }
-        } else {
+        } else if (m.data.call_id !== pendingQuestion?.callId) {
+          // A pending question is shown by its prompt; a past one as one
+          // compact "question → answer" entry (the answer fills it in).
           const text = questionText(input) ?? (m.content.trim() || null);
-          if (text) messages.push({ role: 'assistant', content: text });
+          if (text) {
+            const entry = { role: 'qa' as const, question: text, answer: null };
+            asked.set(m.data.call_id, entry);
+            messages.push(entry);
+          }
         }
         break;
       }
 
       case 'answer': {
+        const entry = asked.get(m.data.call_id);
+        if (entry) {
+          entry.answer = m.data.is_error ? null : m.content;
+          break;
+        }
         if (m.data.is_error) {
           messages.push({ role: 'cancel', content: locale.chat.skipLabel });
           break;

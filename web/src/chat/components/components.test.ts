@@ -117,6 +117,22 @@ describe('ChatMessages', () => {
   });
 });
 
+describe('answered questions', () => {
+  it('show as one compact "question → answer" line, dismissed ones with Skip', () => {
+    const w = mount(ChatMessages, {
+      props: {
+        messages: [
+          { role: 'qa', question: 'Which editor?', answer: 'Zed' },
+          { role: 'qa', question: 'Your name?', answer: null },
+        ],
+      },
+    });
+    const lines = w.findAll('.chat-qa');
+    expect(lines.map((l) => l.text())).toEqual(['Which editor?→Zed', 'Your name?→Skip']);
+    expect(w.find('.chat-markdown').exists()).toBe(false);
+  });
+});
+
 describe('QuestionPrompt', () => {
   const prompt = { callId: 'q1', toolName: 'ask_question', input: { type: 'multiple_choice', question: 'Which one?', options: ['A', 'B'] } };
 

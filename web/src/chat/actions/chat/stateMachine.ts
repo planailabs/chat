@@ -270,12 +270,25 @@ const submitAnswer = async (content: string | undefined, bubbles: ChatMessage[])
   }
 };
 
-export const answerChatQuestion = (text: string) => submitAnswer(text, [{ role: 'user', content: text }]);
+/** The pending ask_question's text, if any (shown with its answer). */
+const pendingQuestionText = (): string | null => {
+  const input = store.state.chat?.clientPrompt?.input;
+  return typeof input?.question === 'string' && input.question.trim() ? input.question : null;
+};
+
+/** What the chat keeps of an answered question: "question → answer" (or the answer alone). */
+const answerBubble = (answer: string | null): ChatMessage => {
+  const question = pendingQuestionText();
+  if (question) return { role: 'qa', question, answer };
+  return answer === null ? { role: 'cancel', content: locale().chat.skipLabel } : { role: 'user', content: answer };
+};
+
+export const answerChatQuestion = (text: string) => submitAnswer(text, [answerBubble(text)]);
 
 export const cancelChatQuestion = () => {
   const mc = store.state.chat;
   if (mc?.phase !== 'question') return Promise.resolve();
-  return submitAnswer(undefined, [{ role: 'cancel', content: locale().chat.skipLabel }]);
+  return submitAnswer(undefined, [answerBubble(null)]);
 };
 
 /** Answers a prompt_preference question whose exchange is already in the chat. */
