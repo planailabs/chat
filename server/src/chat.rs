@@ -134,6 +134,16 @@ pub async fn send(app: &App, user: Uuid, id: Option<Uuid>, text: &str, lang: &st
         .execute(&app.pool)
         .await
         .map_err(internal)?;
+    // The prompt is the agent's first event (seq 1), which usually reaches the
+    // pump before the agent is known as ours: mirror it here; the pump's own
+    // insert, if it got there, is the same row.
+    sqlx::query("INSERT INTO chat_messages (agent_id, seq, user_id, role, content) VALUES ($1, 1, $2, 'user', $3) ON CONFLICT (agent_id, seq) DO NOTHING")
+        .bind(&agent)
+        .bind(user)
+        .bind(text)
+        .execute(&app.pool)
+        .await
+        .map_err(internal)?;
     Ok(id)
 }
 
