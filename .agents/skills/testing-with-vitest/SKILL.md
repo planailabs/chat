@@ -7,7 +7,7 @@ description: Use when writing, running, or fixing unit tests. The project uses V
 
 ## Overview
 
-This project uses [Vitest](https://vitest.dev/) for fast unit/integration tests running in Node. It evaluates state machines, caching helpers, and logical controllers without spinning up a full browser.
+This project uses [Vitest](https://vitest.dev/) for fast unit tests of the UI in `web/` (run from `web/`), in Node by default. It covers the API client, history mapping and rendering helpers without a full browser. The Rust server has its own tests (`cargo test` in `server/`).
 
 ## Commands
 
@@ -21,7 +21,7 @@ Prefer `pnpm` for all test commands.
 
 ### 1. File Placement
 
-Place `.test.ts` files adjacent to the module they cover (e.g., `src/auth/preAuthCache.test.ts`).
+Place `.test.ts` files adjacent to the module they cover (e.g., `web/src/chat/api.test.ts`).
 
 ### 2. Mocking Browser Globals (Node Environment)
 
@@ -38,6 +38,10 @@ beforeEach(() => {
     typeof globalThis);
 });
 ```
+
+Mock the API with `vi.stubGlobal('fetch', fetchMock)` and return a fresh `Response` per call (`mockImplementation`), since a body can be read once.
+
+Code that needs a real DOM (e.g. DOMPurify in `utils/markdown.ts`) opts into jsdom with a `// @vitest-environment jsdom` comment at the top of the test file.
 
 ### 3. Time Manipulation
 

@@ -1,47 +1,50 @@
 ---
 name: developing-spa-shell
-description: Use when working in src/spa/ or modifying the core application shell in index.astro. Covers action-driven state management, manual i18n/theme resolution, and DOM-based layout initialization.
+description: Use when working in web/src/chat/ (the chat UI) or web/src/dashboard/ (admin dashboard), adding UI state, calling the Rust API, or touching the inline boot script in web/index.html. Covers action-driven state, the shared typed API client, the chat event stream, and manual i18n/theme resolution.
 ---
 
-# Developing SPA Shell
+# Developing the SPA Shell
 
 ## Overview
 
-The project uses Astro as a shell to load a custom TypeScript SPA. This architecture bypasses traditional framework routers in favor of a fast, action-driven DOM manipulation pattern.
+The UI is plain TypeScript built by Vite (`web/`), served as static files by the Rust server (`server/`) on the same origin. Two pages: the chat (`web/index.html` → `web/src/chat/main.ts`) and the admin dashboard (`web/dashboard/index.html` → `web/src/dashboard/main.ts`). There is no framework or router: actions mutate a central store, and `main.ts` re-renders regions from template strings.
 
 ## Core Patterns
 
 ### 1. Action-Driven State Management
 
-Logic is decoupled into `src/spa/actions/*.ts` and coordinated by a central `store` (in `src/spa/app/store`).
+Logic lives in `web/src/chat/actions/**/*.ts`, coordinated by the `store` in `web/src/chat/app/store.ts` (state shape in `app/state.ts`).
 
-- **Always** export discrete async actions for side effects (API calls, storage).
-- **Notify** the store after state changes to trigger re-renders or DOM updates.
+- **Always** put side effects (API calls, storage, timers) in action files, not in `ui/` renderers or `main.ts`.
+- **Notify** the store (`store.notify()` / `store.setState()`) after state changes to re-render.
+- Chat phases go through `transition()` in `actions/chat/stateMachine.ts` only.
 
-### 2. Manual i18n & Theme Resolution
+### 2. The API (`web/src/chat/api.ts`)
 
-Initialization happens in a blocking `<script is:inline>` in `index.astro` to prevent flashes.
+One typed client, shared by chat and dashboard, for the server's `/api/v1/...` (cookie session, JSON).
 
-- **Language**: Resolved via `sessionStorage` (key: `planai-language`) or browser detection.
-- **Theme**: Resolved via `sessionStorage` (key: `planai-theme-mode`) or system preference (prefers-color-scheme).
+- Add endpoints there with their types; never `fetch('/api/...')` elsewhere.
+- Errors are `ApiError` (`status`, `code`, `message`); `isUnauthorized(e)` = signed out (HTTP 401).
+- Sign-in/out are navigations: `signIn(path)` → `/auth/login?redirect=…`, `signOut()` → `/auth/logout`. There is no client-side token.
+- Admin impersonation is the `impersonate_user_id` cookie (`startImpersonation` / `stopImpersonation`); the profile's `impersonating` flag makes the UI read-only.
 
-### 3. DOM Layout Initialization
+### 3. Chat Event Stream
 
-The `initApp` function in `src/spa/main.ts` builds the core shell structure:
+Replies stream over `EventSource(/api/v1/chat/events?mode=…)` (`actions/chat/sse.ts`), handled in `actions/chat/events.ts`. Connect before sending (`await connectEvents()`); on reconnect or a `resync` event the history is refetched (`actions/chat/session.ts`). `actions/chat/history.ts` maps the server's history to chat messages (pure, unit-tested).
 
-```ts
-app.innerHTML = `
-  <div class="app-shell flex flex-col ...">
-    <div id="header-region"></div>
-    <main id="main-region"></main>
-    <footer id="footer-region"></footer>
-  </div>
-`;
-```
+### 4. Manual i18n & Theme Resolution
+
+A blocking inline `<script>` in `web/index.html` sets `lang` and `data-theme` before the bundle loads, to prevent flashes.
+
+- **Language**: `sessionStorage` (`planai-language`) or browser detection; strings in `web/src/chat/content/locales.ts` (`en`, `de` — add both).
+- **Theme**: `sessionStorage` (`planai-theme-mode`) or `prefers-color-scheme`. Signed-in users' choices are also saved to their profile.
+
+### 5. DOM Layout Initialization
+
+`initApp` in `web/src/chat/main.ts` builds the shell (`header-region`, `main-region`, `footer-region`, `overlay-region`) and wires delegated events (`web/src/chat/events/`).
 
 ## Best Practices
 
-- **CSS Variables**: Use `--surface-base` and `--text-primary` for theme-aware styling.
-- **Side Effects**: keep them in action files, not in the view/main.ts.
-- **Vite Integration**: Prefix public env variables with `VITE_` or `PUBLIC_`.
-- **Links**: Always append a trailing slash to internal Astro links (e.g., `href="/chat/"`) to match the platform's default routing resolution.
+- **Escape** every interpolated string with `escapeHtml`; assistant markdown goes through `renderMarkdown` (marked + DOMPurify), never raw into `innerHTML`.
+- **CSS Variables**: Use `--surface-base`, `--text-primary`, `--text-muted` for theme-aware styling.
+- **Checks**: `cd web && pnpm exec tsc --noEmit -p . && pnpm test && pnpm build`.
