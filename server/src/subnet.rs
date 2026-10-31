@@ -84,6 +84,8 @@ struct Turn {
     index: HashMap<u64, String>,
     /// Client-tool calls waiting for (or answered by) the user.
     questions: std::collections::HashSet<String>,
+    /// The model call's usage: each delta's replaces the last; counted at llm_done.
+    usage: Option<Value>,
     thinking: bool,
 }
 
@@ -164,6 +166,23 @@ impl Pump {
         Ok(())
     }
 
+    async fn record_usage(&self, agent: &str, seq: i64, user: Uuid, mode: &str, u: &Value) -> anyhow::Result<()> {
+        sqlx::query(
+            "INSERT INTO chat_token_usage (agent_id, seq, user_id, mode, input_tokens, output_tokens, cached_tokens)
+             VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING",
+        )
+        .bind(agent)
+        .bind(seq)
+        .bind(user)
+        .bind(mode)
+        .bind(u["prompt_tokens"].as_i64().unwrap_or_default())
+        .bind(u["completion_tokens"].as_i64().unwrap_or_default())
+        .bind(u["cached_prompt_tokens"].as_i64().unwrap_or_default())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     async fn apply(&self, agent: &str, seq: i64, user: Uuid, mode: &str, ev: &Value, turn: &mut Turn) -> anyhow::Result<()> {
         match ev["type"].as_str().unwrap_or_default() {
             "inbox" => {
@@ -188,22 +207,13 @@ impl Pump {
                     }
                 }
                 if let Some(u) = delta.get("usage").filter(|u| u.is_object()) {
-                    sqlx::query(
-                        "INSERT INTO chat_token_usage (agent_id, seq, user_id, mode, input_tokens, output_tokens, cached_tokens)
-                         VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING",
-                    )
-                    .bind(agent)
-                    .bind(seq)
-                    .bind(user)
-                    .bind(mode)
-                    .bind(u["prompt_tokens"].as_i64().unwrap_or_default())
-                    .bind(u["completion_tokens"].as_i64().unwrap_or_default())
-                    .bind(u["cached_prompt_tokens"].as_i64().unwrap_or_default())
-                    .execute(&self.pool)
-                    .await?;
+                    turn.usage = Some(u.clone());
                 }
             }
             "llm_done" => {
+                if let Some(u) = turn.usage.take() {
+                    self.record_usage(agent, seq, user, mode, &u).await?;
+                }
                 let text = std::mem::take(&mut turn.text);
                 turn.index.clear();
                 if !text.trim().is_empty() {
@@ -247,6 +257,11 @@ impl Pump {
                 turn.text.clear();
                 self.emit(user, mode, "error", json!({ "message": "The assistant failed to answer. Please try again." }));
                 tracing::error!(agent, "llm_failed: {}", ev["error"]);
+            }
+            "compacted" => {
+                if let Some(u) = ev.get("usage").filter(|u| u.is_object()) {
+                    self.record_usage(agent, seq, user, mode, u).await?;
+                }
             }
             "cancelled" | "superseded" => {
                 self.owners.0.write().await.remove(agent);

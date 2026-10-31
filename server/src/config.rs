@@ -1,4 +1,5 @@
-//! `config.toml` (path in `CONFIG_PATH`, default `config.toml`).
+//! `config.toml` (path in `CONFIG_PATH`, default `config.toml`), plus an
+//! optional secrets file (`CONFIG_SECRETS_PATH`) merged over it.
 
 use std::path::PathBuf;
 use std::sync::OnceLock;
@@ -160,11 +161,33 @@ pub struct Catalog {
 
 static CONFIG: OnceLock<Config> = OnceLock::new();
 
+fn read(path: &str) -> toml::Table {
+    let text = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("reading config {path}: {e}"));
+    toml::from_str(&text).unwrap_or_else(|e| panic!("parsing config {path}: {e}"))
+}
+
+/// `over` merged into `base`: tables merge key by key, anything else replaces.
+fn merge(base: &mut toml::Table, over: toml::Table) {
+    for (k, v) in over {
+        match (base.get_mut(&k), v) {
+            (Some(toml::Value::Table(b)), toml::Value::Table(o)) => merge(b, o),
+            (_, v) => {
+                base.insert(k, v);
+            }
+        }
+    }
+}
+
+/// `CONFIG_PATH` (default `config.toml`), with `CONFIG_SECRETS_PATH` merged
+/// over it: secrets stay out of the (world-readable) config, e.g. the Nix store.
 pub fn load() -> &'static Config {
     CONFIG.get_or_init(|| {
         let path = std::env::var("CONFIG_PATH").unwrap_or_else(|_| "config.toml".into());
-        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("reading config {path}: {e}"));
-        toml::from_str(&text).unwrap_or_else(|e| panic!("parsing config {path}: {e}"))
+        let mut table = read(&path);
+        if let Ok(secrets) = std::env::var("CONFIG_SECRETS_PATH") {
+            merge(&mut table, read(&secrets));
+        }
+        toml::Value::Table(table).try_into().unwrap_or_else(|e| panic!("config {path}: {e}"))
     })
 }
 
@@ -174,5 +197,12 @@ mod tests {
     fn example_config_parses() {
         let cfg: super::Config = toml::from_str(include_str!("../../config.example.toml")).unwrap();
         assert_eq!(cfg.subnet.types["sales"], "chat-sales");
+    }
+
+    #[test]
+    fn secrets_merge_into_tables() {
+        let mut base: toml::Table = toml::from_str("[a]\nx = 1\ny = 2\n[b]\nz = 3").unwrap();
+        super::merge(&mut base, toml::from_str("[a]\ny = 9\n[c]\nw = 4").unwrap());
+        assert_eq!(base.to_string(), toml::from_str::<toml::Table>("[a]\nx = 1\ny = 9\n[b]\nz = 3\n[c]\nw = 4").unwrap().to_string());
     }
 }
