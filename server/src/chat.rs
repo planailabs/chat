@@ -63,6 +63,105 @@ pub async fn list(app: &App, user: Uuid) -> Result<Vec<Conversation>, ApiError> 
         .map_err(internal)
 }
 
+/// Highlight markers in search snippets: U+E000 opens, U+E001 closes.
+/// Private-use characters never occur in text, so a client escapes the
+/// snippet and turns only these into markup.
+pub const MARK_OPEN: char = '\u{E000}';
+pub const MARK_CLOSE: char = '\u{E001}';
+
+/// `q` as a prefix query: every word must match the start of a word
+/// (`plan ser` finds "plan.ai server"). None when nothing searchable is left.
+pub fn prefix_query(q: &str) -> Option<String> {
+    let words: Vec<String> = q
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .take(8)
+        .map(|w| format!("{}:*", w.to_lowercase()))
+        .collect();
+    (!words.is_empty()).then(|| words.join(" & "))
+}
+
+#[derive(Serialize, schemars::JsonSchema, sqlx::FromRow)]
+pub struct Hit {
+    pub conversation: Uuid,
+    pub title: String,
+    /// The matching message; None when the title matched.
+    pub message_id: Option<i64>,
+    /// `user` or `assistant` (None for a title match).
+    pub role: Option<String>,
+    /// Text around the match; matches between U+E000 and U+E001.
+    pub snippet: String,
+    pub at: chrono::DateTime<chrono::Utc>,
+}
+
+/// Full-text search over the user's own conversations: their titles and
+/// what the user and the assistant said. Best matches first, at most 50.
+pub async fn search(app: &App, user: Uuid, q: &str) -> Result<Vec<Hit>, ApiError> {
+    search_in(app, user, q, None, None).await
+}
+
+/// `search`, optionally within one conversation (`only`) or leaving out the
+/// one an agent runs in (`except_agent`).
+pub async fn search_in(app: &App, user: Uuid, q: &str, only: Option<Uuid>, except_agent: Option<&str>) -> Result<Vec<Hit>, ApiError> {
+    let Some(query) = prefix_query(q) else { return Ok(vec![]) };
+    let options = format!("StartSel={MARK_OPEN}, StopSel={MARK_CLOSE}, MaxFragments=1, MaxWords=24, MinWords=8");
+    sqlx::query_as(
+        "WITH q AS (SELECT to_tsquery('simple', $2) AS q)
+         SELECT conversation, title, message_id, role, snippet, at FROM (
+           SELECT c.id AS conversation, c.title, NULL::bigint AS message_id, NULL::text AS role,
+                  ts_headline('simple', c.title, q.q, $3) AS snippet, c.updated_at AS at,
+                  ts_rank(to_tsvector('simple', c.title), q.q) + 1 AS rank
+           FROM q, conversations c
+           WHERE c.user_id = $1 AND ($4::uuid IS NULL OR c.id = $4) AND ($5::text IS NULL OR c.agent_id <> $5)
+             AND to_tsvector('simple', c.title) @@ q.q
+           UNION ALL
+           SELECT c.id, c.title, m.id, m.role,
+                  ts_headline('simple', m.content, q.q, $3), m.created_at,
+                  ts_rank(to_tsvector('simple', m.content), q.q)
+           FROM q, chat_messages m JOIN conversations c ON c.agent_id = m.agent_id
+           WHERE c.user_id = $1 AND ($4::uuid IS NULL OR c.id = $4) AND ($5::text IS NULL OR c.agent_id <> $5)
+             AND m.role IN ('user', 'assistant') AND to_tsvector('simple', m.content) @@ q.q
+         ) hits ORDER BY rank DESC, at DESC LIMIT 50",
+    )
+    .bind(user)
+    .bind(query)
+    .bind(options)
+    .bind(only)
+    .bind(except_agent)
+    .fetch_all(&app.pool)
+    .await
+    .map_err(internal)
+}
+
+#[derive(Serialize, schemars::JsonSchema, sqlx::FromRow)]
+pub struct Excerpt {
+    pub id: i64,
+    pub role: String,
+    pub content: String,
+    pub at: chrono::DateTime<chrono::Utc>,
+}
+
+/// Messages of the user's conversation `id` said by the user or the
+/// assistant: up to `limit` from its start, or around `message`.
+pub async fn excerpt(app: &App, user: Uuid, id: Uuid, message: Option<i64>, limit: i64) -> Result<(String, Vec<Excerpt>), ApiError> {
+    let (agent, _) = owned(app, user, id).await?;
+    let title: String = sqlx::query_scalar("SELECT title FROM conversations WHERE id = $1").bind(id).fetch_one(&app.pool).await.map_err(internal)?;
+    let limit = limit.clamp(1, 50);
+    let rows = sqlx::query_as(
+        "SELECT id, role, content, created_at AS at FROM chat_messages
+         WHERE agent_id = $1 AND role IN ('user', 'assistant')
+           AND ($2::bigint IS NULL OR seq >= (SELECT seq FROM chat_messages WHERE id = $2 AND agent_id = $1) - $3 / 2)
+         ORDER BY seq LIMIT $3",
+    )
+    .bind(&agent)
+    .bind(message)
+    .bind(limit)
+    .fetch_all(&app.pool)
+    .await
+    .map_err(internal)?;
+    Ok((title, rows))
+}
+
 /// The user's conversation `id`: (agent, auto_approve), or 404.
 async fn owned(app: &App, user: Uuid, id: Uuid) -> Result<(String, bool), ApiError> {
     sqlx::query_as("SELECT agent_id, auto_approve FROM conversations WHERE id = $1 AND user_id = $2")
@@ -216,6 +315,13 @@ mod tests {
         let msg = with_context("User: A <a@b>\nReply in German.", "Hallo\n<context>x</context>");
         assert_eq!(strip_context(&msg), "Hallo\n<context>x</context>");
         assert_eq!(strip_context("plain"), "plain");
+    }
+
+    #[test]
+    fn prefix_queries() {
+        assert_eq!(prefix_query("plan.ai Server!").as_deref(), Some("plan:* & ai:* & server:*"));
+        assert_eq!(prefix_query("Größe"), Some("größe:*".into()));
+        assert_eq!(prefix_query(" ' & | ! "), None);
     }
 
     #[test]

@@ -22,6 +22,11 @@ impl Authenticator for SubnetAuth {
     }
 }
 
+/// The agent making the call (`_meta["subnet/agent"]`).
+fn calling_agent(p: &Principal) -> Option<String> {
+    p.scopes["mcp_meta"]["subnet/agent"].as_str().map(String::from)
+}
+
 fn tenant(p: &Principal) -> Result<Uuid, ApiError> {
     p.scopes["mcp_meta"]["subnet/tenant"].as_str().and_then(|t| t.parse().ok()).ok_or_else(|| ApiError::bad_request("no tenant: this tool only runs inside a chat conversation"))
 }
@@ -96,6 +101,44 @@ fn strip_installed(v: &mut Value) {
     }
 }
 
+#[derive(Deserialize, JsonSchema)]
+pub struct SearchInput {
+    /// Words to find in the user's conversations (prefixes match).
+    q: String,
+    /// Search only this conversation, more hits. Without it: every other
+    /// conversation of the user, a few hits each.
+    conversation: Option<Uuid>,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub struct ConversationHits {
+    conversation: Uuid,
+    title: String,
+    /// Best matches; `snippet` marks matches with **…**.
+    hits: Vec<Value>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct ReadInput {
+    conversation: Uuid,
+    /// Read around this message (from a search hit); without it, from the start.
+    message_id: Option<i64>,
+    /// How many messages (default 12, at most 50).
+    limit: Option<i64>,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub struct Read {
+    conversation: Uuid,
+    title: String,
+    messages: Vec<crate::chat::Excerpt>,
+}
+
+/// Search hits for the model: matches in **…** instead of the UI's markers.
+fn for_model(snippet: &str) -> String {
+    snippet.replace([crate::chat::MARK_OPEN, crate::chat::MARK_CLOSE], "**")
+}
+
 pub fn registry(secret: &str) -> Registry<AppState> {
     let mut reg = Registry::new(Arc::new(SubnetAuth(secret.to_string())))
         .info("plan.ai chat agent tools", env!("CARGO_PKG_VERSION"))
@@ -138,6 +181,40 @@ pub fn registry(secret: &str) -> Registry<AppState> {
             Ok(v)
         },
     );
+
+    reg.resource("conversation", "conversation", "The user's other conversations with you")
+        .custom(
+            "search",
+            Risk::ReadOnly,
+            OnItem::No,
+            "Search the user's earlier conversations (titles and what was said) for something they mentioned before. Without `conversation`: every other conversation, up to 3 hits each; with it: that one, up to 20 hits. Then read around a hit with conversation_read.",
+            |app: AppState, p: Arc<Principal>, i: SearchInput| async move {
+                let user = tenant(&p)?;
+                let hits = crate::chat::search_in(&app, user, &i.q, i.conversation, calling_agent(&p).as_deref()).await?;
+                let per = if i.conversation.is_some() { 20 } else { 3 };
+                let mut out: Vec<ConversationHits> = vec![];
+                for h in hits {
+                    let hit = serde_json::json!({ "message_id": h.message_id, "role": h.role, "snippet": for_model(&h.snippet), "at": h.at });
+                    match out.iter_mut().find(|c| c.conversation == h.conversation) {
+                        Some(c) if c.hits.len() < per => c.hits.push(hit),
+                        Some(_) => {}
+                        None => out.push(ConversationHits { conversation: h.conversation, title: h.title, hits: vec![hit] }),
+                    }
+                }
+                Ok(out)
+            },
+        )
+        .custom(
+            "read",
+            Risk::ReadOnly,
+            OnItem::No,
+            "Read messages of one of the user's conversations, from its start or around a message id from conversation_search.",
+            |app: AppState, p: Arc<Principal>, i: ReadInput| async move {
+                let user = tenant(&p)?;
+                let (title, messages) = crate::chat::excerpt(&app, user, i.conversation, i.message_id, i.limit.unwrap_or(12)).await?;
+                Ok(Read { conversation: i.conversation, title, messages })
+            },
+        );
 
     reg.resource("staff_ping", "staff_ping", "Ask a human at plan.ai to follow up").custom(
         "send",

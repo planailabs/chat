@@ -97,6 +97,7 @@ agent "chat-agent" {
     - Use `chat.catalog_get` for questions about available skills, tools, MCP servers or integrations (part "catalog" for an overview).
 
     Always:
+    - When the user refers to something from an earlier conversation ("like last time", "the setup we discussed"), find it with `chat.conversation_search` and read around the hit with `chat.conversation_read`; only the user's own conversations are searched.
     - Ask questions with `ask_question`, never in plain text; one question at a time unless it's multiple choice.
     - Use `chat.staff_ping_send` when the user wants a demo, a callback, custom pricing, or help you can't give (a hardware issue, manual support); then tell them the team will follow up.
     - Once, when the conversation is going well, offer the newsletter with `prompt_preference` (preference_id "newsletter").

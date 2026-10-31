@@ -173,6 +173,14 @@ pub struct ApproveInput {
 }
 
 #[derive(Deserialize, JsonSchema)]
+pub struct SearchInput {
+    /// Words to find (prefixes match: "konf" finds "Konfiguration").
+    #[serde(deserialize_with = "text")]
+    #[schemars(with = "String")]
+    q: String,
+}
+
+#[derive(Deserialize, JsonSchema)]
 pub struct RenameInput {
     id: Uuid,
     title: String,
@@ -301,6 +309,9 @@ pub fn registry(auth: Arc<dyn plan_ai_api_mcp::Authenticator>) -> Registry<AppSt
     reg.resource("chat", "chat", "Your conversations with the plan.ai assistant")
         .list("Your conversations, most recent first.", |app: AppState, p: Arc<Principal>, _: Empty| async move {
             chat::list(&app, user_of(&p)?).await
+        })
+        .custom("search", Risk::ReadOnly, OnItem::No, "Search your own conversations (titles and messages); snippets mark matches between U+E000 and U+E001.", |app: AppState, p: Arc<Principal>, i: SearchInput| async move {
+            chat::search(&app, user_of(&p)?, &i.q).await
         })
         .custom("history", Risk::ReadOnly, OnItem::No, "A conversation's messages and what it waits on.", |app: AppState, p: Arc<Principal>, c: ConversationRef| async move {
             chat::history(&app, user_of(&p)?, c.id).await
