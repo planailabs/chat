@@ -1,15 +1,5 @@
 import { api, isUnauthorized, signIn, stopImpersonation } from '../chat/api';
 
-/** Escapes text for element content and quoted attribute values. */
-export function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -41,6 +31,31 @@ export async function enforceAdminAccess(): Promise<boolean> {
       console.error('Dashboard: profile check failed', error);
       window.location.href = '/';
     }
+    return false;
+  }
+}
+
+/** "just now", "5m ago", "3h ago", "2d ago". */
+export function relativeTime(dateStr: string, now = Date.now()): string {
+  const mins = Math.floor((now - new Date(dateStr).getTime()) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
+/** A message's conversation title, or a dash when it has none. */
+export function conversationLabel(conversation: string | null | undefined): string {
+  return conversation?.trim() ? conversation : '—';
+}
+
+/** Copies text; `true` when it worked. */
+export async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
     return false;
   }
 }

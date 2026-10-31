@@ -13,14 +13,30 @@ export const pathForConversation = (id: string | null): string => (id ? `/c/${id
 
 export type HistoryMode = 'push' | 'replace' | 'none';
 
+/** Moves the address bar; the app plugs in Vue Router's push/replace. */
+export interface Navigator {
+  push(path: string): void;
+  replace(path: string): void;
+}
+
+const historyNavigator: Navigator = {
+  push: (path) => window.history.pushState({}, '', path),
+  replace: (path) => window.history.replaceState({}, '', path),
+};
+
+let navigator: Navigator | null = null;
+
+/** Routes URL changes through `nav` (the app's router) instead of window.history. */
+export const useNavigator = (nav: Navigator | null): void => {
+  navigator = nav;
+};
+
 /** Points the address bar at the conversation (no reload). */
 export const setConversationPath = (id: string | null, mode: HistoryMode): void => {
   if (mode === 'none' || typeof window === 'undefined') return;
   const path = pathForConversation(id);
   if (window.location.pathname === path) return;
-  if (mode === 'push') {
-    window.history.pushState({ conversation: id }, '', path);
-  } else {
-    window.history.replaceState({ conversation: id }, '', path);
-  }
+  const nav = navigator ?? historyNavigator;
+  if (mode === 'push') nav.push(path);
+  else nav.replace(path);
 };

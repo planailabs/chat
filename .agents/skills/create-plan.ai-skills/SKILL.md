@@ -29,7 +29,7 @@ Each skill lives in `.agents/skills/<skill-name>/` and must contain:
 
 To prevent skills from going stale and to capture evolving architecture, this rule **MUST** be enforced by all agents:
 
-1. **Trigger on Modification**: If you modify core architectural files (e.g., `web/vite.config.ts`, `web/src/chat/main.ts`, `web/src/chat/api.ts`, `web/src/chat/style.css`, `server/src/api.rs`), evaluating the corresponding skill's relevance is **mandatory**. If outdated, use `mcporter call context7.query-docs` to fetch the latest paradigms and update the `.agents/skills/<skill>/SKILL.md` immediately.
+1. **Trigger on Modification**: If you modify core architectural files (e.g., `web/package.json` (Parcel), `web/src/chat/main.ts`, `web/src/chat/api.ts`, `web/src/chat/style.css`, `server/src/api.rs`), evaluating the corresponding skill's relevance is **mandatory**. If outdated, use `mcporter call context7.query-docs` to fetch the latest paradigms and update the `.agents/skills/<skill>/SKILL.md` immediately.
 2. **Trigger on Discovery (Proactive)**: If you are asked to implement a feature or debug an issue and you discover a complex, project-specific pattern that is NOT yet documented in this repository's agent skills, you **must proactively create a new skill** covering it.
 3. **Execution**: Generate both `.PROMPT.md` and `SKILL.md` utilizing TDD-for-documentation. Ensure all new skills follow the CSO "Use when..." standard.
 
@@ -49,7 +49,7 @@ Keep an append-only changelog at the bottom.
 
 - **Description**: MUST start with "Use when..." and describe _triggering conditions_, NOT the workflow.
 - **Workflow Summary Trap**: Never summarize the process in the description. Claude might follow the description blindly and skip the full skill content.
-- **Keywords**: Include technical terms like `Tailwind v4`, `Vite`, `SPA`, `EventSource`, `axum`.
+- **Keywords**: Include technical terms like `Tailwind v4`, `Vue`, `Parcel`, `SPA`, `EventSource`, `axum`.
 
 ## Multi-Model Council
 

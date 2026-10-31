@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { conversationIdFromPath, pathForConversation, setConversationPath } from './route';
+import { conversationIdFromPath, pathForConversation, setConversationPath, useNavigator } from './route';
 
 const ID = '0f8fad5b-d9cb-469f-a165-70867728950e';
 
@@ -37,11 +37,11 @@ describe('setConversationPath', () => {
   it('pushes or replaces a history entry', () => {
     let history = stubWindow('/');
     setConversationPath(ID, 'push');
-    expect(history.pushState).toHaveBeenCalledWith({ conversation: ID }, '', `/c/${ID}`);
+    expect(history.pushState).toHaveBeenCalledWith({}, '', `/c/${ID}`);
 
     history = stubWindow(`/c/${ID}`);
     setConversationPath(null, 'replace');
-    expect(history.replaceState).toHaveBeenCalledWith({ conversation: null }, '', '/');
+    expect(history.replaceState).toHaveBeenCalledWith({}, '', '/');
     expect(history.pushState).not.toHaveBeenCalled();
   });
 
@@ -54,5 +54,19 @@ describe('setConversationPath', () => {
     setConversationPath(ID, 'none');
     expect(history.pushState).not.toHaveBeenCalled();
     expect(history.replaceState).not.toHaveBeenCalled();
+  });
+
+  it('goes through the app\'s router when one is plugged in', () => {
+    const history = stubWindow('/');
+    const nav = { push: vi.fn(), replace: vi.fn() };
+    useNavigator(nav);
+    try {
+      setConversationPath(ID, 'push');
+      setConversationPath(null, 'replace');
+    } finally {
+      useNavigator(null);
+    }
+    expect(nav.push).toHaveBeenCalledWith(`/c/${ID}`);
+    expect(history.pushState).not.toHaveBeenCalled();
   });
 });

@@ -4,11 +4,10 @@
  */
 
 import type { LocaleKey } from './locales';
-import { APP_ICONS, type AppIcon } from '../ui/icons';
 
 export interface Application {
   url: string;
-  icon: AppIcon;
+  icon: 'cloud' | 'agency' | 'machine';
   label: Record<LocaleKey, string>;
 }
 
@@ -17,5 +16,3 @@ export const APPLICATIONS: Application[] = [
   { url: 'https://agency.plan.ai', icon: 'agency', label: { en: 'Web Agency', de: 'Webagentur' } },
   { url: 'https://mgmt.plan.ai', icon: 'machine', label: { en: 'Machine management', de: 'Maschinenverwaltung' } },
 ];
-
-export const applicationIcon = (app: Application): string => APP_ICONS[app.icon];

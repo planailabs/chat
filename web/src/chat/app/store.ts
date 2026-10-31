@@ -1,48 +1,23 @@
 /**
  * Application Store
  *
- * A minimal pub/sub store for managing global application state.
- * Uses a simple observer pattern for reactivity without external dependencies.
- *
- * Design decisions:
- * - Single store instance (singleton) for simplicity
- * - Synchronous updates for predictable behavior
- * - No middleware or devtools (keep it simple)
- * - Mutable state object for performance (shallow copy on setState)
+ * One reactive state object (Vue `reactive`) shared by the actions and the
+ * components. Actions either call `setState` or mutate `store.state`
+ * directly; components re-render from whatever they read. `notify` is kept
+ * for actions that mutate and then want to tell non-Vue listeners.
  */
 
+import { reactive } from 'vue';
 import { createInitialState, type AppState } from './state';
 
-/** Listener callback type for store subscriptions */
 type StoreListener = () => void;
 
-/**
- * Simple reactive store for application state.
- * Provides subscribe/notify pattern for UI updates.
- */
 class Store {
-  /** Current application state (mutable for performance) */
-  state: AppState;
+  /** The application state (reactive; never replaced, only updated). */
+  readonly state: AppState = reactive(createInitialState()) as AppState;
 
-  /** Set of subscribed listener callbacks */
   private listeners = new Set<StoreListener>();
 
-  constructor() {
-    this.state = createInitialState();
-  }
-
-  /**
-   * Subscribes to state changes.
-   *
-   * @param listener - Callback invoked when state changes
-   * @returns Unsubscribe function
-   *
-   * @example
-   * const unsubscribe = store.subscribe(() => {
-   *   console.log('State changed:', store.state);
-   * });
-   * // Later: unsubscribe();
-   */
   subscribe(listener: StoreListener): () => void {
     this.listeners.add(listener);
     return () => {
@@ -50,36 +25,15 @@ class Store {
     };
   }
 
-  /**
-   * Triggers all subscribed listeners.
-   * Call this after direct state mutations or when external
-   * state changes need to trigger a UI update.
-   */
+  /** Tells subscribers about a direct mutation (Vue tracks it by itself). */
   notify(): void {
     this.listeners.forEach((listener) => listener());
   }
 
-  /**
-   * Updates state with a partial object or updater function.
-   * Automatically notifies listeners after the update.
-   *
-   * @param updater - Partial state object or function returning partial state
-   *
-   * @example
-   * // Object form
-   * store.setState({ isAuthMenuOpen: true });
-   *
-   * // Function form (for updates based on current state)
-   * store.setState((state) => ({
-   *   counter: state.counter + 1
-   * }));
-   */
-  setState(
-    updater: Partial<AppState> | ((state: AppState) => Partial<AppState>),
-  ): void {
-    const updates =
-      typeof updater === 'function' ? updater(this.state) : updater;
-    this.state = { ...this.state, ...updates };
+  /** Merges a partial state (or an updater's result) into the state. */
+  setState(updater: Partial<AppState> | ((state: AppState) => Partial<AppState>)): void {
+    const updates = typeof updater === 'function' ? updater(this.state) : updater;
+    Object.assign(this.state, updates);
     this.notify();
   }
 }

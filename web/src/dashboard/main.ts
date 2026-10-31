@@ -1,29 +1,11 @@
 import '../chat/style.css';
-import { enforceAdminAccess } from './logic.ts';
-import { resetActivityZoom } from './charts.ts';
-import { initTabs } from './tabs.ts';
+import { createApp } from 'vue';
+import Dashboard from './Dashboard.vue';
+import { router } from './router';
+import { enforceAdminAccess } from './logic';
 
-(async () => {
-  const isAdmin = await enforceAdminAccess();
-  if (isAdmin) {
-     document.getElementById('dashboard-loading')!.classList.add('hidden');
-     document.getElementById('dashboard-root')!.classList.remove('hidden');
-     initTabs();
-  }
+void (async () => {
+  if (!(await enforceAdminAccess())) return;
+  document.getElementById('dashboard-loading')?.remove();
+  createApp(Dashboard).use(router).mount('#dashboard');
 })();
-
-// Chart reset
-document.getElementById('chart-reset')?.addEventListener('click', (e) => {
-   e.preventDefault();
-   resetActivityZoom();
-});
-
-// Text modal close handlers
-document.getElementById('modal-close')?.addEventListener('click', () => {
-   document.getElementById('text-modal')!.classList.add('hidden');
-});
-document.getElementById('text-modal')?.addEventListener('click', (e) => {
-   if ((e.target as HTMLElement).id === 'text-modal') {
-      document.getElementById('text-modal')!.classList.add('hidden');
-   }
-});

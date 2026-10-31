@@ -7,7 +7,7 @@ description: Use when writing, running, or fixing unit tests. The project uses V
 
 ## Overview
 
-This project uses [Vitest](https://vitest.dev/) for fast unit tests of the UI in `web/` (run from `web/`), in Node by default. It covers the API client, history mapping and rendering helpers without a full browser. The Rust server has its own tests (`cargo test` in `server/`).
+This project uses [Vitest](https://vitest.dev/) for fast unit tests of the UI in `web/` (run from `web/`), in Node by default. It covers the API client, history mapping, routing, event routing and the Vue components (with `@vue/test-utils`; `vitest.config.ts` uses `@vitejs/plugin-vue` only to compile `.vue` files for tests, the app itself is built by Parcel). The default environment is jsdom. The Rust server has its own tests (`cargo test` in `server/`).
 
 ## Commands
 
@@ -25,7 +25,7 @@ Place `.test.ts` files adjacent to the module they cover (e.g., `web/src/chat/ap
 
 ### 2. Mocking Browser Globals (Node Environment)
 
-Because Vitest runs in Node, browser globals (`window`, `sessionStorage`, `crypto`) do not exist. You **must** mock them before each test if the target module relies on them.
+Tests run in jsdom, but network and navigation do not exist: stub `fetch` (and `window` pieces such as `history` when a test needs exact calls) with `vi.stubGlobal`.
 
 **Example Pattern:**
 
@@ -41,7 +41,7 @@ beforeEach(() => {
 
 Mock the API with `vi.stubGlobal('fetch', fetchMock)` and return a fresh `Response` per call (`mockImplementation`), since a body can be read once.
 
-Code that needs a real DOM (e.g. DOMPurify in `utils/markdown.ts`) opts into jsdom with a `// @vitest-environment jsdom` comment at the top of the test file.
+Component tests mount with `mount()` from `@vue/test-utils`, set `store.state` directly, and mock `../actions/chat` with `vi.mock` to assert which action a click calls (see `src/chat/components/components.test.ts`).
 
 ### 3. Time Manipulation
 

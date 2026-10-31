@@ -1,0 +1,104 @@
+<script setup lang="ts">
+/** Settings: who is signed in, the newsletter, data export, account deletion, sign-out. */
+import { computed } from 'vue';
+import AppIcon from './AppIcon.vue';
+import PlanLogo from './PlanLogo.vue';
+import { store } from '../app/store';
+import { locale } from '../app/locale';
+import { getLocaleDateString } from '../utils/date';
+import { handleSignOut } from '../actions/auth';
+import { closeSettingsOverlay } from '../actions/overlay';
+import { handleDataExport, handleSettingsNewsletterToggle, requestAccountDeletion } from '../actions/settings';
+
+const state = store.state;
+const profileSection = computed(() => locale.value.settings.sections.profile);
+const privacy = computed(() => locale.value.settings.sections.privacy);
+
+const displayName = computed(() => state.userDisplayName?.trim() || state.userEmail || profileSection.value.fields.name);
+const email = computed(() => state.userEmail ?? 'Not signed in');
+
+const newsletterChecked = computed(() => state.profile.newsletterStatus === 'subscribed' && state.isAuthenticated);
+const newsletterDisabled = computed(() => !state.isAuthenticated || state.profile.newsletterSyncing);
+const savingLabel = computed(() => (state.profile.newsletterSyncing ? `${locale.value.settings.savedLabel.replace('Saved', 'Saving')}…` : ''));
+
+const exportDisabled = computed(() => !state.isAuthenticated || state.profile.dataExportInFlight || state.profile.dataExportStatus !== 'idle');
+const exportLabel = computed(() => {
+  const status = state.profile.dataExportStatus;
+  return status === 'started' ? privacy.value.requestDataStarted : status === 'done' ? privacy.value.requestDataDone : privacy.value.requestData;
+});
+
+const deletionDisabled = computed(() => !state.isAuthenticated || state.profile.deletionPending);
+const deletionNotice = computed(() =>
+  state.profile.deletionPending
+    ? privacy.value.deleteScheduledInfo.replace('{{date}}', getLocaleDateString(state.profile.deletionRequestedAt, state.localeKey) ?? '30 days')
+    : '',
+);
+
+const onNewsletterChange = (event: Event) => handleSettingsNewsletterToggle((event.target as HTMLInputElement).checked);
+
+const signOut = () => {
+  closeSettingsOverlay();
+  handleSignOut();
+};
+</script>
+
+<template>
+  <div v-if="state.isSettingsOverlayOpen" class="settings-overlay">
+    <button class="settings-overlay__backdrop" aria-label="Close overlay" @click.prevent="closeSettingsOverlay" />
+    <section class="settings-panel" role="dialog" aria-modal="true" :aria-label="locale.settings.title">
+      <button type="button" class="settings-close-button" aria-label="Close" @click.prevent="closeSettingsOverlay">
+        <span aria-hidden="true">&times;</span>
+      </button>
+      <div class="settings-identity">
+        <div class="settings-avatar">
+          <span class="settings-avatar-fallback"><AppIcon name="user" /></span>
+        </div>
+        <div class="settings-identity__text">
+          <p class="settings-display-name" :title="displayName">{{ displayName }}</p>
+          <p class="settings-email" :title="email">{{ email }}</p>
+        </div>
+      </div>
+      <div class="settings-divider" aria-hidden="true" />
+      <section class="settings-section">
+        <header class="settings-section__header">
+          <p class="settings-section__title">{{ profileSection.title }}</p>
+          <span v-if="savingLabel" class="settings-section__status">{{ savingLabel }}</span>
+        </header>
+        <label class="settings-toggle">
+          <input
+            type="checkbox"
+            class="settings-toggle__input"
+            :checked="newsletterChecked"
+            :disabled="newsletterDisabled"
+            @change="onNewsletterChange"
+          />
+          <span class="settings-toggle__icon" aria-hidden="true">
+            <PlanLogo v-if="newsletterChecked" class="settings-toggle__logo" />
+          </span>
+          <span>{{ profileSection.fields.newsletter }}</span>
+        </label>
+      </section>
+      <div class="settings-divider" aria-hidden="true" />
+      <section class="settings-section settings-privacy">
+        <header class="settings-section__header">
+          <p class="settings-section__title">{{ privacy.title }}</p>
+        </header>
+        <div class="settings-privacy-actions">
+          <button type="button" class="pill-button settings-action-button" :disabled="exportDisabled" @click.prevent="handleDataExport(locale)">
+            {{ exportLabel }}
+          </button>
+          <button type="button" class="pill-button settings-action-button is-danger" :disabled="deletionDisabled" @click.prevent="requestAccountDeletion(locale)">
+            {{ privacy.deleteAccount }}
+          </button>
+        </div>
+        <p v-if="deletionNotice" class="settings-privacy-inline-status">{{ deletionNotice }}</p>
+      </section>
+      <div class="settings-divider" aria-hidden="true" />
+      <div class="settings-actions">
+        <button type="button" class="pill-button" :disabled="!state.isAuthenticated" @click.prevent="signOut">
+          {{ locale.navigation.loginMenu.signOutLabel }}
+        </button>
+      </div>
+    </section>
+  </div>
+</template>

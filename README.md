@@ -6,7 +6,7 @@ The plan.ai chat: signed-in users have conversations with the plan.ai assistant 
 
 - **Server** (`server/`, Rust/axum): the API at `/api/v1/...` (REST, plus OpenAPI at `/api/v1/docs` and MCP at `/mcp`), the chat event stream (`/api/v1/chat/events`), Zitadel sign-in (`/auth/login`, `/auth/logout`, cookie session) and the static UI. Postgres holds profiles, the chat mirror, token usage, staff pings and prompt extensions (`server/migrations/`).
 - **Agents**: each conversation is an agent on subagent-net (`git.plan.ai/plan-ai/subagent-net`) (the hub, `subnet`, configured by `subnet/chat.hcl`). The server spawns and messages agents, follows the hub's events and streams them to the browser; tool calls can wait for the user's approval.
-- **UI** (`web/`, TypeScript + Vite + Tailwind 4, no framework): the chat (`web/index.html`, `web/src/chat/`; a sidebar with the conversations and plan.ai's applications, `/c/<id>` for a conversation) and the admin dashboard (`web/dashboard/index.html`, `web/src/dashboard/`), both using the typed API client in `web/src/chat/api.ts`. Built to `web/dist`, which the server serves.
+- **UI** (`web/`, Vue 3 + Vue Router + TypeScript, built by Parcel, Tailwind 4): the chat (`web/index.html`, `web/src/chat/`; a sidebar with the conversations and plan.ai's applications, `/c/<id>` for a conversation) and the admin dashboard (`web/dashboard/index.html`, `web/src/dashboard/`), both using the typed API client in `web/src/chat/api.ts`. Built to `web/dist`, which the server serves.
 - **Shared crates** (`common/`, git submodule): API/MCP registry, auth, accounts, connector.
 
 ## Running locally
@@ -21,13 +21,13 @@ overmind start
 
 Without an `[auth]` section a debug build signs everyone in as dev@localhost (admin) when started with `DEV_ONLY_NO_AUTH=1`; otherwise configure Zitadel in `config.toml` (see the comments in `config.example.toml`). Secrets can live in a separate file named by `CONFIG_SECRETS_PATH`.
 
-For UI work with hot reload, `cd web && pnpm dev` serves the UI on Vite's port and proxies `/api` and `/auth` to the server.
+For UI work with hot reload, `cd web && pnpm dev` serves the UI on <http://localhost:1234> (Parcel) and proxies `/api` and `/auth` to the server (`web/.proxyrc.cjs`).
 
 ## Testing
 
 ```bash
-cd web && pnpm test                        # Vitest (UI)
-cd web && pnpm exec tsc --noEmit -p .      # type check
+cd web && pnpm test                        # Vitest + Vue Test Utils (UI)
+cd web && pnpm typecheck                   # vue-tsc
 cargo test                                 # server and shared crates
 ```
 

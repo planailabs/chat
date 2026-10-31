@@ -54,7 +54,7 @@ in
     pnpmDeps = fetchPnpmDeps {
       inherit (finalAttrs) pname version src;
       fetcherVersion = 4;
-      hash = "sha256-/Tho0QTPBD5HNJ/WV/MGnHW3ehChh84HoJ/1FV8p/3g=";
+      hash = "sha256-aYRQ5pdCheFApGFZJUC+LjMHQN0x7h2Xy7hDUzV7Lqo=";
     };
     buildPhase = ''
       runHook preBuild

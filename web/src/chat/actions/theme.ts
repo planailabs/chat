@@ -8,6 +8,7 @@
  * - Listens for system preference changes
  */
 
+import { ref } from 'vue';
 import { store } from '../app/store';
 import type { ThemeMode } from '../app/state';
 import { STORAGE_KEYS } from '../constants';
@@ -25,6 +26,9 @@ const prefersDark =
 
 const getSystemPreference = (): 'light' | 'dark' =>
   prefersDark?.matches ? 'dark' : 'light';
+
+/** The system's color scheme (follows changes). */
+export const systemTheme = ref(getSystemPreference());
 
 const applyDocumentTheme = (theme: 'light' | 'dark') => {
   if (typeof document !== 'undefined') {
@@ -53,10 +57,8 @@ export const initTheme = () => {
 
   // 4. Listen for system changes
   prefersDark?.addEventListener('change', () => {
-    if (store.state.themeMode === 'system') {
-      applyDocumentTheme(getSystemPreference());
-      store.notify(); // Re-render to update icons if needed
-    }
+    systemTheme.value = getSystemPreference();
+    if (store.state.themeMode === 'system') applyDocumentTheme(systemTheme.value);
   });
 };
 
