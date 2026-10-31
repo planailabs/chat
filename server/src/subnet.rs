@@ -48,28 +48,27 @@ impl Hub {
     }
 }
 
-/// What the browser of `user` in `mode` is told.
+/// What `user`'s browsers are told about one of their conversations.
 #[derive(Clone, Debug)]
 pub struct BrowserEvent {
     pub user: Uuid,
-    pub mode: String,
     pub name: &'static str,
     pub data: Value,
 }
 
-/// Our agents: id → (user, mode). Loaded at start, extended on spawn.
+/// Our agents: id → (user, conversation). Loaded at start, extended on spawn.
 #[derive(Clone, Default)]
-pub struct Owners(Arc<RwLock<HashMap<String, (Uuid, String)>>>);
+pub struct Owners(Arc<RwLock<HashMap<String, (Uuid, Uuid)>>>);
 
 impl Owners {
     pub async fn load(pool: &PgPool) -> anyhow::Result<Self> {
-        let rows: Vec<(String, Uuid, String)> = sqlx::query_as("SELECT agent_id, user_id, mode FROM chat_agents").fetch_all(pool).await?;
-        Ok(Self(Arc::new(RwLock::new(rows.into_iter().map(|(a, u, m)| (a, (u, m))).collect()))))
+        let rows: Vec<(String, Uuid, Uuid)> = sqlx::query_as("SELECT agent_id, user_id, id FROM conversations").fetch_all(pool).await?;
+        Ok(Self(Arc::new(RwLock::new(rows.into_iter().map(|(a, u, c)| (a, (u, c))).collect()))))
     }
-    pub async fn insert(&self, agent: String, user: Uuid, mode: String) {
-        self.0.write().await.insert(agent, (user, mode));
+    pub async fn insert(&self, agent: String, user: Uuid, conversation: Uuid) {
+        self.0.write().await.insert(agent, (user, conversation));
     }
-    async fn get(&self, agent: &str) -> Option<(Uuid, String)> {
+    async fn get(&self, agent: &str) -> Option<(Uuid, Uuid)> {
         self.0.read().await.get(agent).cloned()
     }
 }
@@ -134,30 +133,30 @@ impl Pump {
                 continue;
             }
             let agent = notice["agent"].as_str().unwrap_or_default().to_string();
-            let Some((user, mode)) = self.owners.get(&agent).await else { continue };
+            let Some((user, conv)) = self.owners.get(&agent).await else { continue };
             let seq = notice["seq"].as_i64().unwrap_or_default();
             let turn = turns.entry(agent.clone()).or_default();
-            if let Err(e) = self.apply(&agent, seq, user, &mode, &notice["event"], turn).await {
+            if let Err(e) = self.apply(&agent, seq, user, conv, &notice["event"], turn).await {
                 tracing::error!(agent, seq, "mirroring subnet event: {e:#}");
             }
         }
         Ok(())
     }
 
-    fn emit(&self, user: Uuid, mode: &str, name: &'static str, data: Value) {
+    fn emit(&self, user: Uuid, conversation: Uuid, name: &'static str, mut data: Value) {
+        data["conversation"] = json!(conversation);
         // No receivers is fine: nobody has the chat open.
-        let _ = self.tx.send(BrowserEvent { user, mode: mode.to_string(), name, data });
+        let _ = self.tx.send(BrowserEvent { user, name, data });
     }
 
-    async fn mirror(&self, agent: &str, seq: i64, user: Uuid, mode: &str, role: &str, content: &str, data: Option<Value>) -> anyhow::Result<()> {
+    async fn mirror(&self, agent: &str, seq: i64, user: Uuid, role: &str, content: &str, data: Option<Value>) -> anyhow::Result<()> {
         sqlx::query(
-            "INSERT INTO chat_messages (agent_id, seq, user_id, mode, role, content, data) VALUES ($1,$2,$3,$4,$5,$6,$7)
+            "INSERT INTO chat_messages (agent_id, seq, user_id, role, content, data) VALUES ($1,$2,$3,$4,$5,$6)
              ON CONFLICT (agent_id, seq) DO NOTHING",
         )
         .bind(agent)
         .bind(seq)
         .bind(user)
-        .bind(mode)
         .bind(role)
         .bind(content)
         .bind(data)
@@ -166,15 +165,14 @@ impl Pump {
         Ok(())
     }
 
-    async fn record_usage(&self, agent: &str, seq: i64, user: Uuid, mode: &str, u: &Value) -> anyhow::Result<()> {
+    async fn record_usage(&self, agent: &str, seq: i64, user: Uuid, u: &Value) -> anyhow::Result<()> {
         sqlx::query(
-            "INSERT INTO chat_token_usage (agent_id, seq, user_id, mode, input_tokens, output_tokens, cached_tokens)
-             VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING",
+            "INSERT INTO chat_token_usage (agent_id, seq, user_id, input_tokens, output_tokens, cached_tokens)
+             VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT DO NOTHING",
         )
         .bind(agent)
         .bind(seq)
         .bind(user)
-        .bind(mode)
         .bind(u["prompt_tokens"].as_i64().unwrap_or_default())
         .bind(u["completion_tokens"].as_i64().unwrap_or_default())
         .bind(u["cached_prompt_tokens"].as_i64().unwrap_or_default())
@@ -183,19 +181,19 @@ impl Pump {
         Ok(())
     }
 
-    async fn apply(&self, agent: &str, seq: i64, user: Uuid, mode: &str, ev: &Value, turn: &mut Turn) -> anyhow::Result<()> {
+    async fn apply(&self, agent: &str, seq: i64, user: Uuid, conv: Uuid, ev: &Value, turn: &mut Turn) -> anyhow::Result<()> {
         match ev["type"].as_str().unwrap_or_default() {
             "inbox" => {
                 let content = ev["content"].as_str().unwrap_or_default();
-                self.mirror(agent, seq, user, mode, "user", &crate::chat::strip_context(content), None).await?;
+                self.mirror(agent, seq, user, "user", &crate::chat::strip_context(content), None).await?;
                 turn.thinking = true;
-                self.emit(user, mode, "thinking", json!({}));
+                self.emit(user, conv, "thinking", json!({}));
             }
             "llm_delta" => {
                 let delta = &ev["delta"];
                 if let Some(text) = delta["content"].as_str().filter(|t| !t.is_empty()) {
                     turn.text.push_str(text);
-                    self.emit(user, mode, "text_delta", json!({ "content": text }));
+                    self.emit(user, conv, "text_delta", json!({ "content": text }));
                 }
                 for call in delta["tool_calls"].as_array().into_iter().flatten() {
                     let idx = call["index"].as_u64().unwrap_or_default();
@@ -212,31 +210,31 @@ impl Pump {
             }
             "llm_done" => {
                 if let Some(u) = turn.usage.take() {
-                    self.record_usage(agent, seq, user, mode, &u).await?;
+                    self.record_usage(agent, seq, user, &u).await?;
                 }
                 let text = std::mem::take(&mut turn.text);
                 turn.index.clear();
                 if !text.trim().is_empty() {
-                    self.mirror(agent, seq, user, mode, "assistant", &text, None).await?;
-                    self.emit(user, mode, "text_done", json!({ "content": text }));
+                    self.mirror(agent, seq, user, "assistant", &text, None).await?;
+                    self.emit(user, conv, "text_done", json!({ "content": text }));
                 }
                 let pending: Vec<String> = turn.calls.values().cloned().collect();
                 for name in &pending {
-                    self.emit(user, mode, "tool_start", json!({ "name": name }));
+                    self.emit(user, conv, "tool_start", json!({ "name": name }));
                 }
                 if pending.is_empty() {
                     turn.thinking = false;
-                    self.emit(user, mode, "done", json!({}));
+                    self.emit(user, conv, "done", json!({}));
                 }
             }
             "tool_result" | "tool_aborted" => {
                 let call = ev["call_id"].as_str().unwrap_or_default();
                 if turn.questions.remove(call) {
                     let content = ev["content"].as_str().unwrap_or_default();
-                    self.mirror(agent, seq, user, mode, "answer", content, Some(json!({ "call_id": call, "is_error": ev["is_error"] }))).await?;
+                    self.mirror(agent, seq, user, "answer", content, Some(json!({ "call_id": call, "is_error": ev["is_error"] }))).await?;
                 } else if let Some(name) = turn.calls.remove(call) {
-                    self.mirror(agent, seq, user, mode, "tool", &name, Some(json!({ "call_id": call, "is_error": ev["is_error"] }))).await?;
-                    self.emit(user, mode, "tool_end", json!({ "name": name }));
+                    self.mirror(agent, seq, user, "tool", &name, Some(json!({ "call_id": call, "is_error": ev["is_error"] }))).await?;
+                    self.emit(user, conv, "tool_end", json!({ "name": name }));
                 }
             }
             "client_tool_call" => {
@@ -245,22 +243,22 @@ impl Pump {
                 turn.calls.remove(&id);
                 turn.questions.insert(id);
                 let data = json!({ "call_id": call, "toolName": name, "input": input });
-                self.mirror(agent, seq, user, mode, "question", input["question"].as_str().unwrap_or_default(), Some(data.clone())).await?;
-                self.emit(user, mode, "question", data);
+                self.mirror(agent, seq, user, "question", input["question"].as_str().unwrap_or_default(), Some(data.clone())).await?;
+                self.emit(user, conv, "question", data);
             }
             "approval_requested" => {
                 let data = json!({ "call_id": ev["call_id"], "name": ev["name"], "input": ev["input"], "reason": ev["reason"] });
-                self.mirror(agent, seq, user, mode, "approval", ev["name"].as_str().unwrap_or_default(), Some(data.clone())).await?;
-                self.emit(user, mode, "approval", data);
+                self.mirror(agent, seq, user, "approval", ev["name"].as_str().unwrap_or_default(), Some(data.clone())).await?;
+                self.emit(user, conv, "approval", data);
             }
             "llm_failed" => {
                 turn.text.clear();
-                self.emit(user, mode, "error", json!({ "message": "The assistant failed to answer. Please try again." }));
+                self.emit(user, conv, "error", json!({ "message": "The assistant failed to answer. Please try again." }));
                 tracing::error!(agent, "llm_failed: {}", ev["error"]);
             }
             "compacted" => {
                 if let Some(u) = ev.get("usage").filter(|u| u.is_object()) {
-                    self.record_usage(agent, seq, user, mode, u).await?;
+                    self.record_usage(agent, seq, user, u).await?;
                 }
             }
             "cancelled" | "superseded" => {

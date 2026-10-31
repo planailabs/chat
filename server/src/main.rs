@@ -11,7 +11,7 @@ use std::convert::Infallible;
 use std::sync::Arc;
 
 use axum::Router;
-use axum::extract::{Query, Request, State};
+use axum::extract::{Request, State};
 use axum::http::{StatusCode, header};
 use axum::middleware::{Next, from_fn, from_fn_with_state};
 use axum::response::sse::{Event, KeepAlive, Sse};
@@ -150,20 +150,14 @@ async fn session_principal(State(app): State<AppState>, mut req: Request, next: 
     next.run(req).await
 }
 
-#[derive(serde::Deserialize)]
-struct EventsQuery {
-    mode: String,
-}
-
-/// The live conversation in one mode, for the signed-in user (every tab).
-async fn chat_events(State(app): State<AppState>, Query(q): Query<EventsQuery>, req: Request) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, Response> {
+/// Every conversation of the signed-in user, live (each event names its
+/// `conversation`), for all their tabs.
+async fn chat_events(State(app): State<AppState>, req: Request) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, Response> {
     let user = req.extensions().get::<WebUser>().map(|u| u.id).ok_or_else(|| StatusCode::UNAUTHORIZED.into_response())?;
-    chat::agent_type(&app, &q.mode).map_err(|e| (e.status(), e.to_string()).into_response())?;
-    let mode = q.mode;
     let stream = BroadcastStream::new(app.events.subscribe()).filter_map(move |ev| match ev {
-        Ok(ev) if ev.user == user && ev.mode == mode => Some(Ok(Event::default().event(ev.name).json_data(&ev.data).expect("json"))),
+        Ok(ev) if ev.user == user => Some(Ok(Event::default().event(ev.name).json_data(&ev.data).expect("json"))),
         Ok(_) => None,
-        // Fell behind: the client refetches history.
+        // Fell behind: the client refetches what it shows.
         Err(_) => Some(Ok(Event::default().event("resync").data("{}"))),
     });
     Ok(Sse::new(stream).keep_alive(KeepAlive::default()))

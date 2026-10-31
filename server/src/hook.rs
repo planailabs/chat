@@ -192,7 +192,7 @@ pub async fn pre_tool(State(app): State<AppState>, headers: HeaderMap, Json(h): 
         return Ok(decide("allow", "allow-listed"));
     }
     // Only our conversations: an unknown agent has no user to answer for it.
-    let auto_approve: Option<bool> = sqlx::query_scalar("SELECT auto_approve FROM chat_agents WHERE agent_id = $1")
+    let auto_approve: Option<bool> = sqlx::query_scalar("SELECT auto_approve FROM conversations WHERE agent_id = $1")
         .bind(&h.agent.id)
         .fetch_optional(&app.pool)
         .await

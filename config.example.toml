@@ -30,26 +30,26 @@ admin_emails = []
 url = "http://127.0.0.1:7700"
 token = "CHANGE_ME"              # subnet issue_token for client "chat"
 callback_secret = "CHANGE_ME_at_least_32_chars"   # openssl rand -hex 32; subnet sends it as CHAT_CALLBACK_SECRET
-types = { sales = "chat-sales", machine_config = "chat-machine-config" }
+agent_type = "chat"               # mixture in subnet/chat.hcl
 
 [approval]
 # Validator model (layer 2), via LiteLLM. Unset: static checks, then the user.
-# validator_url = "https://litellm.plan.ai/v1"
+# validator_url = "https://codex.plan.ai/v1"
 # validator_api_key = "sk-xxx"
-# validator_model = "claude-haiku-4-5"
+# validator_model = "deepseek-flash"
 
 [chat]
 hourly_input_tokens = 100000
 hourly_output_tokens = 20000
 max_chars = 2048
 
-# The sales assistant reads mac-mgmt's catalog with this service token.
+# The assistant reads mac-mgmt's public catalog with this service token.
 # [catalog]
 # url = "https://mgmt.plan.ai/daemon/"
 # token = "CHANGE_ME"
 
 # Acting as the user on plan.ai services (Zitadel token exchange, see
-# common/plan-ai-connector/README.md). Without it, machine_config is off.
+# common/plan-ai-connector/README.md). Without it, the assistant can't act on services.
 # [connector.exchange]
 # issuer = "https://id.plan.ai"
 # client = { method = "basic", client_id = "xxx", client_secret = "xxx" }   # app with the token-exchange grant

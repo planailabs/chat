@@ -1,5 +1,6 @@
-//! Conversations: one subagent-net agent per (user, mode).
+//! Conversations: each one a subagent-net agent, many per user.
 
+use serde::Serialize;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
@@ -29,37 +30,48 @@ fn language_name(code: &str) -> &'static str {
     }
 }
 
+/// A conversation's title from its first message: one line, at most 60
+/// characters, cut at a word.
+pub fn title_from(text: &str) -> String {
+    let line = text.lines().find(|l| !l.trim().is_empty()).unwrap_or("").trim();
+    if line.chars().count() <= 60 {
+        return line.to_string();
+    }
+    let cut: String = line.chars().take(60).collect();
+    let cut = cut.rsplit_once(' ').map(|(head, _)| head).filter(|h| h.len() > 20).unwrap_or(&cut);
+    format!("{}…", cut.trim_end())
+}
+
 fn internal(e: impl std::fmt::Display) -> ApiError {
     tracing::error!("{e:#}");
     ApiError::internal(e.to_string())
 }
 
-/// The agent type for `mode`, or 404.
-pub fn agent_type<'a>(app: &'a App, mode: &str) -> Result<&'a str, ApiError> {
-    app.cfg.subnet.types.get(mode).map(String::as_str).ok_or_else(|| ApiError::not_found(format!("unknown chat mode {mode}")))
+#[derive(Serialize, schemars::JsonSchema, sqlx::FromRow)]
+pub struct Conversation {
+    pub id: Uuid,
+    pub title: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
 }
 
-/// Whether `mode` is offered to `user`: modes that act on a service need the
-/// connector to reach one of that kind.
-pub async fn available(app: &App, user: Uuid, mode: &str) -> Result<bool, ApiError> {
-    agent_type(app, mode)?;
-    let Some(kind) = app.cfg.subnet.requires.get(mode) else { return Ok(true) };
-    let Some(targets) = &app.targets else { return Ok(false) };
-    let list = targets.targets(&user.to_string()).await.map_err(|e| internal(format!("listing services: {e}")))?;
-    Ok(list.iter().any(|t| &t.kind == kind))
-}
-
-pub async fn current_agent(app: &App, user: Uuid, mode: &str) -> Result<Option<(String, bool)>, ApiError> {
-    sqlx::query_as("SELECT agent_id, auto_approve FROM chat_agents WHERE user_id = $1 AND mode = $2")
+pub async fn list(app: &App, user: Uuid) -> Result<Vec<Conversation>, ApiError> {
+    sqlx::query_as("SELECT id, title, created_at, updated_at FROM conversations WHERE user_id = $1 ORDER BY updated_at DESC")
         .bind(user)
-        .bind(mode)
-        .fetch_optional(&app.pool)
+        .fetch_all(&app.pool)
         .await
         .map_err(internal)
 }
 
-async fn require_agent(app: &App, user: Uuid, mode: &str) -> Result<String, ApiError> {
-    current_agent(app, user, mode).await?.map(|(a, _)| a).ok_or_else(|| ApiError::not_found("no conversation in this mode"))
+/// The user's conversation `id`: (agent, auto_approve), or 404.
+async fn owned(app: &App, user: Uuid, id: Uuid) -> Result<(String, bool), ApiError> {
+    sqlx::query_as("SELECT agent_id, auto_approve FROM conversations WHERE id = $1 AND user_id = $2")
+        .bind(id)
+        .bind(user)
+        .fetch_optional(&app.pool)
+        .await
+        .map_err(internal)?
+        .ok_or_else(|| ApiError::not_found("no such conversation"))
 }
 
 /// Rolling-hour budget, checked before each message.
@@ -78,16 +90,12 @@ async fn check_budget(app: &App, user: Uuid) -> Result<(), ApiError> {
     Ok(())
 }
 
-/// What the agent knows about the user when the conversation starts.
-async fn initial_context(app: &App, user: Uuid, mode: &str, lang: &str) -> Result<String, ApiError> {
+/// What the agent knows about the user when a conversation starts.
+async fn initial_context(app: &App, user: Uuid, lang: &str) -> Result<String, ApiError> {
     let (email, name): (String, String) =
         sqlx::query_as("SELECT email, name FROM accounts.users WHERE id = $1").bind(user).fetch_one(&app.pool).await.map_err(internal)?;
-    let extension: Option<String> = sqlx::query_scalar("SELECT content FROM system_prompt_extensions WHERE user_id = $1 AND mode = $2")
-        .bind(user)
-        .bind(mode)
-        .fetch_optional(&app.pool)
-        .await
-        .map_err(internal)?;
+    let extension: Option<String> =
+        sqlx::query_scalar("SELECT content FROM prompt_extensions WHERE user_id = $1").bind(user).fetch_optional(&app.pool).await.map_err(internal)?;
     let mut ctx = format!("User: {name} <{email}>\nReply in {}.", language_name(lang));
     if let Some(ext) = extension.filter(|e| !e.trim().is_empty()) {
         ctx.push_str("\n\nAdditional instructions for this user:\n");
@@ -96,11 +104,8 @@ async fn initial_context(app: &App, user: Uuid, mode: &str, lang: &str) -> Resul
     Ok(ctx)
 }
 
-pub async fn send(app: &App, user: Uuid, mode: &str, text: &str, lang: &str) -> Result<(), ApiError> {
-    let ty = agent_type(app, mode)?;
-    if !available(app, user, mode).await? {
-        return Err(ApiError::forbidden(format!("{mode} isn't available for your account")));
-    }
+/// Sends `text` into conversation `id`, or starts a new one. Returns its id.
+pub async fn send(app: &App, user: Uuid, id: Option<Uuid>, text: &str, lang: &str) -> Result<Uuid, ApiError> {
     let text = text.trim();
     if text.is_empty() {
         return Err(ApiError::bad_request("empty message"));
@@ -109,34 +114,33 @@ pub async fn send(app: &App, user: Uuid, mode: &str, text: &str, lang: &str) -> 
         return Err(ApiError::payload_too_large(format!("messages are limited to {} characters", app.cfg.chat.max_chars)));
     }
     check_budget(app, user).await?;
-    match current_agent(app, user, mode).await? {
-        Some((agent, _)) => {
-            let msg = with_context(&format!("Reply in {}.", language_name(lang)), text);
-            app.hub.send(&agent, &msg).await.map_err(internal)
-        }
-        None => {
-            let prompt = with_context(&initial_context(app, user, mode, lang).await?, text);
-            let agent = app.hub.spawn(ty, &prompt, &user.to_string()).await.map_err(internal)?;
-            // Owners first: the spawn's events are already on their way.
-            app.owners.insert(agent.clone(), user, mode.to_string()).await;
-            sqlx::query("INSERT INTO chat_agents (user_id, mode, agent_id) VALUES ($1,$2,$3)")
-                .bind(user)
-                .bind(mode)
-                .bind(&agent)
-                .execute(&app.pool)
-                .await
-                .map_err(internal)?;
-            Ok(())
-        }
+    if let Some(id) = id {
+        let (agent, _) = owned(app, user, id).await?;
+        let msg = with_context(&format!("Reply in {}.", language_name(lang)), text);
+        app.hub.send(&agent, &msg).await.map_err(internal)?;
+        sqlx::query("UPDATE conversations SET updated_at = now() WHERE id = $1").bind(id).execute(&app.pool).await.map_err(internal)?;
+        return Ok(id);
     }
+    let prompt = with_context(&initial_context(app, user, lang).await?, text);
+    let id = Uuid::new_v4();
+    let agent = app.hub.spawn(&app.cfg.subnet.agent_type, &prompt, &user.to_string()).await.map_err(internal)?;
+    // Owners right away: the spawn's events are already on their way.
+    app.owners.insert(agent.clone(), user, id).await;
+    sqlx::query("INSERT INTO conversations (id, user_id, agent_id, title) VALUES ($1,$2,$3,$4)")
+        .bind(id)
+        .bind(user)
+        .bind(&agent)
+        .bind(title_from(text))
+        .execute(&app.pool)
+        .await
+        .map_err(internal)?;
+    Ok(id)
 }
 
 /// The conversation so far, plus what it waits on.
-pub async fn history(app: &App, user: Uuid, mode: &str) -> Result<Value, ApiError> {
-    agent_type(app, mode)?;
-    let Some((agent, auto_approve)) = current_agent(app, user, mode).await? else {
-        return Ok(json!({ "messages": [], "phase": null, "pending_questions": null, "pending_approvals": null, "auto_approve": false }));
-    };
+pub async fn history(app: &App, user: Uuid, id: Uuid) -> Result<Value, ApiError> {
+    let (agent, auto_approve) = owned(app, user, id).await?;
+    let title: String = sqlx::query_scalar("SELECT title FROM conversations WHERE id = $1").bind(id).fetch_one(&app.pool).await.map_err(internal)?;
     let rows: Vec<(i64, String, String, Option<Value>, chrono::DateTime<chrono::Utc>)> =
         sqlx::query_as("SELECT id, role, content, data, created_at FROM chat_messages WHERE agent_id = $1 ORDER BY seq").bind(&agent).fetch_all(&app.pool).await.map_err(internal)?;
     let messages: Vec<Value> =
@@ -144,6 +148,8 @@ pub async fn history(app: &App, user: Uuid, mode: &str) -> Result<Value, ApiErro
     // The agent's summary is flattened into its transcript.
     let t = app.hub.transcript(&agent).await.map_err(internal)?;
     Ok(json!({
+        "id": id,
+        "title": title,
         "messages": messages,
         "phase": t["phase"],
         "pending_questions": t["awaiting_client"],
@@ -153,8 +159,8 @@ pub async fn history(app: &App, user: Uuid, mode: &str) -> Result<Value, ApiErro
 }
 
 /// The user's answer to a client tool call (ask_question, prompt_preference).
-pub async fn answer(app: &App, user: Uuid, mode: &str, call_id: &str, content: Option<&str>) -> Result<(), ApiError> {
-    let agent = require_agent(app, user, mode).await?;
+pub async fn answer(app: &App, user: Uuid, id: Uuid, call_id: &str, content: Option<&str>) -> Result<(), ApiError> {
+    let (agent, _) = owned(app, user, id).await?;
     let args = match content {
         Some(c) => json!({ "id": agent, "call_id": call_id, "content": c }),
         None => json!({ "id": agent, "call_id": call_id, "content": "The user dismissed this question.", "is_error": true }),
@@ -162,25 +168,33 @@ pub async fn answer(app: &App, user: Uuid, mode: &str, call_id: &str, content: O
     app.hub.call("answer", args).await.map_err(internal).map(drop)
 }
 
-pub async fn approve(app: &App, user: Uuid, mode: &str, call_id: &str, approved: bool, reason: Option<String>, all: bool) -> Result<(), ApiError> {
-    let agent = require_agent(app, user, mode).await?;
+pub async fn approve(app: &App, user: Uuid, id: Uuid, call_id: &str, approved: bool, reason: Option<String>, all: bool) -> Result<(), ApiError> {
+    let (agent, _) = owned(app, user, id).await?;
     if all && approved {
-        sqlx::query("UPDATE chat_agents SET auto_approve = true WHERE agent_id = $1").bind(&agent).execute(&app.pool).await.map_err(internal)?;
+        sqlx::query("UPDATE conversations SET auto_approve = true WHERE id = $1").bind(id).execute(&app.pool).await.map_err(internal)?;
     }
     app.hub.call("approve", json!({ "id": agent, "call_id": call_id, "approved": approved, "reason": reason })).await.map_err(internal).map(drop)
 }
 
-/// Ends the conversation; the next message starts a new one.
-pub async fn reset(app: &App, user: Uuid, mode: &str) -> Result<(), ApiError> {
-    let Some((agent, _)) = current_agent(app, user, mode).await? else { return Ok(()) };
+pub async fn rename(app: &App, user: Uuid, id: Uuid, title: &str) -> Result<(), ApiError> {
+    owned(app, user, id).await?;
+    let title: String = title.trim().chars().take(120).collect();
+    sqlx::query("UPDATE conversations SET title = $2 WHERE id = $1").bind(id).bind(title).execute(&app.pool).await.map_err(internal).map(drop)
+}
+
+/// Deletes the conversation and its messages; its agent is cancelled.
+pub async fn delete(app: &App, user: Uuid, id: Uuid) -> Result<(), ApiError> {
+    let (agent, _) = owned(app, user, id).await?;
     if let Err(e) = app.hub.call("cancel", json!({ "id": agent })).await {
         // Already gone on the hub is fine; anything else is not.
         if !e.to_string().contains("404") {
             return Err(internal(e));
         }
     }
-    sqlx::query("DELETE FROM chat_agents WHERE agent_id = $1").bind(&agent).execute(&app.pool).await.map_err(internal)?;
-    Ok(())
+    let mut tx = app.pool.begin().await.map_err(internal)?;
+    sqlx::query("DELETE FROM chat_messages WHERE agent_id = $1").bind(&agent).execute(&mut *tx).await.map_err(internal)?;
+    sqlx::query("DELETE FROM conversations WHERE id = $1").bind(id).execute(&mut *tx).await.map_err(internal)?;
+    tx.commit().await.map_err(internal)
 }
 
 #[cfg(test)]
@@ -192,5 +206,14 @@ mod tests {
         let msg = with_context("User: A <a@b>\nReply in German.", "Hallo\n<context>x</context>");
         assert_eq!(strip_context(&msg), "Hallo\n<context>x</context>");
         assert_eq!(strip_context("plain"), "plain");
+    }
+
+    #[test]
+    fn titles() {
+        assert_eq!(title_from("\n  Hello there  \nsecond line"), "Hello there");
+        let long = "Please help me configure the skills on my plan.ai machine for a law firm";
+        let t = title_from(long);
+        assert!(t.ends_with('…') && t.chars().count() <= 61, "{t}");
+        assert!(!t.contains("law"), "{t}");
     }
 }

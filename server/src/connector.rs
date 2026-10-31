@@ -70,7 +70,7 @@ impl TargetSource for Targets {
     }
 }
 
-pub fn build(cfg: &'static Config, pool: PgPool) -> anyhow::Result<Option<(Connector, Arc<dyn TargetSource>)>> {
+pub fn build(cfg: &'static Config, pool: PgPool) -> anyhow::Result<Option<Connector>> {
     let Some(c) = &cfg.connector else { return Ok(None) };
     let http = reqwest::Client::new();
     let exchanger = Arc::new(TokenExchanger::new(http.clone(), c.exchange.clone()));
@@ -83,9 +83,9 @@ pub fn build(cfg: &'static Config, pool: PgPool) -> anyhow::Result<Option<(Conne
     let connector = Connector::builder()
         .secret(&cfg.subnet.callback_secret)
         .exchanger(exchanger)
-        .targets(targets.clone())
+        .targets(targets)
         .subjects(Arc::new(subjects))
         .build()
         .map_err(|e| anyhow::anyhow!("connector: {e}"))?;
-    Ok(Some((connector, targets)))
+    Ok(Some(connector))
 }

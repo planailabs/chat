@@ -14,8 +14,6 @@ pub struct App {
     pub owners: Owners,
     pub events: broadcast::Sender<BrowserEvent>,
     pub http: reqwest::Client,
-    /// The connector's services; None without `[connector]`.
-    pub targets: Option<Arc<dyn plan_ai_connector::TargetSource>>,
 }
 
 pub type AppState = Arc<App>;
@@ -43,10 +41,7 @@ pub async fn init(cfg: &'static Config) -> anyhow::Result<(AppState, Option<plan
     let owners = Owners::load(&pool).await?;
     let (events, _) = broadcast::channel(1024);
     tokio::spawn(Pump { hub: hub.clone(), pool: pool.clone(), owners: owners.clone(), tx: events.clone() }.run());
-    let (connector, targets) = match crate::connector::build(cfg, pool.clone())? {
-        Some((c, t)) => (Some(c), Some(t)),
-        None => (None, None),
-    };
-    Ok((Arc::new(App { cfg, pool, accounts, hub, owners, events, http: reqwest::Client::new(), targets }), connector))
+    let connector = crate::connector::build(cfg, pool.clone())?;
+    Ok((Arc::new(App { cfg, pool, accounts, hub, owners, events, http: reqwest::Client::new() }), connector))
 }
 

@@ -129,14 +129,15 @@ async fn export(app: &AppState, user: Uuid) -> Result<Value, ApiError> {
 // ── chat ────────────────────────────────────────────────────────────
 
 #[derive(Deserialize, JsonSchema)]
-pub struct Mode {
-    /// `sales` or `machine_config`.
-    mode: String,
+pub struct ConversationRef {
+    /// Conversation id.
+    id: Uuid,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub struct SendInput {
-    mode: String,
+    /// The conversation; absent starts a new one.
+    id: Option<Uuid>,
     text: String,
     /// The UI language (`en`, `de`); the assistant replies in it.
     #[serde(default = "en")]
@@ -146,9 +147,15 @@ fn en() -> String {
     "en".into()
 }
 
+#[derive(Serialize, JsonSchema)]
+pub struct Sent {
+    /// The conversation the message went to (new or given).
+    id: Uuid,
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub struct AnswerInput {
-    mode: String,
+    id: Uuid,
     call_id: String,
     /// The answer; absent when the user dismissed the question.
     content: Option<String>,
@@ -156,7 +163,7 @@ pub struct AnswerInput {
 
 #[derive(Deserialize, JsonSchema)]
 pub struct ApproveInput {
-    mode: String,
+    id: Uuid,
     call_id: String,
     approved: bool,
     reason: Option<String>,
@@ -165,13 +172,10 @@ pub struct ApproveInput {
     all: bool,
 }
 
-#[derive(Serialize, JsonSchema)]
-pub struct ModeInfo {
-    id: String,
-    /// Offered to you (modes acting on a service need it reachable).
-    available: bool,
-    /// You have a conversation in it.
-    active: bool,
+#[derive(Deserialize, JsonSchema)]
+pub struct RenameInput {
+    id: Uuid,
+    title: String,
 }
 
 // ── admin ───────────────────────────────────────────────────────────
@@ -197,28 +201,25 @@ pub struct UserHit {
     id: Uuid,
     email: String,
     name: String,
-    /// Modes with a prompt extension.
-    extension_modes: Vec<String>,
+    /// Has a prompt extension.
+    has_extension: bool,
 }
 
 #[derive(Deserialize, JsonSchema)]
-pub struct UserMode {
+pub struct UserRef {
     user_id: Uuid,
-    /// Absent: every mode.
-    mode: Option<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
 pub struct ExtensionInput {
     user_id: Uuid,
-    mode: String,
     content: String,
 }
 
 #[derive(Serialize, JsonSchema, sqlx::FromRow)]
 pub struct Extension {
-    mode: String,
     content: String,
+    updated_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -257,7 +258,8 @@ pub struct AdminMessage {
     id: i64,
     user_id: Uuid,
     email: String,
-    mode: String,
+    /// The conversation's title.
+    conversation: Option<String>,
     role: String,
     content: String,
     created_at: chrono::DateTime<chrono::Utc>,
@@ -296,52 +298,47 @@ pub fn registry(auth: Arc<dyn plan_ai_api_mcp::Authenticator>) -> Registry<AppSt
             Ok(OK)
         });
 
-    reg.resource("chat", "chat", "Conversations with the plan.ai assistants")
-        .list("Chat modes and whether you have a conversation in each.", |app: AppState, p: Arc<Principal>, _: Empty| async move {
-            let user = user_of(&p)?;
-            let mut out = vec![];
-            for mode in app.cfg.subnet.types.keys() {
-                out.push(ModeInfo {
-                    id: mode.clone(),
-                    available: chat::available(&app, user, mode).await?,
-                    active: chat::current_agent(&app, user, mode).await?.is_some(),
-                });
-            }
-            Ok(out)
+    reg.resource("chat", "chat", "Your conversations with the plan.ai assistant")
+        .list("Your conversations, most recent first.", |app: AppState, p: Arc<Principal>, _: Empty| async move {
+            chat::list(&app, user_of(&p)?).await
         })
-        .custom("history", Risk::ReadOnly, OnItem::No, "The conversation in a mode and what it waits on.", |app: AppState, p: Arc<Principal>, m: Mode| async move {
-            chat::history(&app, user_of(&p)?, &m.mode).await
+        .custom("history", Risk::ReadOnly, OnItem::No, "A conversation's messages and what it waits on.", |app: AppState, p: Arc<Principal>, c: ConversationRef| async move {
+            chat::history(&app, user_of(&p)?, c.id).await
         })
-        .custom("send", Risk::Mutating, OnItem::No, "Send a message; the reply streams over /api/v1/chat/events.", |app: AppState, p: Arc<Principal>, i: SendInput| async move {
+        .custom("send", Risk::Mutating, OnItem::No, "Send a message (no id: start a new conversation); the reply streams over /api/v1/chat/events.", |app: AppState, p: Arc<Principal>, i: SendInput| async move {
             require_not_impersonating(&p)?;
             let user = user_of(&p)?;
             ensure_profile(&app, user).await?;
-            chat::send(&app, user, &i.mode, &i.text, &i.lang).await?;
-            Ok(OK)
+            Ok(Sent { id: chat::send(&app, user, i.id, &i.text, &i.lang).await? })
         })
         .custom("answer", Risk::Mutating, OnItem::No, "Answer a question the assistant asked.", |app: AppState, p: Arc<Principal>, i: AnswerInput| async move {
             require_not_impersonating(&p)?;
-            chat::answer(&app, user_of(&p)?, &i.mode, &i.call_id, i.content.as_deref()).await?;
+            chat::answer(&app, user_of(&p)?, i.id, &i.call_id, i.content.as_deref()).await?;
             Ok(OK)
         })
         .custom("approve", Risk::Mutating, OnItem::No, "Approve or deny a tool call waiting for you.", |app: AppState, p: Arc<Principal>, i: ApproveInput| async move {
             require_not_impersonating(&p)?;
-            chat::approve(&app, user_of(&p)?, &i.mode, &i.call_id, i.approved, i.reason, i.all).await?;
+            chat::approve(&app, user_of(&p)?, i.id, &i.call_id, i.approved, i.reason, i.all).await?;
             Ok(OK)
         })
-        .custom("reset", Risk::Destructive, OnItem::No, "End the conversation; the next message starts a new one.", |app: AppState, p: Arc<Principal>, m: Mode| async move {
+        .custom("rename", Risk::Mutating, OnItem::No, "Rename a conversation.", |app: AppState, p: Arc<Principal>, i: RenameInput| async move {
             require_not_impersonating(&p)?;
-            chat::reset(&app, user_of(&p)?, &m.mode).await?;
+            chat::rename(&app, user_of(&p)?, i.id, &i.title).await?;
+            Ok(OK)
+        })
+        .custom("remove", Risk::Destructive, OnItem::No, "Delete a conversation and its messages.", |app: AppState, p: Arc<Principal>, c: ConversationRef| async move {
+            require_not_impersonating(&p)?;
+            chat::delete(&app, user_of(&p)?, c.id).await?;
             Ok(OK)
         });
 
     reg.resource("user", "user", "Users (admin)").list("Search users by email or name.", |app: AppState, p: Arc<Principal>, s: UserSearch| async move {
         p.require_admin()?;
         sqlx::query_as(
-            "SELECT u.id, u.email, u.name, COALESCE(array_agg(e.mode) FILTER (WHERE e.mode IS NOT NULL), '{}') AS extension_modes
-             FROM accounts.users u LEFT JOIN system_prompt_extensions e ON e.user_id = u.id
+            "SELECT u.id, u.email, u.name, e.user_id IS NOT NULL AS has_extension
+             FROM accounts.users u LEFT JOIN prompt_extensions e ON e.user_id = u.id
              WHERE u.email ILIKE '%' || $1 || '%' OR u.name ILIKE '%' || $1 || '%'
-             GROUP BY u.id ORDER BY u.email LIMIT 20",
+             ORDER BY u.email LIMIT 20",
         )
         .bind(s.q.replace(['%', '_'], ""))
         .fetch_all(&app.pool)
@@ -351,35 +348,31 @@ pub fn registry(auth: Arc<dyn plan_ai_api_mcp::Authenticator>) -> Registry<AppSt
     });
 
     reg.resource("prompt_extension", "prompt_extension", "Per-user system prompt extensions (admin)")
-        .list("A user's prompt extensions.", |app: AppState, p: Arc<Principal>, i: UserMode| async move {
+        .list("A user's prompt extension (empty list: none).", |app: AppState, p: Arc<Principal>, i: UserRef| async move {
             p.require_admin()?;
-            sqlx::query_as("SELECT mode, content FROM system_prompt_extensions WHERE user_id = $1 AND ($2::text IS NULL OR mode = $2) ORDER BY mode")
+            sqlx::query_as("SELECT content, updated_at FROM prompt_extensions WHERE user_id = $1")
                 .bind(i.user_id)
-                .bind(i.mode)
                 .fetch_all(&app.pool)
                 .await
                 .map_err(internal)
                 .map(|v: Vec<Extension>| v)
         })
-        .update("Set a user's extension for a mode; it applies from their next conversation.", |app: AppState, p: Arc<Principal>, i: ExtensionInput| async move {
+        .custom("set", Risk::Mutating, OnItem::No, "Set a user's extension; it applies from their next conversation.", |app: AppState, p: Arc<Principal>, i: ExtensionInput| async move {
             p.require_admin()?;
-            chat::agent_type(&app, &i.mode)?;
             sqlx::query(
-                "INSERT INTO system_prompt_extensions (user_id, mode, content) VALUES ($1,$2,$3)
-                 ON CONFLICT (user_id, mode) DO UPDATE SET content = EXCLUDED.content, updated_at = now()",
+                "INSERT INTO prompt_extensions (user_id, content) VALUES ($1,$2)
+                 ON CONFLICT (user_id) DO UPDATE SET content = EXCLUDED.content, updated_at = now()",
             )
             .bind(i.user_id)
-            .bind(&i.mode)
             .bind(&i.content)
             .execute(&app.pool)
             .await
             .map_err(internal)?;
             Ok(OK)
         })
-        .custom("remove", Risk::Destructive, OnItem::No, "Remove a user's extension for a mode.", |app: AppState, p: Arc<Principal>, i: UserMode| async move {
+        .custom("remove", Risk::Destructive, OnItem::No, "Remove a user's extension.", |app: AppState, p: Arc<Principal>, i: UserRef| async move {
             p.require_admin()?;
-            let mode = i.mode.ok_or_else(|| ApiError::bad_request("mode is required"))?;
-            sqlx::query("DELETE FROM system_prompt_extensions WHERE user_id = $1 AND mode = $2").bind(i.user_id).bind(mode).execute(&app.pool).await.map_err(internal)?;
+            sqlx::query("DELETE FROM prompt_extensions WHERE user_id = $1").bind(i.user_id).execute(&app.pool).await.map_err(internal)?;
             Ok(OK)
         });
 
@@ -406,8 +399,9 @@ pub fn registry(auth: Arc<dyn plan_ai_api_mcp::Authenticator>) -> Registry<AppSt
     reg.resource("message", "message", "Chat traffic (admin)").list("The latest chat messages of all users.", |app: AppState, p: Arc<Principal>, f: MessageFilter| async move {
         p.require_admin()?;
         sqlx::query_as(
-            "SELECT m.id, m.user_id, u.email, m.mode, m.role, m.content, m.created_at
-             FROM chat_messages m JOIN accounts.users u ON u.id = m.user_id ORDER BY m.id DESC LIMIT $1",
+            "SELECT m.id, m.user_id, u.email, c.title AS conversation, m.role, m.content, m.created_at
+             FROM chat_messages m JOIN accounts.users u ON u.id = m.user_id
+             LEFT JOIN conversations c ON c.agent_id = m.agent_id ORDER BY m.id DESC LIMIT $1",
         )
         .bind(f.limit.clamp(1, 1000))
         .fetch_all(&app.pool)

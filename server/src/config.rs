@@ -100,20 +100,14 @@ pub struct Subnet {
     /// Shared secret subnet presents when calling back (approval hook, agent
     /// tools, connector): `Authorization: Bearer <secret>`.
     pub callback_secret: String,
-    /// Agent type per chat mode, as declared in the cluster file.
-    #[serde(default = "default_types")]
-    pub types: std::collections::BTreeMap<String, String>,
-    /// Modes that need a connector service of this kind to be offered.
-    #[serde(default = "default_requires")]
-    pub requires: std::collections::BTreeMap<String, String>,
+    /// The agent type (or mixture) every conversation runs, as declared in
+    /// the cluster file (subnet/chat.hcl).
+    #[serde(default = "default_agent_type")]
+    pub agent_type: String,
 }
 
-fn default_requires() -> std::collections::BTreeMap<String, String> {
-    [("machine_config".to_string(), "mac-mgmt".to_string())].into()
-}
-
-fn default_types() -> std::collections::BTreeMap<String, String> {
-    [("sales", "chat-sales"), ("machine_config", "chat-machine-config")].map(|(k, v)| (k.to_string(), v.to_string())).into()
+fn default_agent_type() -> String {
+    "chat".into()
 }
 
 /// The layered approval of tool calls (static checks → validator model →
@@ -208,7 +202,7 @@ mod tests {
     #[test]
     fn example_config_parses() {
         let cfg: super::Config = toml::from_str(include_str!("../../config.example.toml")).unwrap();
-        assert_eq!(cfg.subnet.types["sales"], "chat-sales");
+        assert_eq!(cfg.subnet.agent_type, "chat");
     }
 
     #[test]
