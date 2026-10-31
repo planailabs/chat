@@ -15,12 +15,13 @@ static_dir = "web/dist"
 # admin_emails = ["you@plan.ai"]
 #
 # [[auth.providers]]
-# slug = "zitadel"
+# slug = "zitadel"                 # redirect URI: {external_url}/auth/zitadel/callback
 # name = "plan.ai"
-# issuer = "https://auth.plan.ai"
-# client_id = "xxx"
+# issuer = "https://id.plan.ai"
+# client_id = "xxx"                 # project "plan.ai chat" in the plan.ai org
 # client_secret = "xxx"
 # allow_all = true
+# scopes = ["openid", "email", "profile", "urn:zitadel:iam:org:id:397597061693833352"]
 
 [accounts]
 admin_emails = []
