@@ -136,6 +136,17 @@ export interface PendingQuestion {
   input: Record<string, unknown>;
 }
 
+/** A search hit (`POST /api/v1/chat/search`): a message, or the title when `message_id` is null. */
+export interface SearchHit {
+  conversation: string;
+  title: string;
+  message_id: number | null;
+  role: 'user' | 'assistant' | null;
+  /** Text around the match; matches between U+E000 and U+E001. */
+  snippet: string;
+  at: string;
+}
+
 export interface History {
   id: string;
   title: string;
@@ -258,6 +269,8 @@ export const api = {
       request<Ok>('POST', '/api/v1/chat/answer', content === undefined ? { id, call_id: callId } : { id, call_id: callId, content }),
     approve: (id: string, callId: string, approved: boolean, options: { all?: boolean; reason?: string } = {}) =>
       request<Ok>('POST', '/api/v1/chat/approve', { id, call_id: callId, approved, ...options }),
+    /** Full text over the user's own titles and messages, best first (at most 50). */
+    search: (q: string) => request<SearchHit[]>('POST', '/api/v1/chat/search', { q }),
     rename: (id: string, title: string) => request<Ok>('POST', '/api/v1/chat/rename', { id, title }),
     /** Deletes the conversation and its messages. */
     remove: (id: string) => request<Ok>('POST', '/api/v1/chat/remove', { id }),

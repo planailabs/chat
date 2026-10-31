@@ -1296,6 +1296,120 @@ html.is-first-visit #app {
     outline: none;
   }
 
+  .sidebar-search {
+    position: relative;
+    margin-top: 0.5rem;
+  }
+
+  .sidebar-search__input {
+    width: 100%;
+    padding: 0.45rem 3.2rem 0.45rem 2.1rem;
+    border: 1px solid color-mix(in lab, var(--border-muted) 80%, transparent);
+    border-radius: 0.65rem;
+    background: var(--surface-base);
+    color: var(--text-primary);
+    font-size: 0.875rem;
+    outline: none;
+  }
+
+  .sidebar-search__input::placeholder {
+    color: var(--text-muted);
+  }
+
+  .sidebar-search__input:focus {
+    border-color: var(--accent);
+  }
+
+  .sidebar-search__input::-webkit-search-cancel-button {
+    display: none;
+  }
+
+  .sidebar-search__icon {
+    position: absolute;
+    top: 50%;
+    left: 0.7rem;
+    width: 1rem;
+    height: 1rem;
+    color: var(--text-muted);
+    transform: translateY(-50%);
+    pointer-events: none;
+  }
+
+  .sidebar-search__kbd {
+    position: absolute;
+    top: 50%;
+    right: 0.55rem;
+    padding: 0 0.3rem;
+    border: 1px solid color-mix(in lab, var(--border-muted) 80%, transparent);
+    border-radius: 0.3rem;
+    color: var(--text-muted);
+    font-size: 0.68rem;
+    line-height: 1.3rem;
+    transform: translateY(-50%);
+    pointer-events: none;
+  }
+
+  .search-group + .search-group {
+    margin-top: 0.6rem;
+  }
+
+  .search-hit {
+    display: flex;
+    gap: 0.5rem;
+    align-items: flex-start;
+    width: 100%;
+    padding: 0.35rem 0.5rem;
+    border-radius: 0.5rem;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    line-height: 1.35;
+    text-align: left;
+  }
+
+  .search-hit:hover,
+  .search-hit:focus-visible {
+    background: var(--surface-hover);
+    outline: none;
+  }
+
+  .search-hit--title {
+    color: var(--text-primary);
+    font-size: 0.875rem;
+    font-weight: 500;
+  }
+
+  .search-hit__text {
+    display: -webkit-box;
+    min-width: 0;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+
+  .search-hit .sidebar-icon {
+    margin-top: 0.1rem;
+  }
+
+  .search-hit mark,
+  .chat-message mark {
+    border-radius: 0.2rem;
+    background: color-mix(in lab, var(--accent) 28%, transparent);
+    color: inherit;
+  }
+
+  .chat-message {
+    border-radius: 0.9rem;
+    transition:
+      background-color 0.8s ease,
+      box-shadow 0.8s ease;
+  }
+
+  .chat-message.is-highlighted {
+    background-color: color-mix(in lab, var(--accent) 14%, transparent);
+    box-shadow: 0 0 0 0.5rem color-mix(in lab, var(--accent) 14%, transparent);
+  }
+
   .sidebar-apps {
     padding: 0.5rem 0.5rem 0.75rem;
     border-top: 1px solid color-mix(in lab, var(--border-muted) 60%, transparent);

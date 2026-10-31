@@ -5,6 +5,7 @@ import type { ChatMessage } from '../../app/state';
 import { locale } from '../../app/locale';
 import { renderMarkdown } from '../../utils/markdown';
 import { formatToolArgs } from '../../utils/format';
+import { store } from '../../app/store';
 
 defineProps({ messages: { type: Array as PropType<ChatMessage[]>, required: true } });
 
@@ -29,10 +30,18 @@ const approvalStatus = (decision: 'approved' | 'denied' | null) => {
       <p class="max-w-[min(100%,640px)] rounded-3xl px-5 py-3 text-sm text-(--text-muted) italic">{{ msg.content }}</p>
     </div>
     <div v-else-if="msg.role === 'user'" class="flex justify-end">
-      <p class="max-w-[min(100%,640px)] rounded-3xl bg-(--surface-elevated) px-5 py-3 text-base text-(--text-primary)">{{ msg.content }}</p>
+      <p
+        :class="['chat-message', { 'is-highlighted': msg.id !== undefined && msg.id === store.state.highlightMessageId }]"
+        :data-message-id="msg.id"
+        class="max-w-[min(100%,640px)] rounded-3xl bg-(--surface-elevated) px-5 py-3 text-base text-(--text-primary)">{{ msg.content }}</p>
     </div>
     <div v-else class="flex justify-start">
-      <div class="chat-markdown max-w-[min(100%,640px)] text-base leading-relaxed text-(--text-primary)" v-html="renderMarkdown(msg.content)" />
+      <div
+        :class="['chat-message', { 'is-highlighted': msg.id !== undefined && msg.id === store.state.highlightMessageId }]"
+        :data-message-id="msg.id"
+        class="chat-markdown max-w-[min(100%,640px)] text-base leading-relaxed text-(--text-primary)"
+        v-html="renderMarkdown(msg.content)"
+      />
     </div>
   </template>
 </template>

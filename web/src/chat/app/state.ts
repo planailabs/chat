@@ -44,7 +44,8 @@ export interface PendingApproval {
 }
 
 export type ChatMessage =
-  | { role: 'user' | 'assistant' | 'cancel'; content: string }
+  /** `id`: the server's message id (from the history; search hits point at it). */
+  | { role: 'user' | 'assistant' | 'cancel'; content: string; id?: number }
   /** A past approval request; `decision` is known for the ones made here. */
   | ({ role: 'approval'; decision: ApprovalDecision | null } & PendingApproval);
 
@@ -122,6 +123,8 @@ export interface AppState {
   conversations: ConversationItem[];
   /** The conversation on screen (its URL is /c/<id>); null: a new chat. */
   activeConversationId: string | null;
+  /** A message to scroll to and highlight once it is shown (a search hit). */
+  highlightMessageId: number | null;
   /** null until the chat is set up on load */
   chat: ChatSession | null;
 
@@ -266,6 +269,7 @@ export const createInitialState = (): AppState => {
     ...user,
     conversations: [],
     activeConversationId: null,
+    highlightMessageId: null,
     chat: null,
     profile: createProfileState(),
   };

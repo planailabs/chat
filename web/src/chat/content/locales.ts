@@ -49,6 +49,14 @@ export interface LocaleContent {
     applications: string;
     /** Screen readers: the link opens in a new tab. */
     newTab: string;
+    search: string;
+    /** The search field's keyboard shortcut hint. */
+    searchShortcut: string;
+    noResults: string;
+    /** A hit in the conversation's title. */
+    titleMatch: string;
+    you: string;
+    assistant: string;
   };
   composer: {
     submitLabel: string;
@@ -155,6 +163,12 @@ const en: LocaleContent = {
     activity: 'New activity',
     applications: 'Applications',
     newTab: 'opens in a new tab',
+    search: 'Search chats',
+    searchShortcut: 'Ctrl+K',
+    noResults: 'No results',
+    titleMatch: 'Title',
+    you: 'You',
+    assistant: 'Assistant',
   },
   composer: {
     submitLabel: 'Send',
@@ -266,6 +280,12 @@ const de: LocaleContent = {
     activity: 'Neue Aktivität',
     applications: 'Anwendungen',
     newTab: 'öffnet in einem neuen Tab',
+    search: 'Chats durchsuchen',
+    searchShortcut: 'Strg+K',
+    noResults: 'Keine Treffer',
+    titleMatch: 'Titel',
+    you: 'Du',
+    assistant: 'Assistent',
   },
   composer: {
     submitLabel: 'Senden',

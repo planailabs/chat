@@ -24,18 +24,16 @@ describe('historyToChat', () => {
     expect(historyToChat(history([]), en)).toEqual({ messages: [], pendingQuestion: null, approvals: [] });
   });
 
-  it('keeps user and assistant messages and hides tool runs', () => {
-    const snapshot = historyToChat(
-      history([
-        msg({ role: 'user', content: 'Install git', data: null }),
-        msg({ role: 'tool', content: 'run_command', data: { call_id: 'c0', is_error: false } }),
-        msg({ role: 'assistant', content: 'Done.', data: null }),
-      ]),
-      en,
-    );
+  it('keeps user and assistant messages (with their ids) and hides tool runs', () => {
+    const [user, tool, assistant] = [
+      msg({ role: 'user', content: 'Install git', data: null }),
+      msg({ role: 'tool', content: 'run_command', data: { call_id: 'c0', is_error: false } }),
+      msg({ role: 'assistant', content: 'Done.', data: null }),
+    ];
+    const snapshot = historyToChat(history([user, tool, assistant]), en);
     expect(snapshot.messages).toEqual([
-      { role: 'user', content: 'Install git' },
-      { role: 'assistant', content: 'Done.' },
+      { role: 'user', content: 'Install git', id: user.id },
+      { role: 'assistant', content: 'Done.', id: assistant.id },
     ]);
   });
 

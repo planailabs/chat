@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mount } from '@vue/test-utils';
+import { flushPromises, mount } from '@vue/test-utils';
 import { nextTick } from 'vue';
 import { store } from '../app/store';
 import { APPLICATIONS } from '../content/applications';
@@ -15,6 +15,9 @@ const actions = vi.hoisted(() => ({
 }));
 
 vi.mock('../actions/chat', async (importOriginal) => ({ ...(await importOriginal<object>()), ...actions }));
+
+const openSearchHit = vi.hoisted(() => vi.fn());
+vi.mock('../actions/chat/search', async (importOriginal) => ({ ...(await importOriginal<object>()), openSearchHit }));
 
 import AppSidebar from './AppSidebar.vue';
 import ChatMessages from './chat/ChatMessages.vue';
@@ -164,5 +167,80 @@ describe('ChatComposer', () => {
     });
     expect(w.find('.composer-skip-button').exists()).toBe(true);
     expect(w.find('.composer-input').attributes('aria-label')).toBe('Your name?');
+  });
+});
+
+describe('sidebar search', () => {
+  const hits = [
+    { conversation: 'b', title: 'Law firm', message_id: null, role: null, snippet: '\uE000Law\uE001 firm', at: now },
+    { conversation: 'b', title: 'Law firm', message_id: 7, role: 'assistant', snippet: 'a small \uE000law\uE001 firm <script>alert(1)</script>', at: now },
+    { conversation: 'a', title: 'Title a', message_id: 3, role: 'user', snippet: 'my \uE000law\uE001yer', at: now },
+  ];
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    openSearchHit.mockReset();
+    fetchMock = vi.fn(async () => new Response(JSON.stringify(hits), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  const type = async (w: ReturnType<typeof mount>, q: string) => {
+    await w.find('.sidebar-search__input').setValue(q);
+  };
+
+  it('searches after a pause and groups the hits by conversation, matches marked, markup kept as text', async () => {
+    const w = mount(AppSidebar);
+    await type(w, 'la');
+    await type(w, 'law');
+    expect(fetchMock).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(250);
+    await flushPromises();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ q: 'law' });
+
+    // The conversation list is replaced by the results.
+    expect(w.find('.sidebar-group').exists()).toBe(false);
+    const groups = w.findAll('.search-group');
+    expect(groups).toHaveLength(2);
+    expect(groups[0].find('.search-hit--title').html()).toContain('<mark>Law</mark> firm');
+    const snippet = groups[0].findAll('.search-hit')[1];
+    expect(snippet.find('mark').text()).toBe('law');
+    expect(snippet.find('script').exists()).toBe(false);
+    expect(snippet.text()).toContain('<script>alert(1)</script>');
+
+    await snippet.trigger('click');
+    expect(openSearchHit).toHaveBeenCalledWith('b', 7);
+    await groups[1].find('.search-hit--title').trigger('click');
+    expect(openSearchHit).toHaveBeenCalledWith('a', null);
+  });
+
+  it('says so when nothing matches, and Escape clears the search', async () => {
+    fetchMock.mockImplementation(async () => new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    const w = mount(AppSidebar);
+    await type(w, 'zzz');
+    await vi.advanceTimersByTimeAsync(250);
+    await flushPromises();
+    expect(w.find('.sidebar-search-results').text()).toBe('No results');
+
+    await w.find('.sidebar-search__input').trigger('keydown', { key: 'Escape' });
+    expect(w.find<HTMLInputElement>('.sidebar-search__input').element.value).toBe('');
+    expect(w.find('.sidebar-group').exists()).toBe(true);
+  });
+
+  it('does not search punctuation', async () => {
+    const w = mount(AppSidebar);
+    await type(w, '?!');
+    await vi.advanceTimersByTimeAsync(300);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('focuses the search on Ctrl+K', async () => {
+    const w = mount(AppSidebar, { attachTo: document.body });
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true }));
+    await flushPromises();
+    expect(document.activeElement).toBe(w.find('.sidebar-search__input').element);
+    w.unmount();
   });
 });

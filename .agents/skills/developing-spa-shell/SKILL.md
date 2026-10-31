@@ -41,7 +41,7 @@ One `EventSource(/api/v1/chat/events)` (`actions/chat/sse.ts`) carries every con
 
 ### Sidebar and applications
 
-`components/AppSidebar.vue` renders New chat, the grouped conversations (rename, delete) and the applications from `content/applications.ts` (one entry per app; icons by name from `ui/icons.ts` through `AppIcon.vue`). Inputs (the composer, a rename) keep what is typed while other parts re-render: the composer's contenteditable is never bound to state, only read on send.
+`components/AppSidebar.vue` renders New chat, the grouped conversations (rename, delete) and the applications from `content/applications.ts` (one entry per app; icons by name from `ui/icons.ts` through `AppIcon.vue`). The search field above the list (Ctrl/Cmd+K focuses it, Escape clears it) shows `SearchResults.vue` instead of the list: `POST /api/v1/chat/search` debounced, hits grouped by conversation (`actions/chat/search.ts`, unit-tested). Snippets mark matches between U+E000 and U+E001: `snippetHtml`/`titleHtml` escape the text first and only then turn those two characters into `<mark>`; never put a snippet into `v-html` otherwise. Opening a message hit sets `highlightMessageId`; `ChatView` scrolls to the message (`data-message-id`, from the history's message ids) and highlights it briefly. Inputs (the composer, a rename) keep what is typed while other parts re-render: the composer's contenteditable is never bound to state, only read on send.
 
 ### 4. Manual i18n & Theme Resolution
 

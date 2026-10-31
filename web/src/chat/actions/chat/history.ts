@@ -40,7 +40,7 @@ export const historyToChat = (history: History, locale: LocaleContent): ChatSnap
     switch (m.role) {
       case 'user':
       case 'assistant':
-        messages.push({ role: m.role, content: m.content });
+        messages.push({ role: m.role, content: m.content, id: m.id });
         break;
 
       case 'question': {

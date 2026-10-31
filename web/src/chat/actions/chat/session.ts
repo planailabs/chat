@@ -133,6 +133,7 @@ export const openConversation = async (id: string | null, nav: HistoryMode = 'pu
   setConversationPath(id, nav);
   clearChatTimers();
   state.activeConversationId = id;
+  state.highlightMessageId = null;
   state.isSidebarOpen = false;
   state.renamingConversationId = null;
 

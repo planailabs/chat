@@ -4,7 +4,7 @@
  * heading above the composer, centered. With messages, it scrolls and keeps
  * the newest part in view.
  */
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue';
 import { store } from '../app/store';
 import { locale } from '../app/locale';
 import { renderMarkdown } from '../utils/markdown';
@@ -32,12 +32,47 @@ watch(
   },
   async () => {
     const mc = chat.value;
-    if (!mc || mc.phase === 'error' || mc.phase === 'tool') return;
+    if (!mc || mc.phase === 'error' || mc.phase === 'tool' || store.state.highlightMessageId !== null) return;
     await nextTick();
     if (main.value) main.value.scrollTop = main.value.scrollHeight;
   },
   { immediate: true },
 );
+
+// A search hit: scroll to its message once it is shown, highlight it for a
+// moment. Gives up when it doesn't show up (e.g. the history failed).
+const HIGHLIGHT_MS = 2500;
+const GIVE_UP_MS = 8000;
+let highlightTimer: ReturnType<typeof setTimeout> | null = null;
+const clearHighlightLater = (id: number, ms: number) => {
+  if (highlightTimer) clearTimeout(highlightTimer);
+  highlightTimer = setTimeout(() => {
+    if (store.state.highlightMessageId === id) store.state.highlightMessageId = null;
+  }, ms);
+};
+let found: number | null = null;
+watch(
+  () => [store.state.highlightMessageId, chat.value?.messages.length] as const,
+  async ([id], previous) => {
+    if (id === null) {
+      found = null;
+      return;
+    }
+    if (id !== previous?.[0]) {
+      found = null;
+      clearHighlightLater(id, GIVE_UP_MS);
+    }
+    if (found === id) return;
+    await nextTick();
+    const el = main.value?.querySelector(`[data-message-id="${id}"]`);
+    if (!el) return;
+    found = id;
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    clearHighlightLater(id, HIGHLIGHT_MS);
+  },
+  { immediate: true },
+);
+onBeforeUnmount(() => highlightTimer && clearTimeout(highlightTimer));
 </script>
 
 <template>

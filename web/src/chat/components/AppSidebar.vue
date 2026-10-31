@@ -6,8 +6,10 @@
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import AppIcon from './AppIcon.vue';
+import SearchResults from './SearchResults.vue';
 import { store } from '../app/store';
 import { locale } from '../app/locale';
+import { isDesktop } from '../app/viewport';
 import { pathForConversation } from '../app/route';
 import { APPLICATIONS } from '../content/applications';
 import { groupConversations, type ConversationItem } from '../actions/chat/conversationList';
@@ -19,6 +21,7 @@ import {
   startNewChat,
   startRenaming,
   stopRenaming,
+  toggleSidebar,
 } from '../actions/chat';
 
 const state = store.state;
@@ -86,8 +89,36 @@ const remove = (c: ConversationItem) => {
   if (window.confirm(question)) void deleteConversation(c.id);
 };
 
-// Escape closes the mobile drawer.
+// ── Search ─────────────────────────────────────────────────────────────────
+const query = ref('');
+const searchInput = ref<HTMLInputElement | null>(null);
+const searching = computed(() => query.value.trim().length > 0);
+const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
+
+/** Escape clears the search (a second Escape may close the drawer). */
+const onSearchKeydown = (event: KeyboardEvent) => {
+  if (event.key !== 'Escape' || !query.value) return;
+  event.preventDefault();
+  event.stopPropagation();
+  query.value = '';
+};
+
+/** Shows the sidebar (expands the column, opens the drawer) and focuses the search. */
+const focusSearch = async () => {
+  if (isDesktop.value ? state.isSidebarCollapsed : !state.isSidebarOpen) toggleSidebar(isDesktop.value);
+  await nextTick();
+  searchInput.value?.focus();
+  searchInput.value?.select();
+};
+
 const onKeydown = (event: KeyboardEvent) => {
+  // Ctrl/Cmd+K: search.
+  if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'k' && state.isAuthenticated) {
+    event.preventDefault();
+    void focusSearch();
+    return;
+  }
+  // Escape closes the mobile drawer.
   if (event.key === 'Escape' && state.isSidebarOpen) closeSidebarDrawer();
 };
 onMounted(() => document.addEventListener('keydown', onKeydown));
@@ -104,9 +135,27 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown));
             <AppIcon name="newChat" class="sidebar-icon" />
             <span>{{ locale.sidebar.newChat }}</span>
           </button>
+          <div class="sidebar-search" role="search">
+            <AppIcon name="search" class="sidebar-search__icon" />
+            <input
+              ref="searchInput"
+              v-model="query"
+              class="sidebar-search__input"
+              type="search"
+              enterkeyhint="search"
+              autocomplete="off"
+              :placeholder="locale.sidebar.search"
+              :aria-label="locale.sidebar.search"
+              aria-keyshortcuts="Control+K Meta+K"
+              @keydown="onSearchKeydown"
+            />
+            <kbd v-if="!query && isDesktop" class="sidebar-search__kbd">{{ isMac ? '⌘K' : locale.sidebar.searchShortcut }}</kbd>
+          </div>
         </div>
 
         <div class="sidebar-scroll">
+          <SearchResults v-if="searching" :query="query" />
+          <template v-else>
           <p v-if="groups.length === 0" class="sidebar-empty">{{ locale.sidebar.empty }}</p>
           <section v-for="group in groups" :key="group.key" class="sidebar-group">
             <h2 class="sidebar-heading">{{ locale.sidebar.groups[group.key] }}</h2>
@@ -163,6 +212,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown));
               </template>
             </ul>
           </section>
+          </template>
         </div>
 
         <nav class="sidebar-apps" :aria-label="locale.sidebar.applications">
