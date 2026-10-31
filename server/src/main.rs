@@ -114,7 +114,14 @@ async fn auth_unless_bearer(req: Request, next: Next) -> Response {
     if req.headers().contains_key(header::AUTHORIZATION) {
         return next.run(req).await;
     }
-    plan_ai_auth::require_auth(req, next).await
+    // The SPA's fetches can't follow a sign-in redirect: they get a 401 and
+    // send the browser to /auth/login themselves.
+    let api = req.uri().path().starts_with("/api/");
+    let res = plan_ai_auth::require_auth(req, next).await;
+    if api && res.status().is_redirection() {
+        return (StatusCode::UNAUTHORIZED, axum::Json(json!({ "error": "unauthorized", "message": "sign in first" }))).into_response();
+    }
+    res
 }
 
 /// A signed-in browser is an API caller too. Impersonation is recorded so

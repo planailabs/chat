@@ -366,7 +366,7 @@ pub fn registry(auth: Arc<dyn plan_ai_api_mcp::Authenticator>) -> Registry<AppSt
             .map_err(internal)?;
             Ok(OK)
         })
-        .delete("Remove a user's extension for a mode.", |app: AppState, p: Arc<Principal>, i: UserMode| async move {
+        .custom("remove", Risk::Destructive, OnItem::No, "Remove a user's extension for a mode.", |app: AppState, p: Arc<Principal>, i: UserMode| async move {
             p.require_admin()?;
             let mode = i.mode.ok_or_else(|| ApiError::bad_request("mode is required"))?;
             sqlx::query("DELETE FROM system_prompt_extensions WHERE user_id = $1 AND mode = $2").bind(i.user_id).bind(mode).execute(&app.pool).await.map_err(internal)?;
