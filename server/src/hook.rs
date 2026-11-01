@@ -127,7 +127,9 @@ async fn validate(app: &AppState, call: &Call, risk: Risk, reason: &str, history
             { "role": "user", "content": prompt },
         ],
         "tools": [verdict_tool("approve", "The call is reasonable."), verdict_tool("reject", "The call is wrong, redundant or dangerous.")],
-        "tool_choice": "required",
+        // "auto", not "required": thinking-mode models (deepseek) refuse a
+        // forced tool choice. No verdict call is an error: the user decides.
+        "tool_choice": "auto",
     });
     let mut req = app.http.post(format!("{}/chat/completions", url.trim_end_matches('/'))).json(&body);
     if let Some(key) = &a.validator_api_key {
