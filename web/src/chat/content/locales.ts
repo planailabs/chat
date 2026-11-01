@@ -91,6 +91,8 @@ export interface LocaleContent {
     tool: {
       /** Before the assistant's reason: "Why: …" */
       why: string;
+      /** Before the tool's own name, shown when a run is expanded. */
+      call: string;
       safetyCheck: string;
       verdicts: { approved: string; rejected: string; failed: string };
       decisions: { denied: string; asked: string };
@@ -242,6 +244,7 @@ const en: LocaleContent = {
     },
     tool: {
       why: 'Why:',
+      call: 'Tool:',
       safetyCheck: 'Safety check',
       verdicts: { approved: 'approved', rejected: 'rejected', failed: 'couldn’t run' },
       decisions: { denied: 'denied', asked: 'asked you' },
@@ -395,6 +398,7 @@ const de: LocaleContent = {
     },
     tool: {
       why: 'Warum:',
+      call: 'Werkzeug:',
       safetyCheck: 'Sicherheitsprüfung',
       verdicts: { approved: 'bestanden', rejected: 'abgelehnt', failed: 'nicht möglich' },
       decisions: { denied: 'blockiert', asked: 'bei dir nachgefragt' },

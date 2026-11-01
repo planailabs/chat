@@ -117,13 +117,15 @@ onBeforeUnmount(() => highlightTimer && clearTimeout(highlightTimer));
         <div class="tool-running max-w-[min(100%,640px)] text-xs text-(--text-muted)">
           <div class="flex items-center gap-2">
             <span class="inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-(--text-muted) border-t-transparent" />
-            <span v-if="chat.toolName" class="tool-run__name">{{ chat.toolName }}</span>
+            <details v-if="chat.toolReason" class="tool-running__why min-w-0">
+              <summary class="tool-run__title">{{ chat.toolReason }}</summary>
+              <p v-if="chat.toolName" class="tool-run__body">
+                <span class="tool-run__label">{{ locale.chat.tool.call }}</span> <span class="tool-run__name">{{ chat.toolName }}</span>
+              </p>
+            </details>
+            <span v-else-if="chat.toolName" class="tool-run__name">{{ chat.toolName }}</span>
             <span v-else>{{ locale.chat.workingLabel }}</span>
           </div>
-          <details v-if="chat.toolReason" class="tool-running__why">
-            <summary class="tool-run__why">{{ locale.chat.tool.why }} {{ chat.toolReason }}</summary>
-            <p class="tool-run__body">{{ chat.toolReason }}</p>
-          </details>
         </div>
       </div>
 

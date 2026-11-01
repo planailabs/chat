@@ -1361,7 +1361,7 @@ html.is-first-visit #app {
 
   .tool-run__head {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     align-items: center;
     gap: 0.5rem;
   }
@@ -1373,24 +1373,23 @@ html.is-first-visit #app {
     font-weight: 600;
   }
 
-  .tool-run__failed {
-    color: var(--accent-danger);
-  }
-
-  .tool-run__why {
-    display: block;
+  /* The reason as the run's title: one line until expanded. */
+  .tool-run__title {
+    min-width: 0;
+    flex: 0 1 auto;
+    color: var(--text-primary);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  details[open] > summary .tool-run__why,
-  details[open] > summary.tool-run__why {
-    display: none;
+  details[open] > summary .tool-run__title,
+  details[open] > summary.tool-run__title {
+    white-space: normal;
   }
 
-  details[open] > summary.tool-run__why + .tool-run__body {
-    margin-top: 0;
+  .tool-run__failed {
+    color: var(--accent-danger);
   }
 
   .tool-running__why > summary {
