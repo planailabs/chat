@@ -56,6 +56,8 @@ export interface ToolRun {
   name: string;
   isError: boolean;
   reason: string | null;
+  /** A connector call's real target (`service.tool`), for its icon. */
+  target: string | null;
   check: SafetyCheck | null;
 }
 
@@ -112,6 +114,8 @@ export interface ChatSession {
   toolName?: string;
   /** Why the assistant runs it. */
   toolReason?: string | null;
+  /** The running connector call's target, for its icon. */
+  toolTarget?: string | null;
   /** Shown as working only because the conversation list said so (until its history or an event says otherwise). */
   assumedWorking?: boolean;
 }

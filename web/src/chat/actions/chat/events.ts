@@ -139,11 +139,12 @@ export const handleServerEvent = <E extends ChatEventName>(type: E, data: ChatEv
     }
 
     case 'tool_start': {
-      const { name, reason } = data as ChatEvents['tool_start'];
+      const { name, reason, target } = data as ChatEvents['tool_start'];
       if (awaitsUser(mc)) break;
       transition(mc, 'tool');
       mc.toolName = name;
       mc.toolReason = reason?.trim() || null;
+      mc.toolTarget = target?.trim() || null;
       break;
     }
 

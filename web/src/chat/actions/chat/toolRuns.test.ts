@@ -12,6 +12,7 @@ describe('tool runs', () => {
       name: 'run_command',
       isError: false,
       reason: 'Why not',
+      target: null,
       check: { agent_reason: null, decision: 'allowed', verdict: 'approved', reasoning: 'ok' },
     });
   });

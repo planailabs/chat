@@ -1373,6 +1373,13 @@ html.is-first-visit #app {
     font-weight: 600;
   }
 
+  .tool-run__icon {
+    width: 0.95rem;
+    height: 0.95rem;
+    flex-shrink: 0;
+    color: var(--text-muted);
+  }
+
   /* The reason as the run's title: one line until expanded. */
   .tool-run__title {
     min-width: 0;

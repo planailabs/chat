@@ -105,6 +105,8 @@ export const transition = (mc: ChatSession, phase: ChatPhase) => {
         mc.phase = 'waiting';
         mc.toolName = undefined;
         mc.toolReason = undefined;
+  mc.toolTarget = undefined;
+        mc.toolTarget = undefined;
         store.notify();
       }
     }, TOOL_TRANSITION_DELAY_MS);

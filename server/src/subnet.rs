@@ -86,6 +86,8 @@ struct Turn {
     args: HashMap<String, String>,
     /// call_id → the assistant's `_reason` for it, once the call is complete.
     reasons: HashMap<String, String>,
+    /// call_id → `service.tool` for a connector call (what it really calls).
+    targets: HashMap<String, String>,
     /// Client-tool calls waiting for (or answered by) the user.
     questions: std::collections::HashSet<String>,
     /// The model call's usage: each delta's replaces the last; counted at llm_done.
@@ -253,12 +255,17 @@ impl Pump {
                 }
                 for (id, args) in std::mem::take(&mut turn.args) {
                     if let Some(reason) = call_reason(&args) {
-                        turn.reasons.insert(id, reason);
+                        turn.reasons.insert(id.clone(), reason);
+                    }
+                    if turn.calls.get(&id).is_some_and(|n| n == "connector.call_tool")
+                        && let Ok(v) = serde_json::from_str::<Value>(&args)
+                    {
+                        turn.targets.insert(id, crate::hook::effective("connector.call_tool", &v).name);
                     }
                 }
                 let pending: Vec<(String, String)> = turn.calls.iter().map(|(id, name)| (id.clone(), name.clone())).collect();
                 for (id, name) in &pending {
-                    self.emit(user, conv, "tool_start", json!({ "name": name, "call_id": id, "reason": turn.reasons.get(id) }));
+                    self.emit(user, conv, "tool_start", json!({ "name": name, "call_id": id, "reason": turn.reasons.get(id), "target": turn.targets.get(id) }));
                 }
                 if pending.is_empty() {
                     turn.thinking = false;
@@ -272,8 +279,9 @@ impl Pump {
                     self.mirror(agent, seq, user, "answer", content, Some(json!({ "call_id": call, "is_error": ev["is_error"] }))).await?;
                 } else if let Some(name) = turn.calls.remove(call) {
                     let reason = turn.reasons.remove(call);
+                    let target = turn.targets.remove(call);
                     let check = self.check(agent, call).await?;
-                    let data = json!({ "call_id": call, "is_error": ev["is_error"], "reason": reason, "check": check });
+                    let data = json!({ "call_id": call, "is_error": ev["is_error"], "reason": reason, "target": target, "check": check });
                     self.mirror(agent, seq, user, "tool", &name, Some(data.clone())).await?;
                     let mut end = data;
                     end["name"] = json!(name);

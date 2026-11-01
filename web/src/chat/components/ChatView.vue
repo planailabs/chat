@@ -16,6 +16,8 @@ import PurchaseCard from './chat/PurchaseCard.vue';
 import LoginInvite from './chat/LoginInvite.vue';
 import ChatComposer from './chat/ChatComposer.vue';
 import ErrorBoundary from './ErrorBoundary.vue';
+import AppIcon from './AppIcon.vue';
+import { toolIcon } from '../ui/toolIcons';
 
 const chat = computed(() => store.state.chat);
 const isEmpty = computed(() => !chat.value || chat.value.messages.length === 0);
@@ -116,14 +118,15 @@ onBeforeUnmount(() => highlightTimer && clearTimeout(highlightTimer));
       <div v-if="chat.phase === 'tool'" class="flex justify-start">
         <div class="tool-running max-w-[min(100%,640px)] text-xs text-(--text-muted)">
           <div class="flex items-center gap-2">
+            <AppIcon v-if="chat.toolName" :name="toolIcon(chat.toolTarget ?? chat.toolName)" class="tool-run__icon" />
             <span class="inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-(--text-muted) border-t-transparent" />
             <details v-if="chat.toolReason" class="tool-running__why min-w-0">
               <summary class="tool-run__title">{{ chat.toolReason }}</summary>
               <p v-if="chat.toolName" class="tool-run__body">
-                <span class="tool-run__label">{{ locale.chat.tool.call }}</span> <span class="tool-run__name">{{ chat.toolName }}</span>
+                <span class="tool-run__label">{{ locale.chat.tool.call }}</span> <span class="tool-run__name">{{ chat.toolTarget ?? chat.toolName }}</span>
               </p>
             </details>
-            <span v-else-if="chat.toolName" class="tool-run__name">{{ chat.toolName }}</span>
+            <span v-else-if="chat.toolName" class="tool-run__name">{{ chat.toolTarget ?? chat.toolName }}</span>
             <span v-else>{{ locale.chat.workingLabel }}</span>
           </div>
         </div>

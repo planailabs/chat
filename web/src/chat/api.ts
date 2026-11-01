@@ -163,6 +163,8 @@ export interface SafetyCheck {
 export interface ToolData extends AnswerData {
   /** Why the assistant made the call. */
   reason?: string | null;
+  /** A connector call's real target, `service.tool`. */
+  target?: string | null;
   check?: SafetyCheck | null;
 }
 
@@ -238,7 +240,7 @@ export interface ChatEvents {
   thinking: Empty;
   text_delta: { content: string };
   text_done: { content: string };
-  tool_start: { name: string; call_id?: string; reason?: string | null };
+  tool_start: { name: string; call_id?: string; reason?: string | null; target?: string | null };
   tool_end: { name: string } & Partial<ToolData>;
   question: QuestionData;
   approval: ApprovalData;

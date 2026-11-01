@@ -26,6 +26,7 @@ export const toolRunOf = (name: string, data: Partial<ToolData>): ToolRun => {
     name,
     isError: data.is_error === true,
     reason: text(data.reason) ?? text(check?.agent_reason),
+    target: text(data.target),
     check,
   };
 };
