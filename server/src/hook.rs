@@ -275,7 +275,8 @@ pub async fn pre_tool(State(app): State<AppState>, headers: HeaderMap, Json(h): 
         Err(e) => {
             // The user still decides; they're told the check didn't run.
             tracing::warn!("validator failed for {}: {e:#}", call.name);
-            let why = format!("The safety check couldn't run ({e}); please review this call.");
+            // Short for the user; the details go with the check.
+            let why = "The safety check couldn't run; please review this call.".to_string();
             return Ok(rec.answer(&app, "ask", Some(("failed", &e.to_string())), why).await);
         }
     };
