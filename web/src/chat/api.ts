@@ -175,6 +175,21 @@ export interface ApprovalData {
   /** Why the assistant wants to make the call. */
   agent_reason?: string | null;
   check?: SafetyCheck | null;
+  /** Set when the call buys something: confirmed with `confirm_purchase`. */
+  purchase?: Purchase | null;
+}
+
+/** What an approval would buy (shown as a "Confirm purchase" card). */
+export interface Purchase {
+  tool: string;
+  product: string;
+  product_name: string;
+  organization_name: string;
+  price_cents: number;
+  currency: string;
+  interval: 'month' | 'year' | 'once' | 'usage';
+  trial_days?: number | null;
+  summary: string;
 }
 
 export type HistoryMessage =
@@ -323,7 +338,8 @@ export const api = {
     /** `content` absent: the user dismissed the question. */
     answer: (id: string, callId: string, content?: string) =>
       request<Ok>('POST', '/api/v1/chat/answer', content === undefined ? { id, call_id: callId } : { id, call_id: callId, content }),
-    approve: (id: string, callId: string, approved: boolean, options: { all?: boolean; reason?: string } = {}) =>
+    /** `confirm_purchase`: the user confirmed a purchase (its card's checkbox). */
+    approve: (id: string, callId: string, approved: boolean, options: { all?: boolean; reason?: string; confirm_purchase?: boolean } = {}) =>
       request<Ok>('POST', '/api/v1/chat/approve', { id, call_id: callId, approved, ...options }),
     /** Full text over the user's own titles and messages, best first (at most 50). */
     search: (q: string) => request<SearchHit[]>('POST', '/api/v1/chat/search', { q }),

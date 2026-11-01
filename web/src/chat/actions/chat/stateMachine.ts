@@ -321,8 +321,9 @@ export const decideApproval = async (callId: string, action: ApprovalAction) => 
   if (!approval || !id) return;
 
   const approved = action !== 'deny';
-  // "Approve all" also covers the other calls waiting right now.
-  const decided = action === 'approve_all' ? mc.approvals : [approval];
+  // "Approve all" also covers the other calls waiting right now, but never a
+  // purchase: each one needs its own confirmation.
+  const decided = action === 'approve_all' ? mc.approvals.filter((a) => a === approval || !a.purchase) : [approval];
   mc.approvals = mc.approvals.filter((a) => !decided.includes(a));
   for (const a of decided) {
     mc.messages.push({ role: 'approval', ...a, decision: approved ? 'approved' : 'denied' });
@@ -336,7 +337,8 @@ export const decideApproval = async (callId: string, action: ApprovalAction) => 
   await connectEvents();
   try {
     for (const a of decided) {
-      await api.chat.approve(id, a.callId, approved, a === approval && action === 'approve_all' ? { all: true } : {});
+      const options = a.purchase ? (approved ? { confirm_purchase: true } : {}) : a === approval && action === 'approve_all' ? { all: true } : {};
+      await api.chat.approve(id, a.callId, approved, options);
     }
   } catch (error) {
     showChatError(error, mc);

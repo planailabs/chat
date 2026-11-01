@@ -3,7 +3,7 @@
  * the safety check where one ran) and the check's badge text.
  */
 
-import type { ApprovalData, SafetyCheck, ToolData } from '../../api';
+import type { ApprovalData, Purchase, SafetyCheck, ToolData } from '../../api';
 import type { PendingApproval, ToolRun } from '../../app/state';
 import type { LocaleContent } from '../../content';
 
@@ -30,6 +30,32 @@ export const toolRunOf = (name: string, data: Partial<ToolData>): ToolRun => {
   };
 };
 
+const INTERVALS = ['month', 'year', 'once', 'usage'] as const;
+
+/**
+ * A purchase as the server sent it. Any object counts (missing fields read
+ * as unknown): a call that buys something must never fall back to the plain
+ * approval card.
+ */
+export const purchaseOf = (v: unknown): Purchase | null => {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+  const p = v as Record<string, unknown>;
+  const s = (k: string) => (typeof p[k] === 'string' ? (p[k] as string).trim() : '');
+  const cents = typeof p.price_cents === 'number' && Number.isFinite(p.price_cents) ? p.price_cents : NaN;
+  const trial = typeof p.trial_days === 'number' && p.trial_days > 0 ? Math.floor(p.trial_days) : null;
+  return {
+    tool: s('tool'),
+    product: s('product'),
+    product_name: s('product_name') || s('product'),
+    organization_name: s('organization_name'),
+    price_cents: cents,
+    currency: s('currency').toUpperCase(),
+    interval: (INTERVALS as readonly string[]).includes(s('interval')) ? (s('interval') as Purchase['interval']) : 'once',
+    trial_days: trial,
+    summary: s('summary'),
+  };
+};
+
 /** A pending approval (event or history), with the assistant's reason and the check. */
 export const pendingApprovalOf = (a: ApprovalData): PendingApproval => {
   const check = safetyCheckOf(a.check);
@@ -40,6 +66,7 @@ export const pendingApprovalOf = (a: ApprovalData): PendingApproval => {
     reason: text(a.reason),
     agentReason: text(a.agent_reason) ?? text(check?.agent_reason),
     check,
+    purchase: purchaseOf(a.purchase),
   };
 };
 

@@ -13,6 +13,7 @@ const actions = vi.hoisted(() => ({
   renameConversation: vi.fn(),
   openConversation: vi.fn(),
   deleteConversation: vi.fn(),
+  decideApproval: vi.fn(),
 }));
 
 vi.mock('../actions/chat', async (importOriginal) => ({ ...(await importOriginal<object>()), ...actions }));
@@ -24,6 +25,7 @@ import AppSidebar from './AppSidebar.vue';
 import ChatMessages from './chat/ChatMessages.vue';
 import QuestionPrompt from './chat/QuestionPrompt.vue';
 import ChatComposer from './chat/ChatComposer.vue';
+import PurchaseCard from './chat/PurchaseCard.vue';
 
 const now = new Date().toISOString();
 const conv = (id: string, extra: Partial<ConversationItem> = {}): ConversationItem => ({ id, title: `Title ${id}`, created_at: now, updated_at: now, ...extra });
@@ -271,5 +273,54 @@ describe('ErrorBoundary', () => {
     expect(w.find('[role="alert"]').text()).toBe('This part couldn’t be shown. Reload the page to try again.');
     expect(log).toHaveBeenCalled();
     log.mockRestore();
+  });
+});
+
+describe('PurchaseCard', () => {
+  const approval = {
+    callId: 'buy1',
+    name: 'connector.call_tool',
+    input: {},
+    reason: null,
+    purchase: {
+      tool: 'subscription_create',
+      product: 'cloud-pro',
+      product_name: 'Cloud Pro',
+      organization_name: 'clover-inc',
+      price_cents: 4900,
+      currency: 'EUR',
+      interval: 'month' as const,
+      trial_days: 14,
+      summary: 'Upgrades clover-inc to Cloud Pro.',
+    },
+  };
+
+  it('shows what is bought and buys only after the explicit confirmation', async () => {
+    store.state.localeKey = 'en';
+    const w = mount(PurchaseCard, { props: { approval } });
+    expect(w.text()).toContain('Confirm purchase');
+    expect(w.text()).toContain('Cloud Pro');
+    expect(w.text()).toContain('clover-inc');
+    expect(w.text()).toContain('€49.00 / month');
+    expect(w.text()).toContain('Free for the first 14 days');
+    expect(w.text()).toContain('I understand this costs €49.00 / month and want to buy it.');
+    // No "approve all" for purchases.
+    expect(w.findAll('button').map((b) => b.text())).toEqual(['Buy', 'Don’t buy']);
+
+    const buy = w.find('.purchase-card__buy');
+    expect(buy.attributes('disabled')).toBeDefined();
+    await buy.trigger('click');
+    expect(actions.decideApproval).not.toHaveBeenCalled();
+
+    await w.find('input[type="checkbox"]').setValue(true);
+    expect(buy.attributes('disabled')).toBeUndefined();
+    await buy.trigger('click');
+    expect(actions.decideApproval).toHaveBeenCalledWith('buy1', 'approve');
+  });
+
+  it('can be declined without confirming', async () => {
+    const w = mount(PurchaseCard, { props: { approval } });
+    await w.findAll('button')[1].trigger('click');
+    expect(actions.decideApproval).toHaveBeenCalledWith('buy1', 'deny');
   });
 });

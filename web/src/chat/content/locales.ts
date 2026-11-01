@@ -99,6 +99,22 @@ export interface LocaleContent {
       showMore: string;
       showLess: string;
     };
+    purchase: {
+      title: string;
+      product: string;
+      organization: string;
+      price: string;
+      /** `{{price}}` with its interval */
+      prices: { month: string; year: string; once: string; usage: string; unknown: string };
+      /** `{{days}}` */
+      trial: string;
+      /** `{{price}}`: the price with its interval */
+      understand: string;
+      buy: string;
+      deny: string;
+      confirmed: string;
+      declined: string;
+    };
     errors: {
       rateLimited: string;
       /** `{{plan}}`: the plan's name. */
@@ -233,6 +249,19 @@ const en: LocaleContent = {
       noReasoning: 'No reasoning given.',
       showMore: 'Show more',
       showLess: 'Show less',
+    },
+    purchase: {
+      title: 'Confirm purchase',
+      product: 'Product',
+      organization: 'Organization',
+      price: 'Price',
+      prices: { month: '{{price}} / month', year: '{{price}} / year', once: '{{price}} once', usage: '{{price}}, billed by usage', unknown: 'Price unknown' },
+      trial: 'Free for the first {{days}} days; you can cancel before it’s charged.',
+      understand: 'I understand this costs {{price}} and want to buy it.',
+      buy: 'Buy',
+      deny: 'Don’t buy',
+      confirmed: 'Purchase confirmed',
+      declined: 'Purchase declined',
     },
     errors: {
       rateLimited: 'You’ve reached the hourly limit of your plan. Please try again later.',
@@ -373,6 +402,19 @@ const de: LocaleContent = {
       noReasoning: 'Keine Begründung angegeben.',
       showMore: 'Mehr anzeigen',
       showLess: 'Weniger anzeigen',
+    },
+    purchase: {
+      title: 'Kauf bestätigen',
+      product: 'Produkt',
+      organization: 'Organisation',
+      price: 'Preis',
+      prices: { month: '{{price}} / Monat', year: '{{price}} / Jahr', once: '{{price}} einmalig', usage: '{{price}}, nach Nutzung abgerechnet', unknown: 'Preis unbekannt' },
+      trial: 'Die ersten {{days}} Tage kostenlos; du kannst vorher kündigen.',
+      understand: 'Mir ist klar, dass das {{price}} kostet, und ich möchte es kaufen.',
+      buy: 'Kaufen',
+      deny: 'Nicht kaufen',
+      confirmed: 'Kauf bestätigt',
+      declined: 'Kauf abgelehnt',
     },
     errors: {
       rateLimited: 'Du hast das Stundenlimit deines Tarifs erreicht. Bitte versuche es später noch einmal.',

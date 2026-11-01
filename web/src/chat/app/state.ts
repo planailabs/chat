@@ -12,7 +12,7 @@ import { defaultLocale, supportedLocales, type LocaleKey, type StreamConfig } fr
 import { STORAGE_KEYS } from '../constants';
 import type { ConversationItem } from '../actions/chat/conversationList';
 import { createProfileState, type ProfileState } from './profileState';
-import type { Budget, SafetyCheck } from '../api';
+import type { Budget, Purchase, SafetyCheck } from '../api';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Type Definitions
@@ -46,6 +46,8 @@ export interface PendingApproval {
   /** Why the assistant wants to make the call. */
   agentReason?: string | null;
   check?: SafetyCheck | null;
+  /** Set when the call buys something. */
+  purchase?: Purchase | null;
 }
 
 /** A finished tool run: its name, why the assistant made it, and the safety check if one ran. */

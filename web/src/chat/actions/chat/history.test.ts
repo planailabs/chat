@@ -110,9 +110,9 @@ describe('historyToChat', () => {
       en,
     );
     expect(snapshot.messages).toEqual([
-      { role: 'approval', callId: 'a1', name: 'install_app', input: { app: 'Zed' }, reason: null, agentReason: null, check: null, decision: null },
+      { role: 'approval', callId: 'a1', name: 'install_app', input: { app: 'Zed' }, reason: null, agentReason: null, check: null, purchase: null, decision: null },
     ]);
-    expect(snapshot.approvals).toEqual([{ callId: 'a2', name: 'remove_app', input: { app: 'Vim' }, reason: 'Destructive', agentReason: null, check: null }]);
+    expect(snapshot.approvals).toEqual([{ callId: 'a2', name: 'remove_app', input: { app: 'Vim' }, reason: 'Destructive', agentReason: null, check: null, purchase: null }]);
   });
 
   it('carries each tool call\'s reason and safety check', () => {

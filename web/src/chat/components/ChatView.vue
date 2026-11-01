@@ -12,6 +12,7 @@ import ChatMessages from './chat/ChatMessages.vue';
 import QuestionPrompt from './chat/QuestionPrompt.vue';
 import PreferencePrompt from './chat/PreferencePrompt.vue';
 import ApprovalCard from './chat/ApprovalCard.vue';
+import PurchaseCard from './chat/PurchaseCard.vue';
 import LoginInvite from './chat/LoginInvite.vue';
 import ChatComposer from './chat/ChatComposer.vue';
 import ErrorBoundary from './ErrorBoundary.vue';
@@ -136,7 +137,10 @@ onBeforeUnmount(() => highlightTimer && clearTimeout(highlightTimer));
 
         <!-- Approvals stay while a question is answered too (both can wait). -->
         <template v-if="chat.phase === 'approval' || (chat.phase === 'question' && chat.approvals.length > 0)">
-          <ApprovalCard v-for="a in chat.approvals" :key="a.callId" :approval="a" />
+          <template v-for="a in chat.approvals" :key="a.callId">
+            <PurchaseCard v-if="a.purchase" :approval="a" />
+            <ApprovalCard v-else :approval="a" />
+          </template>
         </template>
       </ErrorBoundary>
 

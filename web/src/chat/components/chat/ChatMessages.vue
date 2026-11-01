@@ -6,14 +6,23 @@ import { locale } from '../../app/locale';
 import { renderMarkdown } from '../../utils/markdown';
 import { formatToolArgs } from '../../utils/format';
 import { store } from '../../app/store';
+import type { Purchase } from '../../api';
+import { priceLabel } from '../../utils/price';
 import ToolRun from './ToolRun.vue';
 
 defineProps({ messages: { type: Array as PropType<ChatMessage[]>, required: true } });
 
-const approvalStatus = (decision: 'approved' | 'denied' | null) => {
+const approvalStatus = (decision: 'approved' | 'denied' | null, purchase: boolean) => {
   const labels = locale.value.chat.approval;
-  return decision === 'approved' ? labels.approved : decision === 'denied' ? labels.denied : labels.requested;
+  const bought = locale.value.chat.purchase;
+  if (decision === 'approved') return purchase ? bought.confirmed : labels.approved;
+  if (decision === 'denied') return purchase ? bought.declined : labels.denied;
+  return labels.requested;
 };
+
+/** A purchase's record: product and price instead of the raw arguments. */
+const purchaseText = (purchase: Purchase) =>
+  `${purchase.product_name || purchase.product} · ${priceLabel(purchase, locale.value.chat.purchase.prices, store.state.localeKey)}`;
 </script>
 
 <template>
@@ -22,9 +31,10 @@ const approvalStatus = (decision: 'approved' | 'denied' | null) => {
       <p class="max-w-[min(100%,640px)] text-xs text-(--text-muted)">
         <span class="font-mono font-semibold">{{ msg.name }}</span>
         {{ ' ' }}
-        <span v-if="formatToolArgs(msg.input, 120, false)" class="font-mono break-all opacity-80">{{ formatToolArgs(msg.input, 120, false) }}</span>
+        <span v-if="msg.purchase">{{ purchaseText(msg.purchase) }}</span>
+        <span v-else-if="formatToolArgs(msg.input, 120, false)" class="font-mono break-all opacity-80">{{ formatToolArgs(msg.input, 120, false) }}</span>
         {{ ' ' }}
-        <span class="whitespace-nowrap">· {{ approvalStatus(msg.decision) }}</span>
+        <span class="whitespace-nowrap">· {{ approvalStatus(msg.decision, Boolean(msg.purchase)) }}</span>
       </p>
     </div>
     <ToolRun v-else-if="msg.role === 'tool'" :run="msg" />

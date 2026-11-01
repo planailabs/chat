@@ -31,6 +31,7 @@ describe('tool runs', () => {
       reason: null,
       agentReason: 'because',
       check: null,
+      purchase: null,
     });
   });
 });
