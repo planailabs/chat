@@ -38,6 +38,14 @@ async fn main() -> anyhow::Result<()> {
     mac_mgmt_common::otel::init("plan-ai-chat", "info");
     let cfg = config::load();
     let (app, connector) = state::init(cfg).await?;
+    {
+        let app = app.clone();
+        tokio::spawn(async move {
+            if let Err(e) = chat::upgrade_outdated(&app).await {
+                tracing::error!("upgrading outdated conversation agents: {e:#}");
+            }
+        });
+    }
 
     let auth_layers = if dev_no_auth() {
         tracing::warn!("DEV_ONLY_NO_AUTH=1: no sign-in, every request is dev@localhost (admin)");

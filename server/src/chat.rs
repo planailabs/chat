@@ -118,7 +118,7 @@ pub async fn search_in(app: &App, user: Uuid, q: &str, only: Option<Uuid>, excep
            SELECT c.id, c.title, m.id, m.role,
                   ts_headline('simple', m.content, q.q, $3), m.created_at,
                   ts_rank(to_tsvector('simple', m.content), q.q)
-           FROM q, chat_messages m JOIN conversations c ON c.agent_id = m.agent_id
+           FROM q, chat_messages m JOIN conversations c ON m.agent_id = c.agent_id OR m.agent_id = ANY(c.previous_agents)
            WHERE c.user_id = $1 AND ($4::uuid IS NULL OR c.id = $4) AND ($5::text IS NULL OR c.agent_id <> $5)
              AND m.role IN ('user', 'assistant') AND to_tsvector('simple', m.content) @@ q.q
          ) hits ORDER BY rank DESC, at DESC LIMIT 50",
@@ -144,16 +144,19 @@ pub struct Excerpt {
 /// Messages of the user's conversation `id` said by the user or the
 /// assistant: up to `limit` from its start, or around `message`.
 pub async fn excerpt(app: &App, user: Uuid, id: Uuid, message: Option<i64>, limit: i64) -> Result<(String, Vec<Excerpt>), ApiError> {
-    let (agent, _) = owned(app, user, id).await?;
+    owned(app, user, id).await?;
     let title: String = sqlx::query_scalar("SELECT title FROM conversations WHERE id = $1").bind(id).fetch_one(&app.pool).await.map_err(internal)?;
+    let agents = agents_of(app, id).await?;
     let limit = limit.clamp(1, 50);
     let rows = sqlx::query_as(
-        "SELECT id, role, content, created_at AS at FROM chat_messages
-         WHERE agent_id = $1 AND role IN ('user', 'assistant')
-           AND ($2::bigint IS NULL OR seq >= (SELECT seq FROM chat_messages WHERE id = $2 AND agent_id = $1) - $3 / 2)
-         ORDER BY seq LIMIT $3",
+        "WITH said AS (
+           SELECT id, role, content, created_at, row_number() OVER (ORDER BY id) AS n FROM chat_messages
+           WHERE agent_id = ANY($1) AND role IN ('user', 'assistant'))
+         SELECT id, role, content, created_at AS at FROM said
+         WHERE $2::bigint IS NULL OR n >= (SELECT n FROM said WHERE id = $2) - $3 / 2
+         ORDER BY n LIMIT $3",
     )
-    .bind(&agent)
+    .bind(&agents)
     .bind(message)
     .bind(limit)
     .fetch_all(&app.pool)
@@ -171,6 +174,56 @@ async fn owned(app: &App, user: Uuid, id: Uuid) -> Result<(String, bool), ApiErr
         .await
         .map_err(internal)?
         .ok_or_else(|| ApiError::not_found("no such conversation"))
+}
+
+/// Every agent the conversation has had (older ones first, after upgrades).
+async fn agents_of(app: &App, id: Uuid) -> Result<Vec<String>, ApiError> {
+    sqlx::query_scalar("SELECT previous_agents || agent_id FROM conversations WHERE id = $1").bind(id).fetch_one(&app.pool).await.map_err(internal)
+}
+
+/// The conversation's agent, upgraded first when it runs an outdated version
+/// of its type (after the cluster changed; subnet resumes it only then). The
+/// upgrade copies its history into a new agent, which the conversation
+/// follows from here on.
+async fn live_agent(app: &App, user: Uuid, id: Uuid) -> Result<String, ApiError> {
+    let (agent, _) = owned(app, user, id).await?;
+    let t = app.hub.transcript(&agent).await.map_err(internal)?;
+    if t["outdated"] != true {
+        return Ok(agent);
+    }
+    upgrade(app, user, id, &agent).await
+}
+
+/// At start: upgrades every conversation agent the cluster left outdated, so
+/// conversations waiting mid-turn go on without the user sending again.
+pub async fn upgrade_outdated(app: &App) -> anyhow::Result<()> {
+    let agents = app.hub.call("list_agents", json!({})).await?;
+    let ours: Vec<(Uuid, Uuid, String)> = sqlx::query_as("SELECT user_id, id, agent_id FROM conversations").fetch_all(&app.pool).await?;
+    for a in agents.as_array().into_iter().flatten().filter(|a| a["outdated"] == true && a["phase"] != "cancelled") {
+        let Some((user, id, agent)) = ours.iter().find(|(_, _, ag)| a["id"] == ag.as_str()) else { continue };
+        if let Err(e) = upgrade(app, *user, *id, agent).await {
+            tracing::error!(conversation = %id, agent, "upgrading an outdated agent: {e}");
+        }
+    }
+    Ok(())
+}
+
+async fn upgrade(app: &App, user: Uuid, id: Uuid, agent: &str) -> Result<String, ApiError> {
+    let agent = agent.to_string();
+    let up = app.hub.call("upgrade", json!({ "id": agent })).await.map_err(internal)?;
+    let new = up["id"].as_str().ok_or_else(|| internal(format!("upgrade of {agent} returned no id: {up}")))?.to_string();
+    // Its log up to now is the copied history: mirrored already.
+    let copied = app.hub.transcript(&new).await.map_err(internal)?["seq"].as_i64().unwrap_or(0);
+    sqlx::query("UPDATE conversations SET previous_agents = previous_agents || agent_id, agent_id = $2, mirror_from_seq = $3 WHERE id = $1")
+        .bind(id)
+        .bind(&new)
+        .bind(copied)
+        .execute(&app.pool)
+        .await
+        .map_err(internal)?;
+    app.owners.insert(new.clone(), user, id, copied).await;
+    tracing::info!(conversation = %id, old = agent, new, "upgraded an outdated conversation agent");
+    Ok(new)
 }
 
 /// Rolling-hour budget, checked before each message.
@@ -214,7 +267,7 @@ pub async fn send(app: &App, user: Uuid, id: Option<Uuid>, text: &str, lang: &st
     }
     check_budget(app, user).await?;
     if let Some(id) = id {
-        let (agent, _) = owned(app, user, id).await?;
+        let agent = live_agent(app, user, id).await?;
         let msg = with_context(&format!("Reply in {}.", language_name(lang)), text);
         app.hub.send(&agent, &msg).await.map_err(internal)?;
         sqlx::query("UPDATE conversations SET updated_at = now() WHERE id = $1").bind(id).execute(&app.pool).await.map_err(internal)?;
@@ -224,7 +277,7 @@ pub async fn send(app: &App, user: Uuid, id: Option<Uuid>, text: &str, lang: &st
     let id = Uuid::new_v4();
     let agent = app.hub.spawn(&app.cfg.subnet.agent_type, &prompt, &user.to_string()).await.map_err(internal)?;
     // Owners right away: the spawn's events are already on their way.
-    app.owners.insert(agent.clone(), user, id).await;
+    app.owners.insert(agent.clone(), user, id, 0).await;
     sqlx::query("INSERT INTO conversations (id, user_id, agent_id, title) VALUES ($1,$2,$3,$4)")
         .bind(id)
         .bind(user)
@@ -250,8 +303,9 @@ pub async fn send(app: &App, user: Uuid, id: Option<Uuid>, text: &str, lang: &st
 pub async fn history(app: &App, user: Uuid, id: Uuid) -> Result<Value, ApiError> {
     let (agent, auto_approve) = owned(app, user, id).await?;
     let title: String = sqlx::query_scalar("SELECT title FROM conversations WHERE id = $1").bind(id).fetch_one(&app.pool).await.map_err(internal)?;
+    let agents = agents_of(app, id).await?;
     let rows: Vec<(i64, String, String, Option<Value>, chrono::DateTime<chrono::Utc>)> =
-        sqlx::query_as("SELECT id, role, content, data, created_at FROM chat_messages WHERE agent_id = $1 ORDER BY seq").bind(&agent).fetch_all(&app.pool).await.map_err(internal)?;
+        sqlx::query_as("SELECT id, role, content, data, created_at FROM chat_messages WHERE agent_id = ANY($1) ORDER BY id").bind(&agents).fetch_all(&app.pool).await.map_err(internal)?;
     let messages: Vec<Value> =
         rows.into_iter().map(|(id, role, content, data, at)| json!({ "id": id, "role": role, "content": content, "data": data, "at": at })).collect();
     // The agent's summary is flattened into its transcript.
@@ -269,7 +323,7 @@ pub async fn history(app: &App, user: Uuid, id: Uuid) -> Result<Value, ApiError>
 
 /// The user's answer to a client tool call (ask_question, prompt_preference).
 pub async fn answer(app: &App, user: Uuid, id: Uuid, call_id: &str, content: Option<&str>) -> Result<(), ApiError> {
-    let (agent, _) = owned(app, user, id).await?;
+    let agent = live_agent(app, user, id).await?;
     let args = match content {
         Some(c) => json!({ "id": agent, "call_id": call_id, "content": c }),
         None => json!({ "id": agent, "call_id": call_id, "content": "The user dismissed this question.", "is_error": true }),
@@ -278,7 +332,7 @@ pub async fn answer(app: &App, user: Uuid, id: Uuid, call_id: &str, content: Opt
 }
 
 pub async fn approve(app: &App, user: Uuid, id: Uuid, call_id: &str, approved: bool, reason: Option<String>, all: bool) -> Result<(), ApiError> {
-    let (agent, _) = owned(app, user, id).await?;
+    let agent = live_agent(app, user, id).await?;
     if all && approved {
         sqlx::query("UPDATE conversations SET auto_approve = true WHERE id = $1").bind(id).execute(&app.pool).await.map_err(internal)?;
     }
@@ -294,6 +348,7 @@ pub async fn rename(app: &App, user: Uuid, id: Uuid, title: &str) -> Result<(), 
 /// Deletes the conversation and its messages; its agent is cancelled.
 pub async fn delete(app: &App, user: Uuid, id: Uuid) -> Result<(), ApiError> {
     let (agent, _) = owned(app, user, id).await?;
+    let agents = agents_of(app, id).await?;
     if let Err(e) = app.hub.call("cancel", json!({ "id": agent })).await {
         // Already gone on the hub is fine; anything else is not.
         if !e.to_string().contains("404") {
@@ -301,7 +356,7 @@ pub async fn delete(app: &App, user: Uuid, id: Uuid) -> Result<(), ApiError> {
         }
     }
     let mut tx = app.pool.begin().await.map_err(internal)?;
-    sqlx::query("DELETE FROM chat_messages WHERE agent_id = $1").bind(&agent).execute(&mut *tx).await.map_err(internal)?;
+    sqlx::query("DELETE FROM chat_messages WHERE agent_id = ANY($1)").bind(&agents).execute(&mut *tx).await.map_err(internal)?;
     sqlx::query("DELETE FROM conversations WHERE id = $1").bind(id).execute(&mut *tx).await.map_err(internal)?;
     tx.commit().await.map_err(internal)
 }

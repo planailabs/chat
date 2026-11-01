@@ -56,19 +56,20 @@ pub struct BrowserEvent {
     pub data: Value,
 }
 
-/// Our agents: id → (user, conversation). Loaded at start, extended on spawn.
+/// Our agents: id → (user, conversation, seq up to which its log is history
+/// copied by an upgrade). Loaded at start, extended on spawn and upgrade.
 #[derive(Clone, Default)]
-pub struct Owners(Arc<RwLock<HashMap<String, (Uuid, Uuid)>>>);
+pub struct Owners(Arc<RwLock<HashMap<String, (Uuid, Uuid, i64)>>>);
 
 impl Owners {
     pub async fn load(pool: &PgPool) -> anyhow::Result<Self> {
-        let rows: Vec<(String, Uuid, Uuid)> = sqlx::query_as("SELECT agent_id, user_id, id FROM conversations").fetch_all(pool).await?;
-        Ok(Self(Arc::new(RwLock::new(rows.into_iter().map(|(a, u, c)| (a, (u, c))).collect()))))
+        let rows: Vec<(String, Uuid, Uuid, i64)> = sqlx::query_as("SELECT agent_id, user_id, id, mirror_from_seq FROM conversations").fetch_all(pool).await?;
+        Ok(Self(Arc::new(RwLock::new(rows.into_iter().map(|(a, u, c, f)| (a, (u, c, f))).collect()))))
     }
-    pub async fn insert(&self, agent: String, user: Uuid, conversation: Uuid) {
-        self.0.write().await.insert(agent, (user, conversation));
+    pub async fn insert(&self, agent: String, user: Uuid, conversation: Uuid, copied_upto: i64) {
+        self.0.write().await.insert(agent, (user, conversation, copied_upto));
     }
-    async fn get(&self, agent: &str) -> Option<(Uuid, Uuid)> {
+    async fn get(&self, agent: &str) -> Option<(Uuid, Uuid, i64)> {
         self.0.read().await.get(agent).cloned()
     }
 }
@@ -133,8 +134,11 @@ impl Pump {
                 continue;
             }
             let agent = notice["agent"].as_str().unwrap_or_default().to_string();
-            let Some((user, conv)) = self.owners.get(&agent).await else { continue };
+            let Some((user, conv, copied_upto)) = self.owners.get(&agent).await else { continue };
             let seq = notice["seq"].as_i64().unwrap_or_default();
+            if seq <= copied_upto {
+                continue;
+            }
             let turn = turns.entry(agent.clone()).or_default();
             if let Err(e) = self.apply(&agent, seq, user, conv, &notice["event"], turn).await {
                 tracing::error!(agent, seq, "mirroring subnet event: {e:#}");

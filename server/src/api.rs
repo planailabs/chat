@@ -412,7 +412,7 @@ pub fn registry(auth: Arc<dyn plan_ai_api_mcp::Authenticator>) -> Registry<AppSt
         sqlx::query_as(
             "SELECT m.id, m.user_id, u.email, c.title AS conversation, m.role, m.content, m.created_at
              FROM chat_messages m JOIN accounts.users u ON u.id = m.user_id
-             LEFT JOIN conversations c ON c.agent_id = m.agent_id ORDER BY m.id DESC LIMIT $1",
+             LEFT JOIN conversations c ON m.agent_id = c.agent_id OR m.agent_id = ANY(c.previous_agents) ORDER BY m.id DESC LIMIT $1",
         )
         .bind(f.limit.clamp(1, 1000))
         .fetch_all(&app.pool)
