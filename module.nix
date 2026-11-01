@@ -78,7 +78,7 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    services.plan-ai-chat.settings.database.url = lib.mkIf cfg.createDatabase (lib.mkDefault "postgres:///plan-ai-chat?host=/run/postgresql");
+    services.plan-ai-chat.settings.database.url = lib.mkIf cfg.createDatabase (lib.mkDefault "postgres://plan-ai-chat@localhost/plan-ai-chat?host=/run/postgresql");
 
     services.plan-ai-chat.settings.subnet.url = lib.mkIf cfg.hub.enable (lib.mkDefault "http://${cfg.hub.listen}");
 
@@ -100,7 +100,7 @@ in
       after = [ "network.target" "postgresql.service" "plan-ai-chat.service" ];
       requires = [ "postgresql.service" ];
       environment = {
-        DATABASE_URL = "postgres:///plan-ai-chat-subnet?host=/run/postgresql";
+        DATABASE_URL = "postgres://plan-ai-chat-subnet@localhost/plan-ai-chat-subnet?host=/run/postgresql";
         SUBNET_LISTEN = cfg.hub.listen;
         SUBNET_ADMIN_TOKEN = cfg.settings.subnet.token;
         CHAT_CALLBACK_SECRET = cfg.settings.subnet.callback_secret;
