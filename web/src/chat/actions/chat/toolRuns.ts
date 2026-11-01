@@ -27,7 +27,8 @@ export const toolRunOf = (name: string, data: Partial<ToolData>): ToolRun => {
     isError: data.is_error === true,
     reason: text(data.reason) ?? text(check?.agent_reason),
     target: text(data.target),
-    check,
+    // Allowed with no verdict: no check ran (read-only, allow-listed, "approve all") — nothing to show.
+    check: check && (check.verdict !== null || check.decision !== 'allowed') ? check : null,
   };
 };
 

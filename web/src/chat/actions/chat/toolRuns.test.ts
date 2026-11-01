@@ -37,6 +37,15 @@ describe('tool runs', () => {
   });
 });
 
+describe('a run allowed without a verdict', () => {
+  it('shows no safety check (none ran), but keeps the reason it carried', () => {
+    const run = toolRunOf('x', { check: { decision: 'allowed', verdict: null, agent_reason: 'read it' } });
+    expect(run.check).toBeNull();
+    expect(run.reason).toBe('read it');
+    expect(toolRunOf('x', { check: { decision: 'asked', verdict: null } }).check).not.toBeNull();
+  });
+});
+
 describe('checkBadge', () => {
   const check = (decision: 'allowed' | 'denied' | 'asked', verdict: 'approved' | 'rejected' | 'failed' | null) => ({ decision, verdict });
 
