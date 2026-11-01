@@ -7,5 +7,7 @@ import { enforceAdminAccess } from './logic';
 void (async () => {
   if (!(await enforceAdminAccess())) return;
   document.getElementById('dashboard-loading')?.remove();
-  createApp(Dashboard).use(router).mount('#dashboard');
+  const app = createApp(Dashboard);
+  app.config.errorHandler = (error, _instance, info) => console.error('[dashboard] unhandled error', info, error);
+  app.use(router).mount('#dashboard');
 })();

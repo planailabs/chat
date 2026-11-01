@@ -4,9 +4,13 @@
  * conversation waits on (a question, approvals).
  */
 
-import type { History, QuestionData } from '../../api';
+import type { ApprovalData, History, HistoryMessage, QuestionData } from '../../api';
 import type { ChatMessage, ClientPrompt, PendingApproval } from '../../app/state';
 import type { LocaleContent } from '../../content';
+import { pendingApprovalOf, toolRunOf } from './toolRuns';
+
+/** The agent's phase in the history: thinking or running tools is working (no composer). */
+export const isWorkingPhase = (phase: string | null | undefined): boolean => phase === 'thinking' || phase === 'tools';
 
 export interface ChatSnapshot {
   messages: ChatMessage[];
@@ -21,16 +25,34 @@ const questionText = (input: Record<string, unknown>): string | null =>
 const preferenceOf = (input: Record<string, unknown>, locale: LocaleContent) =>
   typeof input.preference_id === 'string' ? locale.preferencePrompts[input.preference_id] : undefined;
 
+// ─── Defensive reading: the server's record must never break the chat ──────
+
+const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/** A list, a single object (as one item), or nothing. */
+const asList = (v: unknown): unknown[] => (Array.isArray(v) ? v : isObject(v) ? [v] : []);
+
+const str = (v: unknown): string => (typeof v === 'string' ? v : '');
+
+/** Pending questions: well-formed ones only (call id and tool name). */
+export const pendingQuestionsOf = (v: unknown): { call_id: string; name: string; input: Record<string, unknown> }[] =>
+  asList(v)
+    .filter(isObject)
+    .filter((q) => str(q.call_id) && str(q.name))
+    .map((q) => ({ call_id: str(q.call_id), name: str(q.name), input: isObject(q.input) ? q.input : {} }));
+
+/** Pending approvals in the approval event's shape; malformed entries are dropped. */
+export const pendingApprovalsOf = (v: unknown): PendingApproval[] =>
+  asList(v)
+    .filter(isObject)
+    .filter((a) => str(a.call_id) && str(a.name))
+    .map((a) => pendingApprovalOf(a as unknown as ApprovalData));
+
 /** A dismissed question shows as the Skip label; an answered one as "question → answer". */
 export const historyToChat = (history: History, locale: LocaleContent): ChatSnapshot => {
-  const pending = history.pending_questions?.[0];
-  const pendingQuestion: ClientPrompt | null = pending ? { callId: pending.call_id, toolName: pending.name, input: pending.input ?? {} } : null;
-  const approvals: PendingApproval[] = (history.pending_approvals ?? []).map((a) => ({
-    callId: a.call_id,
-    name: a.name,
-    input: a.input,
-    reason: a.reason ?? null,
-  }));
+  const pending = pendingQuestionsOf(history.pending_questions)[0];
+  const pendingQuestion: ClientPrompt | null = pending ? { callId: pending.call_id, toolName: pending.name, input: pending.input } : null;
+  const approvals = pendingApprovalsOf(history.pending_approvals);
   const pendingApprovalIds = new Set(approvals.map((a) => a.callId));
 
   const questions = new Map<string, QuestionData>();
@@ -38,11 +60,16 @@ export const historyToChat = (history: History, locale: LocaleContent): ChatSnap
   const asked = new Map<string, Extract<ChatMessage, { role: 'qa' }>>();
   const messages: ChatMessage[] = [];
 
-  for (const m of history.messages) {
+  for (const raw of asList(history.messages)) {
+    if (!isObject(raw)) continue;
+    // Rows missing their data (or with odd fields) are read as empty, never thrown on.
+    const m = { ...raw, content: str(raw.content), data: isObject(raw.data) ? raw.data : {} } as unknown as HistoryMessage;
+    if ((m.role === 'question' || m.role === 'answer' || m.role === 'tool' || m.role === 'approval') && !str(m.data.call_id)) continue;
+    if (m.role === 'approval' && !str(m.data.name)) continue;
     switch (m.role) {
       case 'user':
       case 'assistant':
-        messages.push({ role: m.role, content: m.content, id: m.id });
+        messages.push({ role: m.role, content: m.content, id: typeof m.id === 'number' ? m.id : undefined });
         break;
 
       case 'question': {
@@ -92,19 +119,13 @@ export const historyToChat = (history: History, locale: LocaleContent): ChatSnap
       case 'approval':
         // Pending approvals are shown as cards with buttons.
         if (!pendingApprovalIds.has(m.data.call_id)) {
-          messages.push({
-            role: 'approval',
-            callId: m.data.call_id,
-            name: m.data.name,
-            input: m.data.input,
-            reason: m.data.reason ?? null,
-            decision: null,
-          });
+          messages.push({ role: 'approval', ...pendingApprovalOf(m.data), decision: null });
         }
         break;
 
       case 'tool':
-        // Tool runs aren't part of the visible conversation.
+        // A compact row: the tool, why the assistant ran it, the safety check.
+        messages.push({ role: 'tool', ...toolRunOf(m.content, m.data ?? {}) });
         break;
     }
   }

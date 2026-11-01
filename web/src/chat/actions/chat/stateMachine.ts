@@ -100,10 +100,11 @@ export const transition = (mc: ChatSession, phase: ChatPhase) => {
   if (mc.phase === 'tool' && phase === 'waiting') {
     toolTransitionTimer = setTimeout(() => {
       toolTransitionTimer = null;
-      const cur = store.state.chat;
-      if (cur?.phase === 'tool') {
-        cur.phase = 'waiting';
-        cur.toolName = undefined;
+      // This chat only (another conversation may be on screen by now).
+      if (store.state.chat === mc && mc.phase === 'tool') {
+        mc.phase = 'waiting';
+        mc.toolName = undefined;
+        mc.toolReason = undefined;
         store.notify();
       }
     }, TOOL_TRANSITION_DELAY_MS);
@@ -119,6 +120,7 @@ export const transition = (mc: ChatSession, phase: ChatPhase) => {
   mc.clientPrompt = undefined;
   mc.error = undefined;
   mc.toolName = undefined;
+  mc.toolReason = undefined;
   clearPreferenceTimers();
   clearLoginInviteTimer();
   mc.loginInvite = undefined;
@@ -267,7 +269,7 @@ const submitAnswer = async (content: string | undefined, bubbles: ChatMessage[])
 
   const id = store.state.activeConversationId;
   if (!id) return;
-  transition(mc, 'waiting');
+  transition(mc, mc.approvals.length > 0 ? 'approval' : 'waiting');
   mc.messages.push(...bubbles);
   cacheChatMessages(mc.messages);
   store.notify();
@@ -339,4 +341,12 @@ export const decideApproval = async (callId: string, action: ApprovalAction) => 
   } catch (error) {
     showChatError(error, mc);
   }
+};
+
+/** The composer shows when the assistant isn't working and nothing else waits on the user (a text question uses it too). */
+export const showsComposer = (mc: ChatSession): boolean => {
+  if (mc.phase === 'idle' || mc.phase === 'error') return true;
+  if (mc.phase !== 'question') return false;
+  const prompt = mc.clientPrompt;
+  return prompt?.toolName === 'ask_question' && (prompt.input as { type?: string }).type === 'text';
 };

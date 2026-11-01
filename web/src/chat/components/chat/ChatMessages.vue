@@ -6,6 +6,7 @@ import { locale } from '../../app/locale';
 import { renderMarkdown } from '../../utils/markdown';
 import { formatToolArgs } from '../../utils/format';
 import { store } from '../../app/store';
+import ToolRun from './ToolRun.vue';
 
 defineProps({ messages: { type: Array as PropType<ChatMessage[]>, required: true } });
 
@@ -26,6 +27,7 @@ const approvalStatus = (decision: 'approved' | 'denied' | null) => {
         <span class="whitespace-nowrap">· {{ approvalStatus(msg.decision) }}</span>
       </p>
     </div>
+    <ToolRun v-else-if="msg.role === 'tool'" :run="msg" />
     <div v-else-if="msg.role === 'qa'" class="flex justify-start">
       <p class="chat-qa max-w-[min(100%,640px)] text-sm leading-relaxed text-(--text-muted)">
         <span>{{ msg.question }}</span>

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushPromises, mount } from '@vue/test-utils';
-import { nextTick } from 'vue';
+import { defineComponent, h, nextTick } from 'vue';
+import ErrorBoundary from './ErrorBoundary.vue';
 import { store } from '../app/store';
 import { APPLICATIONS } from '../content/applications';
 import type { ConversationItem } from '../actions/chat/conversationList';
@@ -258,5 +259,17 @@ describe('sidebar search', () => {
     await flushPromises();
     expect(document.activeElement).toBe(w.find('.sidebar-search__input').element);
     w.unmount();
+  });
+});
+
+describe('ErrorBoundary', () => {
+  it('shows an error line instead of a part that fails to render, and logs it', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const Broken = defineComponent({ render: () => { throw new Error('bad data'); } });
+    const w = mount(ErrorBoundary, { props: { resetKey: 'a' }, slots: { default: () => h(Broken) } });
+    await nextTick();
+    expect(w.find('[role="alert"]').text()).toBe('This part couldn’t be shown. Reload the page to try again.');
+    expect(log).toHaveBeenCalled();
+    log.mockRestore();
   });
 });

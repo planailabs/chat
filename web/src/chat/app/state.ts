@@ -12,7 +12,7 @@ import { defaultLocale, supportedLocales, type LocaleKey, type StreamConfig } fr
 import { STORAGE_KEYS } from '../constants';
 import type { ConversationItem } from '../actions/chat/conversationList';
 import { createProfileState, type ProfileState } from './profileState';
-import type { Budget } from '../api';
+import type { Budget, SafetyCheck } from '../api';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Type Definitions
@@ -41,7 +41,20 @@ export interface PendingApproval {
   callId: string;
   name: string;
   input: unknown;
+  /** The approval hook's message to the user. */
   reason: string | null;
+  /** Why the assistant wants to make the call. */
+  agentReason?: string | null;
+  check?: SafetyCheck | null;
+}
+
+/** A finished tool run: its name, why the assistant made it, and the safety check if one ran. */
+export interface ToolRun {
+  callId: string;
+  name: string;
+  isError: boolean;
+  reason: string | null;
+  check: SafetyCheck | null;
 }
 
 export type ChatMessage =
@@ -49,6 +62,7 @@ export type ChatMessage =
   | { role: 'user' | 'assistant' | 'cancel'; content: string; id?: number }
   /** An answered question: the question and the answer (null: dismissed). */
   | { role: 'qa'; question: string; answer: string | null }
+  | ({ role: 'tool' } & ToolRun)
   /** A past approval request; `decision` is known for the ones made here. */
   | ({ role: 'approval'; decision: ApprovalDecision | null } & PendingApproval);
 
@@ -94,6 +108,10 @@ export interface ChatSession {
   loginInvite?: LoginInvite;
   /** Name of the running tool (set during 'tool' phase) */
   toolName?: string;
+  /** Why the assistant runs it. */
+  toolReason?: string | null;
+  /** Shown as working only because the conversation list said so (until its history or an event says otherwise). */
+  assumedWorking?: boolean;
 }
 
 export interface AppState {

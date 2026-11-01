@@ -14,6 +14,7 @@ import PreferencePrompt from './chat/PreferencePrompt.vue';
 import ApprovalCard from './chat/ApprovalCard.vue';
 import LoginInvite from './chat/LoginInvite.vue';
 import ChatComposer from './chat/ChatComposer.vue';
+import ErrorBoundary from './ErrorBoundary.vue';
 
 const chat = computed(() => store.state.chat);
 const isEmpty = computed(() => !chat.value || chat.value.messages.length === 0);
@@ -92,7 +93,9 @@ onBeforeUnmount(() => highlightTimer && clearTimeout(highlightTimer));
         <h1 class="text-3xl font-semibold tracking-tight sm:text-4xl md:text-5xl">{{ locale.chat.heading }}</h1>
       </div>
 
-      <ChatMessages :messages="chat.messages" />
+      <ErrorBoundary :reset-key="store.state.activeConversationId">
+        <ChatMessages :messages="chat.messages" />
+      </ErrorBoundary>
 
       <div v-if="chat.phase === 'streaming' && chat.streamingText" class="flex justify-start">
         <div
@@ -110,9 +113,16 @@ onBeforeUnmount(() => highlightTimer && clearTimeout(highlightTimer));
       </div>
 
       <div v-if="chat.phase === 'tool'" class="flex justify-start">
-        <div class="flex max-w-[min(100%,640px)] items-center gap-2 text-xs text-(--text-muted)">
-          <span class="inline-block h-3 w-3 animate-spin rounded-full border-2 border-(--text-muted) border-t-transparent" />
-          {{ locale.chat.workingLabel }}
+        <div class="tool-running max-w-[min(100%,640px)] text-xs text-(--text-muted)">
+          <div class="flex items-center gap-2">
+            <span class="inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-(--text-muted) border-t-transparent" />
+            <span v-if="chat.toolName" class="tool-run__name">{{ chat.toolName }}</span>
+            <span v-else>{{ locale.chat.workingLabel }}</span>
+          </div>
+          <details v-if="chat.toolReason" class="tool-running__why">
+            <summary class="tool-run__why">{{ locale.chat.tool.why }} {{ chat.toolReason }}</summary>
+            <p class="tool-run__body">{{ chat.toolReason }}</p>
+          </details>
         </div>
       </div>
 
@@ -120,12 +130,15 @@ onBeforeUnmount(() => highlightTimer && clearTimeout(highlightTimer));
         <p class="max-w-[min(100%,640px)] text-base leading-relaxed text-red-500">{{ chat.error }}</p>
       </div>
 
-      <QuestionPrompt v-if="prompt?.toolName === 'ask_question'" :key="prompt.callId" :prompt="prompt" />
-      <PreferencePrompt v-if="prompt?.toolName === 'prompt_preference' && prompt.preference" :prompt="prompt" />
+      <ErrorBoundary :reset-key="`${store.state.activeConversationId}:${prompt?.callId ?? ''}:${chat.approvals.length}`">
+        <QuestionPrompt v-if="prompt?.toolName === 'ask_question'" :key="prompt.callId" :prompt="prompt" />
+        <PreferencePrompt v-if="prompt?.toolName === 'prompt_preference' && prompt.preference" :prompt="prompt" />
 
-      <template v-if="chat.phase === 'approval'">
-        <ApprovalCard v-for="a in chat.approvals" :key="a.callId" :approval="a" />
-      </template>
+        <!-- Approvals stay while a question is answered too (both can wait). -->
+        <template v-if="chat.phase === 'approval' || (chat.phase === 'question' && chat.approvals.length > 0)">
+          <ApprovalCard v-for="a in chat.approvals" :key="a.callId" :approval="a" />
+        </template>
+      </ErrorBoundary>
 
       <LoginInvite v-if="chat.phase === 'login' && chat.loginInvite" :invite="chat.loginInvite" />
 

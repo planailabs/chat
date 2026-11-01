@@ -8,6 +8,7 @@ import { computed, ref, type PropType } from 'vue';
 import type { ChatSession } from '../../app/state';
 import { locale } from '../../app/locale';
 import { sendChatMessage, cancelChatQuestion } from '../../actions/chat';
+import { showsComposer } from '../../actions/chat/stateMachine';
 import AppIcon from '../AppIcon.vue';
 
 const props = defineProps({ chat: { type: Object as PropType<ChatSession>, required: true } });
@@ -17,7 +18,7 @@ const textQuestion = computed(() => {
   const input = prompt?.toolName === 'ask_question' ? (prompt.input as { type?: string; question?: string }) : undefined;
   return input?.type === 'text' ? input : undefined;
 });
-const visible = computed(() => props.chat.phase === 'idle' || props.chat.phase === 'error' || textQuestion.value !== undefined);
+const visible = computed(() => showsComposer(props.chat));
 const placeholder = computed(() => textQuestion.value?.question ?? locale.value.chat.placeholder);
 
 const input = ref<HTMLElement | null>(null);

@@ -10,7 +10,8 @@
 import { store } from '../../app/store';
 import { locales } from '../../content';
 import type { ChatEventName, ChatEvents, ConversationEvent } from '../../api';
-import type { ClientPrompt } from '../../app/state';
+import type { ChatSession, ClientPrompt } from '../../app/state';
+import { pendingApprovalOf, toolRunOf } from './toolRuns';
 import { cacheChatMessages } from './cache';
 import { finishStreamingText, transition } from './stateMachine';
 import { startPreferenceQuestionStream } from './preference';
@@ -94,18 +95,29 @@ export const questionPrompt = (callId: string, toolName: string, input: Record<s
   return prompt;
 };
 
-/** Applies an event of the open conversation to the chat. */
+/** The chat waits on the user (a question or approvals): work events don't replace that UI. */
+const awaitsUser = (mc: ChatSession) => (mc.phase === 'question' && mc.clientPrompt !== undefined) || (mc.phase === 'approval' && mc.approvals.length > 0);
+
+/**
+ * Applies an event of the open conversation to the chat. While the assistant
+ * works (thinking, streaming, a model step's text, tools) the phase is never
+ * idle, so the composer stays hidden until `done`, a question, an approval or
+ * an error.
+ */
 export const handleServerEvent = <E extends ChatEventName>(type: E, data: ChatEvents[E]) => {
   const mc = store.state.chat;
   if (!mc) return;
+  mc.assumedWorking = false;
 
   switch (type) {
     case 'thinking':
-      transition(mc, 'waiting');
+      // From the tool spinner, `transition` keeps it a moment longer.
+      if (!awaitsUser(mc)) transition(mc, 'waiting');
       break;
 
     case 'text_delta': {
       const { content } = data as ChatEvents['text_delta'];
+      if (awaitsUser(mc)) break;
       if (mc.phase !== 'streaming') {
         transition(mc, 'streaming');
       }
@@ -119,20 +131,29 @@ export const handleServerEvent = <E extends ChatEventName>(type: E, data: ChatEv
       mc.streamingText = undefined;
       mc.messages.push({ role: 'assistant', content });
       cacheChatMessages(mc.messages);
-      if (mc.phase === 'streaming') {
+      // More may follow (tools, another step): still working until `done`.
+      if (!awaitsUser(mc) && mc.phase !== 'waiting') {
         transition(mc, 'waiting');
       }
       break;
     }
 
-    case 'tool_start':
+    case 'tool_start': {
+      const { name, reason } = data as ChatEvents['tool_start'];
+      if (awaitsUser(mc)) break;
       transition(mc, 'tool');
-      mc.toolName = (data as ChatEvents['tool_start']).name;
+      mc.toolName = name;
+      mc.toolReason = reason?.trim() || null;
       break;
+    }
 
-    case 'tool_end':
-      transition(mc, 'waiting');
+    case 'tool_end': {
+      const end = data as ChatEvents['tool_end'];
+      mc.messages.push({ role: 'tool', ...toolRunOf(end.name, end) });
+      cacheChatMessages(mc.messages);
+      if (!awaitsUser(mc)) transition(mc, 'waiting');
       break;
+    }
 
     case 'question': {
       const { call_id, toolName, input } = data as ChatEvents['question'];
@@ -148,11 +169,11 @@ export const handleServerEvent = <E extends ChatEventName>(type: E, data: ChatEv
     }
 
     case 'approval': {
-      const { call_id, name, input, reason } = data as ChatEvents['approval'];
+      const approval = pendingApprovalOf(data as ChatEvents['approval']);
       const pending = mc.approvals;
       transition(mc, 'approval');
-      if (!pending.some((a) => a.callId === call_id)) {
-        pending.push({ callId: call_id, name, input, reason: reason ?? null });
+      if (!pending.some((a) => a.callId === approval.callId)) {
+        pending.push(approval);
       }
       mc.approvals = pending;
       break;

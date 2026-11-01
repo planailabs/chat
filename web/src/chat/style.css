@@ -1296,6 +1296,145 @@ html.is-first-visit #app {
     outline: none;
   }
 
+  .ui-error {
+    max-width: min(100%, 640px);
+    color: var(--accent-danger);
+    font-size: 0.875rem;
+  }
+
+  .tool-run {
+    max-width: min(100%, 640px);
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    line-height: 1.4;
+  }
+
+  .tool-run__summary {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    min-width: 0;
+    cursor: pointer;
+    list-style: none;
+  }
+
+  .tool-run__summary::-webkit-details-marker {
+    display: none;
+  }
+
+  p.tool-run__summary {
+    cursor: default;
+  }
+
+  .tool-run__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .tool-run__name {
+    color: var(--text-primary);
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+
+  .tool-run__failed {
+    color: var(--accent-danger);
+  }
+
+  .tool-run__why {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  details[open] > summary .tool-run__why,
+  details[open] > summary.tool-run__why {
+    display: none;
+  }
+
+  details[open] > summary.tool-run__why + .tool-run__body {
+    margin-top: 0;
+  }
+
+  .tool-running__why > summary {
+    cursor: pointer;
+    list-style: none;
+  }
+
+  .tool-running__why > summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .tool-run__body {
+    margin-top: 0.35rem;
+    padding-left: 0.6rem;
+    border-left: 2px solid color-mix(in lab, var(--border-muted) 80%, transparent);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .tool-run__body p + p {
+    margin-top: 0.3rem;
+  }
+
+  .tool-run__label {
+    color: var(--text-primary);
+    font-weight: 600;
+  }
+
+  .safety-badge {
+    display: inline-block;
+    padding: 0 0.45rem;
+    border: 1px solid currentColor;
+    border-radius: 999px;
+    font-size: 0.7rem;
+    line-height: 1.25rem;
+    white-space: nowrap;
+  }
+
+  .safety-badge--ok {
+    color: var(--accent-strong);
+  }
+
+  .safety-badge--warn {
+    color: #d68a00;
+  }
+
+  .safety-badge--bad {
+    color: var(--accent-danger);
+  }
+
+  .approval-field {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .long-text {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .long-text__toggle {
+    margin-left: 0.35rem;
+    color: var(--accent);
+    font-size: 0.8rem;
+    text-decoration: underline;
+  }
+
+  .approval-field__label {
+    color: var(--text-muted);
+    font-size: 0.65rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+  }
+
   .settings-plan__name {
     color: var(--text-primary);
     font-size: 0.875rem;

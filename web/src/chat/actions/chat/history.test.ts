@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { History, HistoryMessage } from '../../api';
+import type { History, HistoryMessage, SafetyCheck } from '../../api';
 import { locales } from '../../content';
 import { historyToChat } from './history';
 
@@ -24,7 +24,7 @@ describe('historyToChat', () => {
     expect(historyToChat(history([]), en)).toEqual({ messages: [], pendingQuestion: null, approvals: [] });
   });
 
-  it('keeps user and assistant messages (with their ids) and hides tool runs', () => {
+  it('keeps user and assistant messages (with their ids) and tool runs as compact rows', () => {
     const [user, tool, assistant] = [
       msg({ role: 'user', content: 'Install git', data: null }),
       msg({ role: 'tool', content: 'run_command', data: { call_id: 'c0', is_error: false } }),
@@ -33,6 +33,7 @@ describe('historyToChat', () => {
     const snapshot = historyToChat(history([user, tool, assistant]), en);
     expect(snapshot.messages).toEqual([
       { role: 'user', content: 'Install git', id: user.id },
+      { role: 'tool', callId: 'c0', name: 'run_command', isError: false, reason: null, check: null },
       { role: 'assistant', content: 'Done.', id: assistant.id },
     ]);
   });
@@ -109,8 +110,28 @@ describe('historyToChat', () => {
       en,
     );
     expect(snapshot.messages).toEqual([
-      { role: 'approval', callId: 'a1', name: 'install_app', input: { app: 'Zed' }, reason: null, decision: null },
+      { role: 'approval', callId: 'a1', name: 'install_app', input: { app: 'Zed' }, reason: null, agentReason: null, check: null, decision: null },
     ]);
-    expect(snapshot.approvals).toEqual([{ callId: 'a2', name: 'remove_app', input: { app: 'Vim' }, reason: 'Destructive' }]);
+    expect(snapshot.approvals).toEqual([{ callId: 'a2', name: 'remove_app', input: { app: 'Vim' }, reason: 'Destructive', agentReason: null, check: null }]);
+  });
+
+  it('carries each tool call\'s reason and safety check', () => {
+    const check: SafetyCheck = { agent_reason: 'Free disk space', decision: 'allowed', verdict: 'approved', reasoning: 'Matches the reason.' };
+    const snapshot = historyToChat(
+      history(
+        [
+          msg({ role: 'tool', content: 'run_command', data: { call_id: 't1', is_error: false, reason: 'List big files', check } }),
+          msg({ role: 'tool', content: 'read_file', data: { call_id: 't2', is_error: true, check: { ...check, decision: 'denied', verdict: 'rejected' } } }),
+        ],
+        { pending_approvals: [{ call_id: 'a3', name: 'delete_files', input: {}, reason: 'Needs your OK', agent_reason: 'Free disk space', check: { ...check, decision: 'asked', verdict: 'failed', reasoning: null } }] },
+      ),
+      en,
+    );
+    expect(snapshot.messages).toEqual([
+      { role: 'tool', callId: 't1', name: 'run_command', isError: false, reason: 'List big files', check },
+      // No reason on the row: the check's copy of the agent's reason.
+      { role: 'tool', callId: 't2', name: 'read_file', isError: true, reason: 'Free disk space', check: { ...check, decision: 'denied', verdict: 'rejected' } },
+    ]);
+    expect(snapshot.approvals[0]).toMatchObject({ reason: 'Needs your OK', agentReason: 'Free disk space', check: { decision: 'asked', verdict: 'failed', reasoning: null } });
   });
 });

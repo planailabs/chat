@@ -148,18 +148,40 @@ export interface AnswerData {
   is_error: boolean | null;
 }
 
+/**
+ * The approval hook's judgement of a call on the user's services: what it
+ * decided, and the safety check's verdict (null: none ran) and reasoning.
+ */
+export interface SafetyCheck {
+  agent_reason?: string | null;
+  decision: 'allowed' | 'denied' | 'asked';
+  verdict: 'approved' | 'rejected' | 'failed' | null;
+  reasoning?: string | null;
+}
+
+/** A tool run (history `role: "tool"`, the `tool_end` event). */
+export interface ToolData extends AnswerData {
+  /** Why the assistant made the call. */
+  reason?: string | null;
+  check?: SafetyCheck | null;
+}
+
 export interface ApprovalData {
   call_id: string;
   name: string;
   input: unknown;
+  /** The approval hook's message to the user. */
   reason?: string | null;
+  /** Why the assistant wants to make the call. */
+  agent_reason?: string | null;
+  check?: SafetyCheck | null;
 }
 
 export type HistoryMessage =
   | { id: number; role: 'user' | 'assistant'; content: string; data: null; at: string }
   | { id: number; role: 'question'; content: string; data: QuestionData; at: string }
   | { id: number; role: 'answer'; content: string; data: AnswerData; at: string }
-  | { id: number; role: 'tool'; content: string; data: AnswerData; at: string }
+  | { id: number; role: 'tool'; content: string; data: ToolData; at: string }
   | { id: number; role: 'approval'; content: string; data: ApprovalData; at: string };
 
 export interface PendingQuestion {
@@ -201,8 +223,8 @@ export interface ChatEvents {
   thinking: Empty;
   text_delta: { content: string };
   text_done: { content: string };
-  tool_start: { name: string };
-  tool_end: { name: string };
+  tool_start: { name: string; call_id?: string; reason?: string | null };
+  tool_end: { name: string } & Partial<ToolData>;
   question: QuestionData;
   approval: ApprovalData;
   done: Empty;

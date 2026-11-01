@@ -82,6 +82,22 @@ export interface LocaleContent {
       approved: string;
       denied: string;
       requested: string;
+      /** The assistant's reason, on the approval card. */
+      agentReason: string;
+      /** The approval hook's message. */
+      hookMessage: string;
+      arguments: string;
+    };
+    tool: {
+      /** Before the assistant's reason: "Why: …" */
+      why: string;
+      safetyCheck: string;
+      verdicts: { approved: string; rejected: string; failed: string };
+      decisions: { denied: string; asked: string };
+      failed: string;
+      noReasoning: string;
+      showMore: string;
+      showLess: string;
     };
     errors: {
       rateLimited: string;
@@ -92,6 +108,8 @@ export interface LocaleContent {
       readOnly: string;
       signedOut: string;
       generic: string;
+      /** A part of the page failed to render. */
+      render: string;
     };
   };
   settings: {
@@ -202,6 +220,19 @@ const en: LocaleContent = {
       approved: 'Approved',
       denied: 'Denied',
       requested: 'Approval requested',
+      agentReason: 'Why the assistant wants this',
+      hookMessage: 'Note',
+      arguments: 'Arguments',
+    },
+    tool: {
+      why: 'Why:',
+      safetyCheck: 'Safety check',
+      verdicts: { approved: 'approved', rejected: 'rejected', failed: 'couldn’t run' },
+      decisions: { denied: 'denied', asked: 'asked you' },
+      failed: 'failed',
+      noReasoning: 'No reasoning given.',
+      showMore: 'Show more',
+      showLess: 'Show less',
     },
     errors: {
       rateLimited: 'You’ve reached the hourly limit of your plan. Please try again later.',
@@ -211,6 +242,7 @@ const en: LocaleContent = {
       readOnly: 'Read-only while impersonating.',
       signedOut: 'Your session has expired. Please sign in again.',
       generic: 'Something went wrong. Please try again.',
+      render: 'This part couldn’t be shown. Reload the page to try again.',
     },
   },
   settings: {
@@ -328,6 +360,19 @@ const de: LocaleContent = {
       approved: 'Freigegeben',
       denied: 'Abgelehnt',
       requested: 'Freigabe angefragt',
+      agentReason: 'Warum der Assistent das möchte',
+      hookMessage: 'Hinweis',
+      arguments: 'Argumente',
+    },
+    tool: {
+      why: 'Warum:',
+      safetyCheck: 'Sicherheitsprüfung',
+      verdicts: { approved: 'bestanden', rejected: 'abgelehnt', failed: 'nicht möglich' },
+      decisions: { denied: 'blockiert', asked: 'bei dir nachgefragt' },
+      failed: 'fehlgeschlagen',
+      noReasoning: 'Keine Begründung angegeben.',
+      showMore: 'Mehr anzeigen',
+      showLess: 'Weniger anzeigen',
     },
     errors: {
       rateLimited: 'Du hast das Stundenlimit deines Tarifs erreicht. Bitte versuche es später noch einmal.',
@@ -337,6 +382,7 @@ const de: LocaleContent = {
       readOnly: 'Beim Impersonieren ist nur Lesen möglich.',
       signedOut: 'Deine Sitzung ist abgelaufen. Bitte melde dich erneut an.',
       generic: 'Etwas ist schiefgelaufen. Bitte versuche es noch einmal.',
+      render: 'Dieser Teil konnte nicht angezeigt werden. Lade die Seite neu, um es noch einmal zu versuchen.',
     },
   },
   settings: {

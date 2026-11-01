@@ -25,7 +25,10 @@ router.afterEach((to) => {
 initTheme();
 showCachedChat();
 
-createApp(App).use(router).mount('#app');
+const app = createApp(App);
+// Anything a boundary didn't catch (event handlers, watchers) is logged, not fatal.
+app.config.errorHandler = (error, _instance, info) => console.error('[ui] unhandled error', info, error);
+app.use(router).mount('#app');
 void startSession();
 
 // Fade-in on the first visit in this session, once the first render is done.

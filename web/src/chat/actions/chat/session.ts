@@ -13,7 +13,7 @@ import { ApiError, api, type History } from '../../api';
 import { readCachedChatMessages, readPendingPrompt, cacheChatMessages } from './cache';
 import { connectEvents } from './sse';
 import { questionPrompt } from './events';
-import { historyToChat } from './history';
+import { historyToChat, isWorkingPhase } from './history';
 import { forgetConversation, loadConversations, patchConversation, showCachedConversations } from './conversations';
 import { clearChatTimers, sendChatMessage, transition } from './stateMachine';
 
@@ -71,12 +71,18 @@ const loadHistory = async (id: string): Promise<History | 'gone' | null> => {
 const isLive = (phase: ChatPhase) => phase === 'waiting' || phase === 'streaming' || phase === 'tool';
 
 /** Replaces the chat with the server's record of it. */
-const applyHistory = (history: History) => {
+const applyHistoryUnsafe = (history: History) => {
   const mc = store.state.chat;
   if (!mc) return;
   const snapshot = historyToChat(history, locale());
-  // A turn in progress keeps showing its progress.
-  const busy = isLive(mc.phase) || store.state.conversations.find((c) => c.id === history.id)?.busy === true;
+  // A turn in progress keeps showing its progress: the server's phase says
+  // whether the agent works (the list's flag only when it doesn't say).
+  const working = history.phase ? isWorkingPhase(history.phase) : store.state.conversations.find((c) => c.id === history.id)?.busy === true;
+  // Live: events of this conversation already drive the chat (not just the list's guess).
+  const liveNow = isLive(mc.phase) && !mc.assumedWorking;
+  const busy = liveNow || working;
+  mc.assumedWorking = false;
+  if (history.phase) patchConversation(history.id, { busy: working && !snapshot.pendingQuestion && snapshot.approvals.length === 0 });
 
   clearChatTimers();
   mc.streamingText = undefined;
@@ -89,12 +95,28 @@ const applyHistory = (history: History) => {
   } else if (snapshot.approvals.length > 0) {
     transition(mc, 'approval');
   } else if (busy) {
-    if (!isLive(mc.phase)) transition(mc, 'waiting');
+    // Running tools: the working spinner, as the live tool_start would show it.
+    // (A missed tool_start shows as the spinner too.)
+    if (!liveNow || (mc.phase === 'waiting' && history.phase === 'tools')) transition(mc, history.phase === 'tools' ? 'tool' : 'waiting');
   } else {
     transition(mc, 'idle');
   }
   cacheChatMessages(mc.messages, history.id);
   store.notify();
+};
+
+/** Applies a history; a record it can't read shows an error line instead of breaking the chat. */
+const applyHistory = (history: History) => {
+  try {
+    applyHistoryUnsafe(history);
+  } catch (error) {
+    console.error('[chat] applying the history failed', error, history);
+    const mc = store.state.chat;
+    if (!mc) return;
+    transition(mc, 'error');
+    mc.error = locale().chat.errors.generic;
+    store.notify();
+  }
 };
 
 /** The conversation on screen no longer exists: back to a new chat. */
@@ -142,7 +164,10 @@ export const openConversation = async (id: string | null, nav: HistoryMode = 'pu
     return;
   }
   if (state.conversations.some((c) => c.id === id && c.unread)) patchConversation(id, { unread: false });
-  initChat(readCachedChatMessages(id));
+  // Until its history is back: working if the list says so (no composer flash).
+  const assumedWorking = state.conversations.some((c) => c.id === id && c.busy);
+  initChat(readCachedChatMessages(id), assumedWorking ? 'waiting' : 'idle');
+  if (assumedWorking) store.state.chat!.assumedWorking = true;
   void connectEvents();
 
   const history = await loadHistory(id);
