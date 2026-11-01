@@ -32,7 +32,7 @@ pub enum Risk {
 
 /// plan-ai-api-mcp tools are `<resource>_<action>`.
 // ponytail: risk by name; unknown verbs count as mutating (the user decides).
-// Upgrade: read the target's readOnlyHint/destructiveHint from list_tools.
+// Connector calls prefer the service's own hints (`advertised_risk`).
 pub fn risk_of(tool: &str) -> Risk {
     let action = tool.rsplit(['_', '.']).next().unwrap_or(tool);
     match action {
@@ -40,6 +40,29 @@ pub fn risk_of(tool: &str) -> Risk {
         "delete" | "remove" | "reset" | "destroy" | "purge" => Risk::Destructive,
         _ => Risk::Mutating,
     }
+}
+
+/// What the service itself says about a connector target, from the latest
+/// `connector.list_tools` result in the transcript (`{service, tools:
+/// [{name, annotations}]}`): readOnlyHint → read-only, destructiveHint →
+/// destructive, otherwise mutating. `None`: the agent hasn't listed it.
+pub fn advertised_risk(transcript: &Value, call: &str) -> Option<Risk> {
+    let (service, tool) = call.split_once('.')?;
+    transcript["messages"].as_array()?.iter().rev().filter(|m| m["role"] == "tool").find_map(|m| {
+        let listed: Value = serde_json::from_str(m["content"].as_str()?).ok()?;
+        if listed["service"] != service {
+            return None;
+        }
+        let t = listed["tools"].as_array()?.iter().find(|t| t["name"] == tool)?;
+        let hints = &t["annotations"];
+        Some(if hints["readOnlyHint"] == true {
+            Risk::ReadOnly
+        } else if hints["destructiveHint"] == true {
+            Risk::Destructive
+        } else {
+            Risk::Mutating
+        })
+    })
 }
 
 fn reads(tool: &str) -> bool {
@@ -293,11 +316,13 @@ pub async fn pre_tool(State(app): State<AppState>, headers: HeaderMap, Json(h): 
     }
     let Some((_, auto_approve)) = conversation else { return Ok(decide("deny", "not a chat conversation")) };
 
-    let risk = risk_of(&call.name);
     let transcript = app.hub.transcript(&h.agent.id).await.map_err(|e| {
         tracing::error!("approval hook: transcript of {}: {e:#}", h.agent.id);
         StatusCode::BAD_GATEWAY
     })?;
+    // The service's own annotations when the agent listed its tools (as it's
+    // told to before calling one); the name's verb only otherwise.
+    let risk = if tool == "connector.call_tool" { advertised_risk(&transcript, &call.name) } else { None }.unwrap_or_else(|| risk_of(&call.name));
     let history = past_calls(&transcript, &h.input.call_id);
     if let Some(why) = static_check(&call, risk, &history) {
         return Ok(rec.answer(&app, "deny", None, why).await);
@@ -328,6 +353,29 @@ pub async fn pre_tool(State(app): State<AppState>, headers: HeaderMap, Json(h): 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_listed_tool_is_judged_by_its_annotations() {
+        use super::{Risk, advertised_risk};
+        let listed = |ro: bool, de: bool| {
+            serde_json::json!({ "service": "plan-ai-cloud", "tools": [
+                { "name": "repo_deploy", "annotations": { "readOnlyHint": ro, "destructiveHint": de } },
+            ] })
+            .to_string()
+        };
+        let t = serde_json::json!({ "messages": [
+            { "role": "tool", "content": listed(false, false), "tool_call_id": "a" },
+            { "role": "tool", "content": "not json", "tool_call_id": "b" },
+            { "role": "tool", "content": listed(true, false), "tool_call_id": "c" },
+        ] });
+        // The latest listing counts.
+        assert_eq!(advertised_risk(&t, "plan-ai-cloud.repo_deploy"), Some(Risk::ReadOnly));
+        let t2 = serde_json::json!({ "messages": [{ "role": "tool", "content": listed(false, true) }] });
+        assert_eq!(advertised_risk(&t2, "plan-ai-cloud.repo_deploy"), Some(Risk::Destructive));
+        // Not listed, or another service: the name decides.
+        assert_eq!(advertised_risk(&t, "plan-ai-cloud.repo_set_deploy"), None);
+        assert_eq!(advertised_risk(&t, "mac-mgmt.repo_deploy"), None);
+    }
+
     use super::*;
 
     fn call(name: &str, args: Value) -> Call {
