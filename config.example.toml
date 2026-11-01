@@ -25,6 +25,19 @@ static_dir = "web/dist"
 
 [accounts]
 admin_emails = []
+# Token budgets are plans (free; only admins assign them, per user). These
+# are seeded unless they exist; later edits happen on the admin dashboard.
+default_plan = "standard"
+
+[[accounts.plans]]
+id = "standard"
+name = "Standard"
+limits = { hourly_input_tokens = 1000000, hourly_output_tokens = 200000 }
+
+[[accounts.plans]]
+id = "pro"
+name = "Pro"
+limits = { hourly_input_tokens = 10000000, hourly_output_tokens = 2000000 }   # 0 = unlimited
 
 [subnet]
 url = "http://127.0.0.1:7700"
@@ -39,8 +52,6 @@ agent_type = "chat"               # mixture in subnet/chat.hcl
 # validator_model = "deepseek-flash"
 
 [chat]
-hourly_input_tokens = 100000
-hourly_output_tokens = 20000
 max_chars = 2048
 
 # The assistant reads mac-mgmt's public catalog with this service token.

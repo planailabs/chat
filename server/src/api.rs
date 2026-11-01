@@ -55,6 +55,9 @@ pub struct Profile {
     deletion_requested_at: Option<chrono::DateTime<chrono::Utc>>,
     #[sqlx(skip)]
     impersonating: bool,
+    /// The user's plan and its hourly token budget, with the last hour's use.
+    #[sqlx(skip)]
+    budget: Option<chat::Budget>,
 }
 
 async fn load_profile(app: &AppState, user: Uuid) -> Result<Profile, ApiError> {
@@ -211,6 +214,8 @@ pub struct UserHit {
     name: String,
     /// Has a prompt extension.
     has_extension: bool,
+    /// Their plan (personal team's).
+    plan_id: String,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -228,6 +233,29 @@ pub struct ExtensionInput {
 pub struct Extension {
     content: String,
     updated_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub struct PlanInfo {
+    #[serde(flatten)]
+    plan: plan_ai_accounts::Plan,
+    /// Users on it.
+    users: i64,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct PlanInput {
+    id: String,
+    name: String,
+    /// Tokens per user per rolling hour; 0 = unlimited.
+    hourly_input_tokens: u64,
+    hourly_output_tokens: u64,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct SetPlanInput {
+    user_id: Uuid,
+    plan_id: String,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -282,6 +310,7 @@ pub fn registry(auth: Arc<dyn plan_ai_api_mcp::Authenticator>) -> Registry<AppSt
         .get("Your profile.", |app: AppState, p: Arc<Principal>, _: Empty| async move {
             let mut profile = load_profile(&app, user_of(&p)?).await?;
             profile.impersonating = !p.scopes["impersonating_from"].is_null();
+            profile.budget = Some(chat::budget(&app, profile.user_id).await?);
             Ok(profile)
         })
         .update("Change language, theme or newsletter subscription.", |app: AppState, p: Arc<Principal>, u: ProfileUpdate| async move {
@@ -346,8 +375,9 @@ pub fn registry(auth: Arc<dyn plan_ai_api_mcp::Authenticator>) -> Registry<AppSt
     reg.resource("user", "user", "Users (admin)").list("Search users by email or name.", |app: AppState, p: Arc<Principal>, s: UserSearch| async move {
         p.require_admin()?;
         sqlx::query_as(
-            "SELECT u.id, u.email, u.name, e.user_id IS NOT NULL AS has_extension
+            "SELECT u.id, u.email, u.name, e.user_id IS NOT NULL AS has_extension, t.plan_id
              FROM accounts.users u LEFT JOIN prompt_extensions e ON e.user_id = u.id
+             JOIN accounts.teams t ON t.owner_id = u.id AND t.personal AND t.deleted_at IS NULL
              WHERE u.email ILIKE '%' || $1 || '%' OR u.name ILIKE '%' || $1 || '%'
              ORDER BY u.email LIMIT 20",
         )
@@ -386,6 +416,51 @@ pub fn registry(auth: Arc<dyn plan_ai_api_mcp::Authenticator>) -> Registry<AppSt
             sqlx::query("DELETE FROM prompt_extensions WHERE user_id = $1").bind(i.user_id).execute(&app.pool).await.map_err(internal)?;
             Ok(OK)
         });
+
+    reg.resource("plan", "plan", "Plans: hourly token budgets, assigned to users by admins (no charges)")
+        .list("Every plan with its limits, and how many users are on it.", |app: AppState, p: Arc<Principal>, _: Empty| async move {
+            p.require_admin()?;
+            let plans = app.accounts.plans().await?;
+            let counts: Vec<(String, i64)> = sqlx::query_as("SELECT plan_id, count(*) FROM accounts.teams WHERE personal AND deleted_at IS NULL GROUP BY plan_id")
+                .fetch_all(&app.pool)
+                .await
+                .map_err(internal)?;
+            Ok(plans
+                .into_iter()
+                .map(|plan| {
+                    let users = counts.iter().find(|(id, _)| *id == plan.id).map(|(_, n)| *n).unwrap_or(0);
+                    PlanInfo { users, plan }
+                })
+                .collect::<Vec<_>>())
+        })
+        .custom("put", Risk::Mutating, OnItem::No, "Create or change a plan's name and limits (hourly_input_tokens, hourly_output_tokens; 0 = unlimited). Plans are free: the price stays 0.", |app: AppState, p: Arc<Principal>, i: PlanInput| async move {
+            p.require_admin()?;
+            if i.id.trim().is_empty() || i.name.trim().is_empty() {
+                return Err(ApiError::bad_request("a plan needs an id and a name"));
+            }
+            let plan = plan_ai_accounts::Plan {
+                id: i.id.trim().to_string(),
+                name: i.name.trim().to_string(),
+                price_cents: 0,
+                currency: "EUR".into(),
+                window_days: 30,
+                limits: [
+                    (crate::config::HOURLY_INPUT.to_string(), i.hourly_input_tokens),
+                    (crate::config::HOURLY_OUTPUT.to_string(), i.hourly_output_tokens),
+                ]
+                .into(),
+            };
+            app.accounts.put_plan(&plan).await
+        });
+
+    reg.resource("user", "user", "Users (admin)").custom("set_plan", Risk::Mutating, OnItem::No, "Put a user on a plan (their personal team's).", |app: AppState, p: Arc<Principal>, i: SetPlanInput| async move {
+        p.require_admin()?;
+        let user = app.accounts.user(i.user_id).await?.ok_or_else(|| ApiError::not_found("no such user"))?;
+        let team = app.accounts.personal_team(&user).await?;
+        let by = user_of(&p).unwrap_or(user.id);
+        app.accounts.assign_plan(team.id, &i.plan_id, by).await?;
+        chat::budget(&app, user.id).await
+    });
 
     reg.resource("staff_ping", "staff_ping", "Requests for a human from the assistants (admin)")
         .list("Staff pings, newest first.", |app: AppState, p: Arc<Principal>, f: PingFilter| async move {

@@ -47,7 +47,7 @@ agent "chat-agent" {
   model        = "deepseek-flash"
   nodes        = ["chat"]
   params       = { max_tokens = 2048 }
-  budget       = { max_tokens = 4000000, max_depth = 0, max_children = 0 }
+  budget       = { max_tokens = 40000000, max_depth = 0, max_children = 0 }
   hooks        = ["approval"]
   call_reasons = true
 

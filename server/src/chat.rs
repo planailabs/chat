@@ -226,8 +226,30 @@ async fn upgrade(app: &App, user: Uuid, id: Uuid, agent: &str) -> Result<String,
     Ok(new)
 }
 
-/// Rolling-hour budget, checked before each message.
-async fn check_budget(app: &App, user: Uuid) -> Result<(), ApiError> {
+/// A user's plan (their personal team's) and its rolling-hour token budget.
+#[derive(Serialize, schemars::JsonSchema)]
+pub struct Budget {
+    pub plan_id: String,
+    pub plan_name: String,
+    /// Tokens per rolling hour; 0 = unlimited.
+    pub hourly_input_tokens: u64,
+    pub hourly_output_tokens: u64,
+    /// Used in the last hour.
+    pub used_input_tokens: u64,
+    pub used_output_tokens: u64,
+}
+
+impl Budget {
+    fn exhausted(&self) -> bool {
+        let over = |limit: u64, used: u64| limit > 0 && used >= limit;
+        over(self.hourly_input_tokens, self.used_input_tokens) || over(self.hourly_output_tokens, self.used_output_tokens)
+    }
+}
+
+pub async fn budget(app: &App, user: Uuid) -> Result<Budget, ApiError> {
+    let u = app.accounts.user(user).await?.ok_or_else(|| ApiError::not_found("no such user"))?;
+    let team = app.accounts.personal_team(&u).await?;
+    let plan = app.accounts.plan(&team.plan_id).await?.ok_or_else(|| internal(format!("team {} is on unknown plan {}", team.id, team.plan_id)))?;
     let (input, output): (i64, i64) = sqlx::query_as(
         "SELECT COALESCE(SUM(input_tokens),0)::bigint, COALESCE(SUM(output_tokens),0)::bigint
          FROM chat_token_usage WHERE user_id = $1 AND created_at > now() - interval '1 hour'",
@@ -236,8 +258,21 @@ async fn check_budget(app: &App, user: Uuid) -> Result<(), ApiError> {
     .fetch_one(&app.pool)
     .await
     .map_err(internal)?;
-    if input >= app.cfg.chat.hourly_input_tokens || output >= app.cfg.chat.hourly_output_tokens {
-        return Err(ApiError::payment_required("You've reached the hourly message limit. Please try again later."));
+    let limit = |d: &str| plan.limits.get(d).copied().unwrap_or(0);
+    Ok(Budget {
+        hourly_input_tokens: limit(crate::config::HOURLY_INPUT),
+        hourly_output_tokens: limit(crate::config::HOURLY_OUTPUT),
+        plan_id: plan.id,
+        plan_name: plan.name,
+        used_input_tokens: input as u64,
+        used_output_tokens: output as u64,
+    })
+}
+
+/// Rolling-hour budget of the user's plan, checked before each message.
+async fn check_budget(app: &App, user: Uuid) -> Result<(), ApiError> {
+    if budget(app, user).await?.exhausted() {
+        return Err(ApiError::payment_required("You've reached the hourly message limit of your plan. Please try again later."));
     }
     Ok(())
 }
@@ -377,6 +412,15 @@ mod tests {
         assert_eq!(prefix_query("plan.ai Server!").as_deref(), Some("plan:* & ai:* & server:*"));
         assert_eq!(prefix_query("Größe"), Some("größe:*".into()));
         assert_eq!(prefix_query(" ' & | ! "), None);
+    }
+
+    #[test]
+    fn budgets() {
+        let b = |li, lo, ui, uo| Budget { plan_id: "p".into(), plan_name: "P".into(), hourly_input_tokens: li, hourly_output_tokens: lo, used_input_tokens: ui, used_output_tokens: uo };
+        assert!(!b(100, 10, 99, 9).exhausted());
+        assert!(b(100, 10, 100, 0).exhausted());
+        assert!(b(100, 10, 0, 10).exhausted());
+        assert!(!b(0, 0, 1_000_000_000, 1_000_000_000).exhausted(), "0 = unlimited");
     }
 
     #[test]

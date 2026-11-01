@@ -83,12 +83,46 @@ fn default_static() -> PathBuf {
     PathBuf::from("web").join("dist")
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Accounts {
     #[serde(default)]
     pub admin_emails: Vec<String>,
+    /// The plan users start on (their personal team's).
+    #[serde(default = "default_plan")]
+    pub default_plan: String,
+    /// Plans created at start unless they exist (later edits are admins',
+    /// on the dashboard). No charges: price 0, assigned only by admins.
+    /// Limits: `hourly_input_tokens`, `hourly_output_tokens` (0 = unlimited).
+    #[serde(default = "default_plans")]
+    pub plans: Vec<plan_ai_accounts::Plan>,
 }
+
+impl Default for Accounts {
+    fn default() -> Self {
+        Self { admin_emails: vec![], default_plan: default_plan(), plans: default_plans() }
+    }
+}
+
+fn default_plan() -> String {
+    "standard".into()
+}
+
+fn default_plans() -> Vec<plan_ai_accounts::Plan> {
+    let plan = |id: &str, name: &str, input: u64, output: u64| plan_ai_accounts::Plan {
+        id: id.into(),
+        name: name.into(),
+        price_cents: 0,
+        currency: "EUR".into(),
+        window_days: 30,
+        limits: [(HOURLY_INPUT.to_string(), input), (HOURLY_OUTPUT.to_string(), output)].into(),
+    };
+    vec![plan("standard", "Standard", 1_000_000, 200_000), plan("pro", "Pro", 10_000_000, 2_000_000)]
+}
+
+/// Plan limit dimensions: tokens per user per rolling hour.
+pub const HOURLY_INPUT: &str = "hourly_input_tokens";
+pub const HOURLY_OUTPUT: &str = "hourly_output_tokens";
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -131,28 +165,18 @@ fn default_allow() -> Vec<String> {
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Chat {
-    /// Rolling-hour token budget per user.
-    #[serde(default = "default_input_budget")]
-    pub hourly_input_tokens: i64,
-    #[serde(default = "default_output_budget")]
-    pub hourly_output_tokens: i64,
-    /// Longest user message, in characters.
+    /// Longest user message, in characters. (Token budgets are per plan:
+    /// `[accounts].plans`.)
     #[serde(default = "default_max_chars")]
     pub max_chars: usize,
 }
 
 impl Default for Chat {
     fn default() -> Self {
-        Self { hourly_input_tokens: default_input_budget(), hourly_output_tokens: default_output_budget(), max_chars: default_max_chars() }
+        Self { max_chars: default_max_chars() }
     }
 }
 
-fn default_input_budget() -> i64 {
-    100_000
-}
-fn default_output_budget() -> i64 {
-    20_000
-}
 fn default_max_chars() -> usize {
     2048
 }
