@@ -111,7 +111,7 @@ async fn validate(app: &AppState, call: &Call, risk: Risk, reason: &str, history
     let (Some(url), Some(model)) = (&a.validator_url, &a.validator_model) else { return Ok(None) };
     let recent: String = history.iter().rev().take(10).rev().map(|h| format!("- {}({})\n", h.name, truncate(&h.args.to_string(), 200))).collect();
     let prompt = format!(
-        "Tool: `{}` ({risk:?})\nArgs: {}\nAgent's reason: \"{reason}\"\nRecent calls:\n{}\nDoes this call make sense given the reason and the history? Record your verdict with `approve` or `reject`.",
+        "Tool: `{}` ({risk:?})\nArgs: {}\nAgent's reason: \"{reason}\"\nRecent calls:\n{}\nDoes this call make sense given the reason and the history? Record your verdict with the `approve` or `reject` tool, or start your reply with APPROVE: or REJECT: followed by one sentence why.",
         call.name,
         truncate(&call.args.to_string(), 2000),
         if recent.is_empty() { "(none)\n".into() } else { recent },
@@ -140,13 +140,26 @@ async fn validate(app: &AppState, call: &Call, risk: Risk, reason: &str, history
 }
 
 pub fn parse_verdict(res: &Value) -> anyhow::Result<Verdict> {
-    let call = &res["choices"][0]["message"]["tool_calls"][0]["function"];
+    let msg = &res["choices"][0]["message"];
+    let call = &msg["tool_calls"][0]["function"];
     let reasoning = call["arguments"].as_str().and_then(|a| serde_json::from_str::<Value>(a).ok()).and_then(|a| a["reasoning"].as_str().map(String::from)).unwrap_or_default();
     match call["name"].as_str() {
-        Some("approve") => Ok(Verdict::Approved(reasoning)),
-        Some("reject") => Ok(Verdict::Rejected(reasoning)),
-        _ => anyhow::bail!("validator gave no verdict: {res}"),
+        Some("approve") => return Ok(Verdict::Approved(reasoning)),
+        Some("reject") => return Ok(Verdict::Rejected(reasoning)),
+        _ => {}
     }
+    // Thinking-mode models may answer in prose instead of calling a tool: a
+    // reply that opens with the verdict counts (markdown and case aside).
+    let text = msg["content"].as_str().unwrap_or_default().trim();
+    let opening = text.trim_start_matches(|c: char| !c.is_alphanumeric()).to_ascii_lowercase();
+    let rest = || text.splitn(2, |c: char| c == ':' || c == '.' || c == '\n').nth(1).unwrap_or("").trim().trim_start_matches('*').trim().to_string();
+    if opening.starts_with("approve") {
+        return Ok(Verdict::Approved(rest()));
+    }
+    if opening.starts_with("reject") {
+        return Ok(Verdict::Rejected(rest()));
+    }
+    anyhow::bail!("validator gave no verdict: {res}")
 }
 
 fn truncate(s: &str, max: usize) -> &str {
@@ -325,6 +338,10 @@ mod tests {
         assert_eq!(parse_verdict(&res("approve")).unwrap(), Verdict::Approved("ok".into()));
         assert_eq!(parse_verdict(&res("reject")).unwrap(), Verdict::Rejected("ok".into()));
         assert!(parse_verdict(&json!({})).is_err());
+        let prose = |t: &str| json!({ "choices": [{ "message": { "content": t } }] });
+        assert_eq!(parse_verdict(&prose("**Approve.** It matches the stated intent.")).unwrap(), Verdict::Approved("It matches the stated intent.".into()));
+        assert_eq!(parse_verdict(&prose("REJECT: deletes the wrong item")).unwrap(), Verdict::Rejected("deletes the wrong item".into()));
+        assert!(parse_verdict(&prose("Hmm, hard to say.")).is_err(), "no verdict word: the user decides");
     }
 
     #[test]
