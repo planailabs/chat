@@ -1,7 +1,7 @@
 # The chat's agents on a subagent-net hub. Apply with `subnet apply chat.hcl`
 # (or merge into the hub's cluster). Environment it needs:
 #   hub:   CHAT_CALLBACK_SECRET (the chat server's [subnet].callback_secret)
-#   nodes: CHAT_CALLBACK_SECRET, LITELLM_API_KEY
+#   nodes: CHAT_CALLBACK_SECRET, LITELLM_API_KEY, CONTEXT7_API_KEY, FIRECRAWL_API_KEY
 # CHAT_URL below is where the chat server listens; adjust per deployment.
 
 client "chat" { role = "operator" }   # the chat server: `subnet issue_token client chat`
@@ -26,11 +26,28 @@ mcp "connector" {
   idempotent = ["list_services", "list_tools"]
 }
 
+# Up-to-date library and API docs.
+mcp "context7" {
+  url        = "https://mcp.context7.com/mcp"
+  credential = { header = "Authorization", env = "CONTEXT7_API_KEY", prefix = "Bearer " }
+  nodes      = ["chat"]
+  idempotent = ["resolve-library-id", "query-docs"]
+}
+
+# Web search, scraping and research papers. Crawls, agents, browser sessions
+# and monitors cost credits or keep running: they go through the approval hook.
+mcp "firecrawl" {
+  url        = "https://mcp.firecrawl.dev/v2/mcp"
+  credential = { header = "Authorization", env = "FIRECRAWL_API_KEY", prefix = "Bearer " }
+  nodes      = ["chat"]
+  idempotent = ["firecrawl_search", "firecrawl_scrape", "firecrawl_map", "firecrawl_check_crawl_status", "firecrawl_agent_status"]
+}
+
 # Layered approval (static checks → validator model → the user) of every
 # call made as the user. The user's decision comes after this answers `ask`.
 hook "approval" {
   on         = "pre_tool"
-  tools      = ["connector.call_tool"]
+  tools      = ["connector.call_tool", "firecrawl.firecrawl_crawl", "firecrawl.firecrawl_agent", "firecrawl.firecrawl_interact*", "firecrawl.firecrawl_monitor_*"]
   run        { url = "http://127.0.0.1:8080/hooks/pre_tool" }
   credential = { header = "Authorization", env = "CHAT_CALLBACK_SECRET", prefix = "Bearer " }
   timeout    = "60s"   # the validator model's call
@@ -98,6 +115,7 @@ agent "chat-agent" {
 
     Always:
     - When the user refers to something from an earlier conversation ("like last time", "the setup we discussed"), find it with `chat.conversation_search` and read around the hit with `chat.conversation_read`; only the user's own conversations are searched.
+    - For current facts from the web (news, prices, a company's site, papers) use firecrawl search/scrape; for how a library, framework or API works use context7 (resolve the library id, then query its docs). Say where an answer comes from.
     - Ask questions with `ask_question`, never in plain text; one question at a time unless it's multiple choice.
     - Use `chat.staff_ping_send` when the user wants a demo, a callback, custom pricing, or help you can't give (a hardware issue, manual support); then tell them the team will follow up.
     - Only if the context says "Newsletter: not asked yet", you may offer the newsletter once with `prompt_preference` (preference_id "newsletter"), and only when the conversation winds down after the user's goal is done. Never offer it during a task, or right after a question, a decision, a cancellation or a problem.
@@ -107,5 +125,5 @@ agent "chat-agent" {
 # What the chat spawns ([subnet].agent_type).
 mixture "chat" {
   agent = "chat-agent"
-  mcp   = ["chat", "connector"]
+  mcp   = ["chat", "connector", "context7", "firecrawl"]
 }

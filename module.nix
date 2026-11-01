@@ -64,6 +64,12 @@ in
         default = "127.0.0.1:7700";
         description = "The hub's address (settings.subnet.url points at it).";
       };
+      environment = lib.mkOption {
+        type = lib.types.attrsOf lib.types.str;
+        default = { };
+        example = { CONTEXT7_API_KEY = "ctx7sk-…"; FIRECRAWL_API_KEY = "fc-…"; };
+        description = "More environment for the hub's node: the MCP servers' keys chat.hcl names (lands in the Nix store, like the settings).";
+      };
       litellmApiKey = lib.mkOption {
         type = lib.types.str;
         description = "LiteLLM key the agents' model calls use (lands in the Nix store, like the settings).";
@@ -105,7 +111,7 @@ in
         SUBNET_ADMIN_TOKEN = cfg.settings.subnet.token;
         CHAT_CALLBACK_SECRET = cfg.settings.subnet.callback_secret;
         LITELLM_API_KEY = cfg.hub.litellmApiKey;
-      };
+      } // cfg.hub.environment;
       serviceConfig = {
         # The node loads the chat's MCP servers once at start: wait until the
         # chat listens, or the agents come up without their tools.
