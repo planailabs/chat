@@ -107,6 +107,16 @@ in
         LITELLM_API_KEY = cfg.hub.litellmApiKey;
       };
       serviceConfig = {
+        # The node loads the chat's MCP servers once at start: wait until the
+        # chat listens, or the agents come up without their tools.
+        ExecStartPre = pkgs.writeShellScript "wait-for-chat" ''
+          for _ in $(seq 80); do
+            ${lib.getExe pkgs.curl} -s -o /dev/null http://${listen}/ && exit 0
+            sleep 1
+          done
+          echo "chat at ${listen} didn't come up" >&2
+          exit 1
+        '';
         ExecStart = "${lib.getExe' cfg.hub.package "subnet"} dev ${clusterFile}";
         Restart = "on-failure";
         RestartSec = 5;
