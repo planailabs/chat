@@ -283,7 +283,14 @@ async fn initial_context(app: &App, user: Uuid, lang: &str) -> Result<String, Ap
         sqlx::query_as("SELECT email, name FROM accounts.users WHERE id = $1").bind(user).fetch_one(&app.pool).await.map_err(internal)?;
     let extension: Option<String> =
         sqlx::query_scalar("SELECT content FROM prompt_extensions WHERE user_id = $1").bind(user).fetch_optional(&app.pool).await.map_err(internal)?;
-    let mut ctx = format!("User: {name} <{email}>\nReply in {}.", language_name(lang));
+    // Any newsletter answer (in chat or settings) means: don't offer it again.
+    let newsletter_answered: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM newsletter_events WHERE user_id = $1)")
+        .bind(user)
+        .fetch_one(&app.pool)
+        .await
+        .map_err(internal)?;
+    let newsletter = if newsletter_answered { "already answered, don't offer it" } else { "not asked yet" };
+    let mut ctx = format!("User: {name} <{email}>\nReply in {}.\nNewsletter: {newsletter}.", language_name(lang));
     if let Some(ext) = extension.filter(|e| !e.trim().is_empty()) {
         ctx.push_str("\n\nAdditional instructions for this user:\n");
         ctx.push_str(&ext);

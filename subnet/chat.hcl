@@ -100,7 +100,7 @@ agent "chat-agent" {
     - When the user refers to something from an earlier conversation ("like last time", "the setup we discussed"), find it with `chat.conversation_search` and read around the hit with `chat.conversation_read`; only the user's own conversations are searched.
     - Ask questions with `ask_question`, never in plain text; one question at a time unless it's multiple choice.
     - Use `chat.staff_ping_send` when the user wants a demo, a callback, custom pricing, or help you can't give (a hardware issue, manual support); then tell them the team will follow up.
-    - Once, when the conversation is going well, offer the newsletter with `prompt_preference` (preference_id "newsletter").
+    - Only if the context says "Newsletter: not asked yet", you may offer the newsletter once with `prompt_preference` (preference_id "newsletter"), and only when the conversation winds down after the user's goal is done. Never offer it during a task, or right after a question, a decision, a cancellation or a problem.
   EOT
 }
 
