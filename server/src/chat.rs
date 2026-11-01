@@ -351,9 +351,53 @@ pub async fn history(app: &App, user: Uuid, id: Uuid) -> Result<Value, ApiError>
         "messages": messages,
         "phase": t["phase"],
         "pending_questions": t["awaiting_client"],
-        "pending_approvals": t["awaiting_approval"],
+        "pending_approvals": pending_approvals(app, &t["awaiting_approval"], &agents).await?,
         "auto_approve": auto_approve,
     }))
+}
+
+/// The call an agent waits on approval for, shaped like the live `approval`
+/// event: subnet's summary has it as one raw tool call (`{id, function:
+/// {name, arguments}}`) or null; the mirrored `approval` row carries what the
+/// hook added (its reason, the assistant's, the safety check).
+async fn pending_approvals(app: &App, raw: &Value, agents: &[String]) -> Result<Value, ApiError> {
+    let mut out = vec![];
+    for c in raw_approvals(raw) {
+        let call_id = c["call_id"].as_str().unwrap_or_default().to_string();
+        let mirrored: Option<Value> = sqlx::query_scalar("SELECT data FROM chat_messages WHERE agent_id = ANY($1) AND role = 'approval' AND data->>'call_id' = $2 ORDER BY id DESC LIMIT 1")
+            .bind(agents)
+            .bind(&call_id)
+            .fetch_optional(&app.pool)
+            .await
+            .map_err(internal)?
+            .flatten();
+        out.push(mirrored.unwrap_or(c));
+    }
+    Ok(Value::Array(out))
+}
+
+/// subnet's `awaiting_approval` (null, one raw tool call, or a list) as
+/// approval-event-shaped values without the hook's additions.
+fn raw_approvals(raw: &Value) -> Vec<Value> {
+    let calls: Vec<&Value> = match raw {
+        Value::Array(a) => a.iter().collect(),
+        Value::Null => vec![],
+        one => vec![one],
+    };
+    calls
+        .into_iter()
+        .map(|c| {
+            let args = c["function"]["arguments"].as_str().and_then(|a| serde_json::from_str::<Value>(a).ok()).unwrap_or(Value::Null);
+            json!({
+                "call_id": c["id"].as_str().or_else(|| c["call_id"].as_str()),
+                "name": c["function"]["name"],
+                "input": args,
+                "reason": null,
+                "agent_reason": null,
+                "check": null,
+            })
+        })
+        .collect()
 }
 
 /// The user's answer to a client tool call (ask_question, prompt_preference).
@@ -412,6 +456,18 @@ mod tests {
         assert_eq!(prefix_query("plan.ai Server!").as_deref(), Some("plan:* & ai:* & server:*"));
         assert_eq!(prefix_query("Größe"), Some("größe:*".into()));
         assert_eq!(prefix_query(" ' & | ! "), None);
+    }
+
+    #[test]
+    fn pending_approvals_from_subnet() {
+        assert!(raw_approvals(&Value::Null).is_empty());
+        let one = json!({ "id": "c1", "type": "function", "function": { "name": "connector.call_tool", "arguments": "{\"service\":\"s\",\"tool\":\"org_create\"}" } });
+        let got = raw_approvals(&one);
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0]["call_id"], "c1");
+        assert_eq!(got[0]["name"], "connector.call_tool");
+        assert_eq!(got[0]["input"]["tool"], "org_create");
+        assert_eq!(raw_approvals(&json!([one.clone(), one])).len(), 2);
     }
 
     #[test]
