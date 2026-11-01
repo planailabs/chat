@@ -350,7 +350,8 @@ pub async fn history(app: &App, user: Uuid, id: Uuid) -> Result<Value, ApiError>
         "title": title,
         "messages": messages,
         "phase": t["phase"],
-        "pending_questions": t["awaiting_client"],
+        // Lists, never null: subnet leaves the field out when nothing waits.
+        "pending_questions": if t["awaiting_client"].is_array() { t["awaiting_client"].clone() } else { json!([]) },
         "pending_approvals": pending_approvals(app, &t["awaiting_approval"], &agents).await?,
         "auto_approve": auto_approve,
     }))
