@@ -93,6 +93,28 @@ struct Turn {
     thinking: bool,
 }
 
+impl Turn {
+    /// Folds a delta's streamed tool-call chunks into calls (id → name) and
+    /// their arguments. subnet's chunks are flat ({id, name, index,
+    /// arguments}); OpenAI's nest name and arguments under `function`.
+    fn fold_tool_calls(&mut self, delta: &Value) {
+        for call in delta["tool_calls"].as_array().into_iter().flatten() {
+            let idx = call["index"].as_u64().unwrap_or_default();
+            if let Some(id) = call["id"].as_str() {
+                self.index.insert(idx, id.to_string());
+            }
+            let field = |k: &str| call[k].as_str().or_else(|| call["function"][k].as_str());
+            let Some(id) = self.index.get(&idx).cloned() else { continue };
+            if let Some(name) = field("name") {
+                self.calls.insert(id.clone(), name.to_string());
+            }
+            if let Some(chunk) = field("arguments") {
+                self.args.entry(id).or_default().push_str(chunk);
+            }
+        }
+    }
+}
+
 pub struct Pump {
     pub hub: Hub,
     pub pool: PgPool,
@@ -214,18 +236,7 @@ impl Pump {
                     turn.text.push_str(text);
                     self.emit(user, conv, "text_delta", json!({ "content": text }));
                 }
-                for call in delta["tool_calls"].as_array().into_iter().flatten() {
-                    let idx = call["index"].as_u64().unwrap_or_default();
-                    if let Some(id) = call["id"].as_str() {
-                        turn.index.insert(idx, id.to_string());
-                    }
-                    if let (Some(id), Some(name)) = (turn.index.get(&idx), call["function"]["name"].as_str()) {
-                        turn.calls.insert(id.clone(), name.to_string());
-                    }
-                    if let (Some(id), Some(chunk)) = (turn.index.get(&idx), call["function"]["arguments"].as_str()) {
-                        turn.args.entry(id.clone()).or_default().push_str(chunk);
-                    }
-                }
+                turn.fold_tool_calls(delta);
                 if let Some(u) = delta.get("usage").filter(|u| u.is_object()) {
                     turn.usage = Some(u.clone());
                 }
@@ -323,5 +334,19 @@ mod tests {
         assert_eq!(super::call_reason(r#"{"service":"s","arguments":{"_reason":"inner"}}"#).as_deref(), Some("inner"));
         assert_eq!(super::call_reason(r#"{"q":1}"#), None);
         assert_eq!(super::call_reason("{not json"), None);
+    }
+
+    #[test]
+    fn tool_calls_fold_from_flat_and_nested_chunks() {
+        use serde_json::json;
+        let mut t = super::Turn::default();
+        // subnet's shape: the call starts with id and name, then index-only chunks.
+        t.fold_tool_calls(&json!({"tool_calls": [{"id": "a", "name": "connector.call_tool", "index": 0, "arguments": ""}, {"index": 0, "arguments": "{\"x\""}]}));
+        t.fold_tool_calls(&json!({"tool_calls": [{"index": 0, "arguments": ":1}"}]}));
+        // OpenAI's shape.
+        t.fold_tool_calls(&json!({"tool_calls": [{"id": "b", "index": 1, "function": {"name": "skill_get", "arguments": "{}"}}]}));
+        assert_eq!(t.calls.get("a").map(String::as_str), Some("connector.call_tool"));
+        assert_eq!(t.args.get("a").map(String::as_str), Some("{\"x\":1}"));
+        assert_eq!(t.calls.get("b").map(String::as_str), Some("skill_get"));
     }
 }

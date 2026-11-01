@@ -96,6 +96,7 @@ describe('the history phase', () => {
   it('thinking and tools are working', () => {
     expect(isWorkingPhase('thinking')).toBe(true);
     expect(isWorkingPhase('tools')).toBe(true);
+    expect(isWorkingPhase('hooking')).toBe(true);
     expect(isWorkingPhase('idle')).toBe(false);
     expect(isWorkingPhase(null)).toBe(false);
   });

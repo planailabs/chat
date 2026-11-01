@@ -10,7 +10,7 @@ import type { LocaleContent } from '../../content';
 import { pendingApprovalOf, toolRunOf } from './toolRuns';
 
 /** The agent's phase in the history: thinking or running tools is working (no composer). */
-export const isWorkingPhase = (phase: string | null | undefined): boolean => phase === 'thinking' || phase === 'tools';
+export const isWorkingPhase = (phase: string | null | undefined): boolean => phase === 'thinking' || phase === 'tools' || phase === 'hooking';
 
 export interface ChatSnapshot {
   messages: ChatMessage[];
