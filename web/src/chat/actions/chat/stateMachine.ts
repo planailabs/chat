@@ -8,6 +8,7 @@
 
 import { store } from '../../app/store';
 import type { ChatMessage, ChatPhase, ChatSession } from '../../app/state';
+import { refreshBudget } from '../profile';
 import { locales } from '../../content';
 import { ApiError, api } from '../../api';
 import { startCharacterStream } from '../../utils/stream';
@@ -144,8 +145,10 @@ const errorText = (error: unknown): string => {
   switch (error.status) {
     case 401:
       return errors.signedOut;
-    case 402:
-      return errors.rateLimited;
+    case 402: {
+      const plan = store.state.budget?.plan_name;
+      return plan ? errors.planLimited.replace('{{plan}}', plan) : errors.rateLimited;
+    }
     case 403:
       return store.state.impersonating ? errors.readOnly : errors.unavailable;
     case 413:
@@ -162,6 +165,13 @@ export const showChatError = (error: unknown, mc: ChatSession | null = store.sta
   transition(mc, 'error');
   mc.error = errorText(error);
   store.notify();
+  // The hourly limit: reload the plan's numbers (and name the current plan).
+  if (error instanceof ApiError && error.status === 402) {
+    const shown = mc.error;
+    void refreshBudget().then(() => {
+      if (mc.phase === 'error' && mc.error === shown) mc.error = errorText(error);
+    });
+  }
 };
 
 // ─────────────────────────────────────────────────────────────────────────────

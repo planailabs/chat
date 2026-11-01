@@ -85,6 +85,8 @@ export interface LocaleContent {
     };
     errors: {
       rateLimited: string;
+      /** `{{plan}}`: the plan's name. */
+      planLimited: string;
       tooLong: string;
       unavailable: string;
       readOnly: string;
@@ -101,6 +103,16 @@ export interface LocaleContent {
           name: string;
           newsletter: string;
         };
+      };
+      plan: {
+        title: string;
+        input: string;
+        output: string;
+        /** `{{used}}` of `{{limit}}` tokens this hour. */
+        usage: string;
+        /** No limit: `{{used}}` tokens this hour. */
+        usageUnlimited: string;
+        unlimited: string;
       };
       privacy: {
         title: string;
@@ -192,7 +204,8 @@ const en: LocaleContent = {
       requested: 'Approval requested',
     },
     errors: {
-      rateLimited: 'You’ve reached the hourly message limit. Please try again later.',
+      rateLimited: 'You’ve reached the hourly limit of your plan. Please try again later.',
+      planLimited: 'You’ve reached the hourly limit of your plan “{{plan}}”. Please try again later.',
       tooLong: 'This message is too long. Please shorten it.',
       unavailable: 'This chat isn’t available for your account.',
       readOnly: 'Read-only while impersonating.',
@@ -209,6 +222,14 @@ const en: LocaleContent = {
           name: 'Your name',
           newsletter: 'Subscribe to newsletter',
         },
+      },
+      plan: {
+        title: 'Plan',
+        input: 'Input',
+        output: 'Output',
+        usage: '{{used}} of {{limit}} tokens this hour',
+        usageUnlimited: '{{used}} tokens this hour',
+        unlimited: 'unlimited',
       },
       privacy: {
         title: 'Privacy & Data',
@@ -309,7 +330,8 @@ const de: LocaleContent = {
       requested: 'Freigabe angefragt',
     },
     errors: {
-      rateLimited: 'Du hast das stündliche Nachrichtenlimit erreicht. Bitte versuche es später noch einmal.',
+      rateLimited: 'Du hast das Stundenlimit deines Tarifs erreicht. Bitte versuche es später noch einmal.',
+      planLimited: 'Du hast das Stundenlimit deines Tarifs „{{plan}}“ erreicht. Bitte versuche es später noch einmal.',
       tooLong: 'Diese Nachricht ist zu lang. Bitte kürze sie.',
       unavailable: 'Dieser Chat ist für dein Konto nicht verfügbar.',
       readOnly: 'Beim Impersonieren ist nur Lesen möglich.',
@@ -326,6 +348,14 @@ const de: LocaleContent = {
           name: 'Dein Name',
           newsletter: 'Newsletter abonnieren',
         },
+      },
+      plan: {
+        title: 'Tarif',
+        input: 'Eingabe',
+        output: 'Ausgabe',
+        usage: '{{used}} von {{limit}} Tokens in dieser Stunde',
+        usageUnlimited: '{{used}} Tokens in dieser Stunde',
+        unlimited: 'unbegrenzt',
       },
       privacy: {
         title: 'Datenschutz',

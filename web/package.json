@@ -10,7 +10,7 @@
   ],
   "scripts": {
     "dev": "parcel serve --port 1234",
-    "build": "rm -rf dist && parcel build --no-source-maps --dist-dir dist --public-url /",
+    "build": "rm -rf dist && parcel build --no-cache --no-source-maps --dist-dir dist --public-url /",
     "watch": "parcel watch --no-hmr --dist-dir dist --public-url /",
     "test": "vitest run",
     "typecheck": "vue-tsc --noEmit -p ."

@@ -12,6 +12,7 @@ import { defaultLocale, supportedLocales, type LocaleKey, type StreamConfig } fr
 import { STORAGE_KEYS } from '../constants';
 import type { ConversationItem } from '../actions/chat/conversationList';
 import { createProfileState, type ProfileState } from './profileState';
+import type { Budget } from '../api';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Type Definitions
@@ -119,6 +120,9 @@ export interface AppState {
   isAdmin: boolean;
   /** An admin looks at this user's account (read-only). */
   impersonating: boolean;
+
+  /** The user's plan and the last hour's use (null until known). */
+  budget: Budget | null;
 
   // ─── Chat State ────────────────────────────────────────────────────────────
   /** The user's conversations, most recent first. */
@@ -270,6 +274,7 @@ export const createInitialState = (): AppState => {
     renamingConversationId: null,
     ...user,
     conversations: [],
+    budget: null,
     activeConversationId: null,
     highlightMessageId: null,
     chat: null,

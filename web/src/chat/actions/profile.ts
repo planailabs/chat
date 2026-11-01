@@ -49,3 +49,14 @@ export const persistNewsletterChoice = async (
   store.notify();
   return saved;
 };
+
+/** Reloads the plan and the last hour's use (settings overlay, after hitting the limit). */
+export const refreshBudget = async (): Promise<void> => {
+  if (!store.state.isAuthenticated) return;
+  try {
+    const profile = await api.profile.me();
+    store.state.budget = profile.budget ?? null;
+  } catch (error) {
+    console.error('[profile] loading the budget failed', error);
+  }
+};

@@ -6,6 +6,7 @@ import PlanLogo from './PlanLogo.vue';
 import { store } from '../app/store';
 import { locale } from '../app/locale';
 import { getLocaleDateString } from '../utils/date';
+import { budgetBars } from '../utils/budget';
 import { handleSignOut } from '../actions/auth';
 import { closeSettingsOverlay } from '../actions/overlay';
 import { handleDataExport, handleSettingsNewsletterToggle, requestAccountDeletion } from '../actions/settings';
@@ -35,6 +36,17 @@ const deletionNotice = computed(() =>
 );
 
 const onNewsletterChange = (event: Event) => handleSettingsNewsletterToggle((event.target as HTMLInputElement).checked);
+
+const planTexts = computed(() => locale.value.settings.sections.plan);
+const bars = computed(() => {
+  const budget = state.budget;
+  if (!budget) return [];
+  const { input, output } = budgetBars(budget, planTexts.value, state.localeKey);
+  return [
+    { key: 'input', name: planTexts.value.input, ...input },
+    { key: 'output', name: planTexts.value.output, ...output },
+  ];
+});
 
 const signOut = () => {
   closeSettingsOverlay();
@@ -78,6 +90,33 @@ const signOut = () => {
           <span>{{ profileSection.fields.newsletter }}</span>
         </label>
       </section>
+      <template v-if="state.budget">
+        <div class="settings-divider" aria-hidden="true" />
+        <section class="settings-section settings-plan">
+          <header class="settings-section__header">
+            <p class="settings-section__title">{{ planTexts.title }}</p>
+            <span class="settings-plan__name">{{ state.budget.plan_name }}</span>
+          </header>
+          <div v-for="bar in bars" :key="bar.key" class="usage">
+            <div class="usage__head">
+              <span>{{ bar.name }}</span>
+              <span v-if="bar.unlimited" class="usage__unlimited">{{ planTexts.unlimited }}</span>
+            </div>
+            <div
+              class="usage__track"
+              role="meter"
+              :aria-label="`${planTexts.title}: ${bar.name}`"
+              aria-valuemin="0"
+              aria-valuemax="100"
+              :aria-valuenow="bar.percent"
+              :aria-valuetext="bar.unlimited ? `${bar.label} (${planTexts.unlimited})` : bar.label"
+            >
+              <div :class="['usage__fill', { 'is-unlimited': bar.unlimited, 'is-exhausted': bar.exhausted }]" :style="{ width: bar.unlimited ? '100%' : `${bar.percent}%` }" />
+            </div>
+            <p class="usage__label">{{ bar.label }}</p>
+          </div>
+        </section>
+      </template>
       <div class="settings-divider" aria-hidden="true" />
       <section class="settings-section settings-privacy">
         <header class="settings-section__header">

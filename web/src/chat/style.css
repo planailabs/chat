@@ -1296,6 +1296,56 @@ html.is-first-visit #app {
     outline: none;
   }
 
+  .settings-plan__name {
+    color: var(--text-primary);
+    font-size: 0.875rem;
+    font-weight: 600;
+  }
+
+  .usage + .usage {
+    margin-top: 0.75rem;
+  }
+
+  .usage__head {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 0.3rem;
+    color: var(--text-primary);
+    font-size: 0.8rem;
+  }
+
+  .usage__unlimited {
+    color: var(--text-muted);
+  }
+
+  .usage__track {
+    height: 0.4rem;
+    overflow: hidden;
+    border-radius: 999px;
+    background: color-mix(in lab, var(--border-muted) 70%, transparent);
+  }
+
+  .usage__fill {
+    height: 100%;
+    border-radius: inherit;
+    background: var(--accent);
+    transition: width 0.4s ease;
+  }
+
+  .usage__fill.is-unlimited {
+    background: color-mix(in lab, var(--accent) 25%, transparent);
+  }
+
+  .usage__fill.is-exhausted {
+    background: var(--accent-danger);
+  }
+
+  .usage__label {
+    margin-top: 0.3rem;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+  }
+
   .sidebar-search {
     position: relative;
     margin-top: 0.5rem;

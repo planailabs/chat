@@ -1,4 +1,5 @@
 import { store } from '../app/store';
+import { refreshBudget } from './profile';
 import { profileSetDataExport } from '../app/profileState';
 
 export const openSettingsOverlay = () => {
@@ -7,6 +8,7 @@ export const openSettingsOverlay = () => {
     return;
   }
   store.setState({ isSettingsOverlayOpen: true });
+  void refreshBudget();
 };
 
 export const closeSettingsOverlay = () => {

@@ -84,6 +84,7 @@ const applyProfile = (profile: Profile) => {
   state.userDisplayName = profile.name.trim() || null;
   state.isAdmin = profile.is_admin;
   state.impersonating = profile.impersonating;
+  state.budget = profile.budget ?? null;
   state.isAuthMenuOpen = false;
   profileLoadSuccess(state.profile, profile);
 

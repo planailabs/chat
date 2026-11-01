@@ -7,6 +7,7 @@ export const TABS = [
   { name: 'impersonate', label: 'Impersonate', path: '/impersonate/' },
   { name: 'pings', label: 'Pings', path: '/pings/' },
   { name: 'prompts', label: 'System Prompts', path: '/prompts/' },
+  { name: 'plans', label: 'Plans', path: '/plans/' },
 ] as const;
 
 export const router = createRouter({
@@ -17,6 +18,7 @@ export const router = createRouter({
     { path: '/impersonate/', alias: '/impersonate', name: 'impersonate', component: () => import('./components/ImpersonateTab.vue') },
     { path: '/pings/', alias: '/pings', name: 'pings', component: () => import('./components/PingsTab.vue') },
     { path: '/prompts/', alias: '/prompts', name: 'prompts', component: () => import('./components/PromptsTab.vue') },
+    { path: '/plans/', alias: '/plans', name: 'plans', component: () => import('./components/PlansTab.vue') },
     { path: '/:rest(.*)*', redirect: '/' },
   ],
 });

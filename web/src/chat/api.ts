@@ -88,6 +88,38 @@ export interface Profile {
   deletion_requested_at: string | null;
   /** An admin is looking at this user's account (read-only). */
   impersonating: boolean;
+  /** The user's plan and its hourly budget, with the last hour's use. */
+  budget?: Budget | null;
+}
+
+/** A plan's hourly token budget (0 = unlimited) and the last rolling hour's use. */
+export interface Budget {
+  plan_id: string;
+  plan_name: string;
+  hourly_input_tokens: number;
+  hourly_output_tokens: number;
+  used_input_tokens: number;
+  used_output_tokens: number;
+}
+
+/** A plan (`GET /api/v1/plan`): free, assigned to users by admins. */
+export interface Plan {
+  id: string;
+  name: string;
+  price_cents: number;
+  currency: string;
+  window_days: number;
+  limits: { hourly_input_tokens?: number; hourly_output_tokens?: number };
+  /** Users on it. */
+  users: number;
+}
+
+export interface PlanInput {
+  id: string;
+  name: string;
+  /** Tokens per user per rolling hour; 0 = unlimited. */
+  hourly_input_tokens: number;
+  hourly_output_tokens: number;
 }
 
 export interface ProfileUpdate {
@@ -225,6 +257,8 @@ export interface UserHit {
   email: string;
   name: string;
   has_extension: boolean;
+  /** Their plan (their personal team's). */
+  plan_id: string;
 }
 
 export interface PromptExtension {
@@ -281,6 +315,10 @@ export const api = {
     stats: () => request<Stats>('GET', '/api/v1/stats/all'),
     messages: (limit: number) => request<AdminMessage[]>('GET', `/api/v1/message${query({ limit })}`),
     users: (q: string) => request<UserHit[]>('GET', `/api/v1/user${query({ q })}`),
+    plans: () => request<Plan[]>('GET', '/api/v1/plan'),
+    putPlan: (plan: PlanInput) => request<unknown>('POST', '/api/v1/plan/put', plan),
+    /** Returns the user's new budget. */
+    setPlan: (userId: string, planId: string) => request<Budget>('POST', '/api/v1/user/set_plan', { user_id: userId, plan_id: planId }),
     /** The user's prompt extension: empty, or one entry. */
     promptExtension: (userId: string) => request<PromptExtension[]>('GET', `/api/v1/prompt_extension${query({ user_id: userId })}`),
     setPromptExtension: (userId: string, content: string) =>
