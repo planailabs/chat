@@ -38,7 +38,7 @@ export interface LocaleContent {
     open: string;
     close: string;
     newChat: string;
-    groups: { today: string; yesterday: string; previous7Days: string; older: string };
+    groups: { today: string; yesterday: string; thisWeek: string; lastWeek: string; thisMonth: string; older: string };
     empty: string;
     rename: string;
     delete: string;
@@ -203,7 +203,7 @@ const en: LocaleContent = {
     open: 'Show conversations',
     close: 'Hide conversations',
     newChat: 'New chat',
-    groups: { today: 'Today', yesterday: 'Yesterday', previous7Days: 'Previous 7 days', older: 'Older' },
+    groups: { today: 'Today', yesterday: 'Yesterday', thisWeek: 'This week', lastWeek: 'Last week', thisMonth: 'This month', older: 'Older' },
     empty: 'No conversations yet.',
     rename: 'Rename',
     delete: 'Delete',
@@ -357,7 +357,7 @@ const de: LocaleContent = {
     open: 'Gespräche anzeigen',
     close: 'Gespräche ausblenden',
     newChat: 'Neuer Chat',
-    groups: { today: 'Heute', yesterday: 'Gestern', previous7Days: 'Letzte 7 Tage', older: 'Älter' },
+    groups: { today: 'Heute', yesterday: 'Gestern', thisWeek: 'Diese Woche', lastWeek: 'Letzte Woche', thisMonth: 'Diesen Monat', older: 'Älter' },
     empty: 'Noch keine Gespräche.',
     rename: 'Umbenennen',
     delete: 'Löschen',

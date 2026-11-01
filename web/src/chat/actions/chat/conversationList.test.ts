@@ -15,16 +15,40 @@ const at = (daysAgo: number, hour = 12) => new Date(2026, 10, 1 - daysAgo, hour)
 const conv = (id: string, updated: string): ConversationItem => ({ id, title: id, created_at: updated, updated_at: updated });
 
 describe('groupConversations', () => {
-  it('groups by last activity: today, yesterday, previous 7 days, older', () => {
+  it('groups by calendar: today, yesterday, this week, last week, this month, older', () => {
+    // Thursday 19 November 2026: the week began Monday the 16th.
+    const thu = new Date(2026, 10, 19, 15, 0);
+    const on = (date: number, month = 10) => new Date(2026, month, date, 12).toISOString();
     const groups = groupConversations(
-      [conv('old', at(30)), conv('today', at(0, 9)), conv('week', at(6)), conv('yesterday', at(1, 23)), conv('eight', at(8))],
-      now,
+      [
+        conv('october', on(31, 9)),
+        conv('today', on(19)),
+        conv('monday', on(16)),
+        conv('yesterday', on(18)),
+        conv('lastMonday', on(9)),
+        conv('lastSunday', on(15)),
+        conv('month', on(2)),
+      ],
+      thu,
     );
     expect(groups.map((g) => [g.key, g.items.map((c) => c.id)])).toEqual([
       ['today', ['today']],
       ['yesterday', ['yesterday']],
-      ['previous7Days', ['week']],
-      ['older', ['eight', 'old']],
+      ['thisWeek', ['monday']],
+      ['lastWeek', ['lastSunday', 'lastMonday']],
+      ['thisMonth', ['month']],
+      ['older', ['october']],
+    ]);
+  });
+
+  it('on a Monday, yesterday is yesterday and last week starts a week ago', () => {
+    const mon = new Date(2026, 10, 16, 9, 0);
+    const on = (date: number) => new Date(2026, 10, date, 12).toISOString();
+    const groups = groupConversations([conv('sun', on(15)), conv('sat', on(14)), conv('prevMon', on(9)), conv('sun8', on(8))], mon);
+    expect(groups.map((g) => [g.key, g.items.map((c) => c.id)])).toEqual([
+      ['yesterday', ['sun']],
+      ['lastWeek', ['sat', 'prevMon']],
+      ['thisMonth', ['sun8']],
     ]);
   });
 

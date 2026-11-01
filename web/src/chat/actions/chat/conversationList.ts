@@ -14,36 +14,42 @@ export interface ConversationItem extends Conversation {
   unread?: boolean;
 }
 
-export type ConversationGroupKey = 'today' | 'yesterday' | 'previous7Days' | 'older';
+export type ConversationGroupKey = 'today' | 'yesterday' | 'thisWeek' | 'lastWeek' | 'thisMonth' | 'older';
 
 export interface ConversationGroup {
   key: ConversationGroupKey;
   items: ConversationItem[];
 }
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-const startOfDay = (d: Date): number => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-
 /** Most recently updated first. */
 export const sortConversations = <T extends Conversation>(list: T[]): T[] =>
   [...list].sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at));
 
 /**
- * Today / Yesterday / Previous 7 days / Older, by last activity in local
- * time, newest first; empty groups are left out.
+ * Today / Yesterday / This week / Last week / This month / Older, by last
+ * activity in local calendar time (weeks start on Monday), newest first;
+ * empty groups are left out.
  */
 export const groupConversations = (list: ConversationItem[], now: Date = new Date()): ConversationGroup[] => {
-  const today = startOfDay(now);
-  const yesterday = today - DAY_MS;
-  const weekAgo = today - 7 * DAY_MS;
-  const groups: Record<ConversationGroupKey, ConversationItem[]> = { today: [], yesterday: [], previous7Days: [], older: [] };
+  // Local midnight `offset` days from today (Date normalises across months and DST).
+  const day = (offset: number) => new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset).getTime();
+  const sinceMonday = (now.getDay() + 6) % 7;
+  // Each group starts where the next newer one ends; a later start than a
+  // newer group's (the 1st of the month falling this week) just leaves it empty.
+  const starts: [ConversationGroupKey, number][] = [
+    ['today', day(0)],
+    ['yesterday', day(-1)],
+    ['thisWeek', day(-sinceMonday)],
+    ['lastWeek', day(-sinceMonday - 7)],
+    ['thisMonth', new Date(now.getFullYear(), now.getMonth(), 1).getTime()],
+  ];
+  const groups = new Map<ConversationGroupKey, ConversationItem[]>();
   for (const c of sortConversations(list)) {
     const t = Date.parse(c.updated_at);
-    const key: ConversationGroupKey = t >= today ? 'today' : t >= yesterday ? 'yesterday' : t >= weekAgo ? 'previous7Days' : 'older';
-    groups[key].push(c);
+    const key = starts.find(([, start]) => t >= start)?.[0] ?? 'older';
+    groups.set(key, [...(groups.get(key) ?? []), c]);
   }
-  return (Object.keys(groups) as ConversationGroupKey[]).filter((k) => groups[k].length > 0).map((key) => ({ key, items: groups[key] }));
+  return [...groups].map(([key, items]) => ({ key, items }));
 };
 
 /** The list with `id` updated by `patch` (and moved to the top when `at` is given). */
