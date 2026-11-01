@@ -82,6 +82,10 @@ struct Turn {
     calls: HashMap<String, String>,
     /// Tool-call index → call_id (deltas after the first only carry the index).
     index: HashMap<u64, String>,
+    /// call_id → its arguments as streamed so far (for the call's `_reason`).
+    args: HashMap<String, String>,
+    /// call_id → the assistant's `_reason` for it, once the call is complete.
+    reasons: HashMap<String, String>,
     /// Client-tool calls waiting for (or answered by) the user.
     questions: std::collections::HashSet<String>,
     /// The model call's usage: each delta's replaces the last; counted at llm_done.
@@ -185,6 +189,17 @@ impl Pump {
         Ok(())
     }
 
+    /// What the approval hook recorded about a call, if it judged it.
+    async fn check(&self, agent: &str, call: &str) -> anyhow::Result<Option<Value>> {
+        let row: Option<(Option<String>, String, Option<String>, Option<String>)> =
+            sqlx::query_as("SELECT agent_reason, decision, check_verdict, check_reasoning FROM approval_checks WHERE agent_id = $1 AND call_id = $2")
+                .bind(agent)
+                .bind(call)
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(row.map(|(agent_reason, decision, verdict, reasoning)| json!({ "agent_reason": agent_reason, "decision": decision, "verdict": verdict, "reasoning": reasoning })))
+    }
+
     async fn apply(&self, agent: &str, seq: i64, user: Uuid, conv: Uuid, ev: &Value, turn: &mut Turn) -> anyhow::Result<()> {
         match ev["type"].as_str().unwrap_or_default() {
             "inbox" => {
@@ -207,6 +222,9 @@ impl Pump {
                     if let (Some(id), Some(name)) = (turn.index.get(&idx), call["function"]["name"].as_str()) {
                         turn.calls.insert(id.clone(), name.to_string());
                     }
+                    if let (Some(id), Some(chunk)) = (turn.index.get(&idx), call["function"]["arguments"].as_str()) {
+                        turn.args.entry(id.clone()).or_default().push_str(chunk);
+                    }
                 }
                 if let Some(u) = delta.get("usage").filter(|u| u.is_object()) {
                     turn.usage = Some(u.clone());
@@ -222,9 +240,14 @@ impl Pump {
                     self.mirror(agent, seq, user, "assistant", &text, None).await?;
                     self.emit(user, conv, "text_done", json!({ "content": text }));
                 }
-                let pending: Vec<String> = turn.calls.values().cloned().collect();
-                for name in &pending {
-                    self.emit(user, conv, "tool_start", json!({ "name": name }));
+                for (id, args) in std::mem::take(&mut turn.args) {
+                    if let Some(reason) = call_reason(&args) {
+                        turn.reasons.insert(id, reason);
+                    }
+                }
+                let pending: Vec<(String, String)> = turn.calls.iter().map(|(id, name)| (id.clone(), name.clone())).collect();
+                for (id, name) in &pending {
+                    self.emit(user, conv, "tool_start", json!({ "name": name, "call_id": id, "reason": turn.reasons.get(id) }));
                 }
                 if pending.is_empty() {
                     turn.thinking = false;
@@ -237,8 +260,13 @@ impl Pump {
                     let content = ev["content"].as_str().unwrap_or_default();
                     self.mirror(agent, seq, user, "answer", content, Some(json!({ "call_id": call, "is_error": ev["is_error"] }))).await?;
                 } else if let Some(name) = turn.calls.remove(call) {
-                    self.mirror(agent, seq, user, "tool", &name, Some(json!({ "call_id": call, "is_error": ev["is_error"] }))).await?;
-                    self.emit(user, conv, "tool_end", json!({ "name": name }));
+                    let reason = turn.reasons.remove(call);
+                    let check = self.check(agent, call).await?;
+                    let data = json!({ "call_id": call, "is_error": ev["is_error"], "reason": reason, "check": check });
+                    self.mirror(agent, seq, user, "tool", &name, Some(data.clone())).await?;
+                    let mut end = data;
+                    end["name"] = json!(name);
+                    self.emit(user, conv, "tool_end", end);
                 }
             }
             "client_tool_call" => {
@@ -251,7 +279,10 @@ impl Pump {
                 self.emit(user, conv, "question", data);
             }
             "approval_requested" => {
-                let data = json!({ "call_id": ev["call_id"], "name": ev["name"], "input": ev["input"], "reason": ev["reason"] });
+                let call = ev["call_id"].as_str().unwrap_or_default();
+                let check = self.check(agent, call).await?;
+                let agent_reason = turn.reasons.get(call).cloned().or_else(|| check.as_ref().and_then(|c| c["agent_reason"].as_str().map(String::from)));
+                let data = json!({ "call_id": ev["call_id"], "name": ev["name"], "input": ev["input"], "reason": ev["reason"], "agent_reason": agent_reason, "check": check });
                 self.mirror(agent, seq, user, "approval", ev["name"].as_str().unwrap_or_default(), Some(data.clone())).await?;
                 self.emit(user, conv, "approval", data);
             }
@@ -271,5 +302,23 @@ impl Pump {
             _ => {}
         }
         Ok(())
+    }
+}
+
+/// The `_reason` the assistant gave a call (call_reasons), from its arguments
+/// (connector calls may carry it inside `arguments`).
+fn call_reason(args: &str) -> Option<String> {
+    let v: Value = serde_json::from_str(args).ok()?;
+    v["_reason"].as_str().or_else(|| v["arguments"]["_reason"].as_str()).filter(|r| !r.trim().is_empty()).map(String::from)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn reasons_from_arguments() {
+        assert_eq!(super::call_reason(r#"{"_reason":"read the config","q":1}"#).as_deref(), Some("read the config"));
+        assert_eq!(super::call_reason(r#"{"service":"s","arguments":{"_reason":"inner"}}"#).as_deref(), Some("inner"));
+        assert_eq!(super::call_reason(r#"{"q":1}"#), None);
+        assert_eq!(super::call_reason("{not json"), None);
     }
 }

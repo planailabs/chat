@@ -185,13 +185,52 @@ fn decide(decision: &str, reason: impl Into<String>) -> Json<Value> {
     Json(json!({ "decision": decision, "reason": reason.into() }))
 }
 
+/// What the hook answered about a call, recorded for the chat's display.
+struct Record<'a> {
+    agent: &'a str,
+    call_id: &'a str,
+    tool: &'a str,
+    agent_reason: Option<&'a str>,
+}
+
+impl Record<'_> {
+    /// Stores the decision (and the safety check's) and answers subnet.
+    async fn answer(&self, app: &AppState, decision: &str, check: Option<(&str, &str)>, reason: String) -> Json<Value> {
+        let recorded = match decision {
+            "allow" => "allowed",
+            "deny" => "denied",
+            _ => "asked",
+        };
+        let res = sqlx::query(
+            "INSERT INTO approval_checks (agent_id, call_id, tool, agent_reason, decision, check_verdict, check_reasoning) VALUES ($1,$2,$3,$4,$5,$6,$7)
+             ON CONFLICT (agent_id, call_id) DO UPDATE SET decision = EXCLUDED.decision, check_verdict = EXCLUDED.check_verdict, check_reasoning = EXCLUDED.check_reasoning",
+        )
+        .bind(self.agent)
+        .bind(self.call_id)
+        .bind(self.tool)
+        .bind(self.agent_reason)
+        .bind(recorded)
+        .bind(check.map(|c| c.0))
+        .bind(check.map(|c| c.1))
+        .execute(&app.pool)
+        .await;
+        if let Err(e) = res {
+            // The decision still stands; only its display is missing.
+            tracing::error!(agent = self.agent, call = self.call_id, "recording an approval check: {e}");
+        }
+        decide(decision, reason)
+    }
+}
+
 pub async fn pre_tool(State(app): State<AppState>, headers: HeaderMap, Json(h): Json<HookCall>) -> Result<Json<Value>, StatusCode> {
     if !secret_ok(&headers, &app.cfg.subnet.callback_secret) {
         return Err(StatusCode::UNAUTHORIZED);
     }
     let tool = &h.input.tool;
+    let call = effective(tool, &h.input.args);
+    let rec = Record { agent: &h.agent.id, call_id: &h.input.call_id, tool: &call.name, agent_reason: h.input.reason.as_deref() };
     if app.cfg.approval.allow.iter().any(|p| glob(p, tool)) {
-        return Ok(decide("allow", "allow-listed"));
+        return Ok(rec.answer(&app, "allow", None, "allow-listed".into()).await);
     }
     // Only our conversations: an unknown agent has no user to answer for it.
     let auto_approve: Option<bool> = sqlx::query_scalar("SELECT auto_approve FROM conversations WHERE agent_id = $1")
@@ -204,7 +243,6 @@ pub async fn pre_tool(State(app): State<AppState>, headers: HeaderMap, Json(h): 
         })?;
     let Some(auto_approve) = auto_approve else { return Ok(decide("deny", "not a chat conversation")) };
 
-    let call = effective(tool, &h.input.args);
     let risk = risk_of(&call.name);
     let transcript = app.hub.transcript(&h.agent.id).await.map_err(|e| {
         tracing::error!("approval hook: transcript of {}: {e:#}", h.agent.id);
@@ -212,28 +250,29 @@ pub async fn pre_tool(State(app): State<AppState>, headers: HeaderMap, Json(h): 
     })?;
     let history = past_calls(&transcript, &h.input.call_id);
     if let Some(why) = static_check(&call, risk, &history) {
-        return Ok(decide("deny", why));
+        return Ok(rec.answer(&app, "deny", None, why).await);
     }
     if risk == Risk::ReadOnly {
-        return Ok(decide("allow", "read-only"));
+        return Ok(rec.answer(&app, "allow", None, "read-only".into()).await);
     }
 
     let reason = h.input.reason.as_deref().unwrap_or("(none given)");
     let verdict = match validate(&app, &call, risk, reason, &history).await {
         Ok(v) => v,
         Err(e) => {
-            // The user still decides; they're told the validator didn't run.
+            // The user still decides; they're told the check didn't run.
             tracing::warn!("validator failed for {}: {e:#}", call.name);
-            return Ok(decide("ask", format!("The safety check couldn't run ({e}); please review this call.")));
+            let why = format!("The safety check couldn't run ({e}); please review this call.");
+            return Ok(rec.answer(&app, "ask", Some(("failed", &e.to_string())), why).await);
         }
     };
-    match verdict {
-        Some(Verdict::Rejected(why)) => Ok(decide("deny", format!("Rejected by the safety check: {why}"))),
-        Some(Verdict::Approved(why)) if risk == Risk::Mutating || auto_approve => Ok(decide("allow", why)),
-        None if auto_approve => Ok(decide("allow", "the user approved all calls in this conversation")),
-        Some(Verdict::Approved(why)) => Ok(decide("ask", why)),
-        None => Ok(decide("ask", "")),
-    }
+    Ok(match verdict {
+        Some(Verdict::Rejected(why)) => rec.answer(&app, "deny", Some(("rejected", &why)), format!("Rejected by the safety check: {why}")).await,
+        Some(Verdict::Approved(why)) if risk == Risk::Mutating || auto_approve => rec.answer(&app, "allow", Some(("approved", &why)), why.clone()).await,
+        None if auto_approve => rec.answer(&app, "allow", None, "the user approved all calls in this conversation".into()).await,
+        Some(Verdict::Approved(why)) => rec.answer(&app, "ask", Some(("approved", &why)), why.clone()).await,
+        None => rec.answer(&app, "ask", None, String::new()).await,
+    })
 }
 
 #[cfg(test)]
