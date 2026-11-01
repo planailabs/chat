@@ -42,6 +42,21 @@ pub enum Topic {
     Faq,
 }
 
+/// Step-by-step playbooks for setting things up with the user.
+#[derive(Deserialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum Skill {
+    /// A cms-agent instance: repository, deploy type, ingress (subdomain), identity, inference (model), accounts, its URL.
+    CmsAgentSetup,
+    /// plan.ai cloud: the organization, accounts in its identity (Zitadel), identity providers.
+    CloudSetup,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct SkillInput {
+    skill: Skill,
+}
+
 #[derive(Deserialize, JsonSchema)]
 pub struct ProductInput {
     topic: Topic,
@@ -142,7 +157,7 @@ fn for_model(snippet: &str) -> String {
 pub fn registry(secret: &str) -> Registry<AppState> {
     let mut reg = Registry::new(Arc::new(SubnetAuth(secret.to_string())))
         .info("plan.ai chat agent tools", env!("CARGO_PKG_VERSION"))
-        .instructions("Tools of the plan.ai chat assistants: product documentation, the public catalog, and asking a human to follow up.");
+        .instructions("Tools of the plan.ai chat assistants: product documentation, setup skills, the public catalog, and asking a human to follow up.");
 
     reg.resource("product", "product", "plan.ai product documentation").get(
         "plan.ai product documentation on one topic, as markdown. Read it before answering product questions.",
@@ -154,6 +169,17 @@ pub fn registry(secret: &str) -> Registry<AppState> {
                 Topic::UseCases => include_str!("../content/use-cases.md"),
                 Topic::GettingStarted => include_str!("../content/getting-started.md"),
                 Topic::Faq => include_str!("../content/faq.md"),
+            };
+            Ok(Text { text: text.to_string() })
+        },
+    );
+
+    reg.resource("skill", "skill", "Playbooks for setting things up with the user").get(
+        "Load a skill: how to walk the user through a setup (which questions to ask, which tools to call, in what order). Load it before starting that setup, then follow it. cms-agent-setup: a cms-agent instance end to end. cloud-setup: a plan.ai cloud organization, its identity accounts and identity providers.",
+        |_: AppState, _: Arc<Principal>, i: SkillInput| async move {
+            let text = match i.skill {
+                Skill::CmsAgentSetup => include_str!("../content/skills/cms-agent-setup.md"),
+                Skill::CloudSetup => include_str!("../content/skills/cloud-setup.md"),
             };
             Ok(Text { text: text.to_string() })
         },

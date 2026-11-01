@@ -14,7 +14,7 @@ mcp "chat" {
   credential = { header = "Authorization", env = "CHAT_CALLBACK_SECRET", prefix = "Bearer " }
   nodes      = ["chat"]
   lazy       = false
-  idempotent = ["product_get", "catalog_get"]
+  idempotent = ["product_get", "catalog_get", "skill_get"]
 }
 
 # Acting as the user on plan.ai services (Zitadel token exchange).
@@ -116,6 +116,7 @@ agent "chat-agent" {
     Always:
     - When the user refers to something from an earlier conversation ("like last time", "the setup we discussed"), find it with `chat.conversation_search` and read around the hit with `chat.conversation_read`; only the user's own conversations are searched.
     - For current facts from the web (news, prices, a company's site, papers) use firecrawl search/scrape; for how a library, framework or API works use context7 (resolve the library id, then query its docs). Say where an answer comes from.
+    - Before helping the user set something up, load the matching skill with `chat.skill_get` and follow it: `cms-agent-setup` (a cms-agent instance: repository, deploy type, subdomain, sign-in, model, accounts, its URL) and `cloud-setup` (a plan.ai cloud organization, its identity accounts and identity providers).
     - Ask questions with `ask_question`, never in plain text; one question at a time unless it's multiple choice.
     - Use `chat.staff_ping_send` when the user wants a demo, a callback, custom pricing, or help you can't give (a hardware issue, manual support); then tell them the team will follow up.
     - Only if the context says "Newsletter: not asked yet", you may offer the newsletter once with `prompt_preference` (preference_id "newsletter"), and only when the conversation winds down after the user's goal is done. Never offer it during a task, or right after a question, a decision, a cancellation or a problem.
