@@ -1038,6 +1038,39 @@ html.is-first-visit #app {
     margin: 1em 0;
   }
 
+  /* ponytail: block + overflow lets a wide table scroll instead of a wrapper element */
+  .chat-markdown table {
+    display: block;
+    max-width: 100%;
+    overflow-x: auto;
+    margin: 0.75em 0;
+    border-collapse: collapse;
+    font-size: 0.925em;
+  }
+
+  .chat-markdown th,
+  .chat-markdown td {
+    padding: 0.4em 0.85em;
+    text-align: left;
+    vertical-align: top;
+    border-bottom: 1px solid color-mix(in lab, var(--border-muted) 60%, transparent);
+  }
+
+  .chat-markdown th {
+    font-weight: 600;
+    white-space: nowrap;
+    border-bottom-color: var(--border-muted);
+  }
+
+  .chat-markdown th:first-child,
+  .chat-markdown td:first-child {
+    padding-left: 0;
+  }
+
+  .chat-markdown tbody tr:last-child td {
+    border-bottom: none;
+  }
+
   /* Streaming cursor — appears inline after the last text */
   .chat-markdown--streaming > :last-child::after {
     content: '';
