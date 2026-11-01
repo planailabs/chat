@@ -372,7 +372,11 @@ async fn pending_approvals(app: &App, raw: &Value, agents: &[String]) -> Result<
             .await
             .map_err(internal)?
             .flatten();
-        out.push(mirrored.unwrap_or(c));
+        let mut approval = mirrored.unwrap_or(c);
+        // Always from the hook's record, so a call that only has subnet's raw
+        // shape still shows (and requires confirming) its purchase.
+        approval["purchase"] = purchase_of(app, agents, &call_id).await?.unwrap_or(Value::Null);
+        out.push(approval);
     }
     Ok(Value::Array(out))
 }
@@ -396,6 +400,7 @@ fn raw_approvals(raw: &Value) -> Vec<Value> {
                 "reason": null,
                 "agent_reason": null,
                 "check": null,
+                "purchase": null,
             })
         })
         .collect()
@@ -411,9 +416,32 @@ pub async fn answer(app: &App, user: Uuid, id: Uuid, call_id: &str, content: Opt
     app.hub.call("answer", args).await.map_err(internal).map(drop)
 }
 
-pub async fn approve(app: &App, user: Uuid, id: Uuid, call_id: &str, approved: bool, reason: Option<String>, all: bool) -> Result<(), ApiError> {
+/// The quote the approval hook recorded for a call that buys something.
+async fn purchase_of(app: &App, agents: &[String], call_id: &str) -> Result<Option<Value>, ApiError> {
+    sqlx::query_scalar("SELECT purchase FROM approval_checks WHERE agent_id = ANY($1) AND call_id = $2 AND purchase IS NOT NULL")
+        .bind(agents)
+        .bind(call_id)
+        .fetch_optional(&app.pool)
+        .await
+        .map_err(internal)
+        .map(Option::flatten)
+}
+
+/// Whether approving sets "approve all": never for a purchase, which is only
+/// ever approved by itself and only with `confirm_purchase` (so a stray
+/// approve can't buy anything).
+pub fn approve_all(purchase: bool, approved: bool, all: bool, confirm_purchase: bool) -> Result<bool, ApiError> {
+    if purchase && approved && !confirm_purchase {
+        return Err(ApiError::bad_request("this call buys something: approve it with confirm_purchase: true"));
+    }
+    Ok(all && approved && !purchase)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn approve(app: &App, user: Uuid, id: Uuid, call_id: &str, approved: bool, reason: Option<String>, all: bool, confirm_purchase: bool) -> Result<(), ApiError> {
     let agent = live_agent(app, user, id).await?;
-    if all && approved {
+    let purchase = purchase_of(app, &agents_of(app, id).await?, call_id).await?.is_some();
+    if approve_all(purchase, approved, all, confirm_purchase)? {
         sqlx::query("UPDATE conversations SET auto_approve = true WHERE id = $1").bind(id).execute(&app.pool).await.map_err(internal)?;
     }
     app.hub.call("approve", json!({ "id": agent, "call_id": call_id, "approved": approved, "reason": reason })).await.map_err(internal).map(drop)
@@ -469,6 +497,23 @@ mod tests {
         assert_eq!(got[0]["name"], "connector.call_tool");
         assert_eq!(got[0]["input"]["tool"], "org_create");
         assert_eq!(raw_approvals(&json!([one.clone(), one])).len(), 2);
+    }
+
+    #[test]
+    fn a_purchase_needs_confirm_purchase_and_never_approves_all() {
+        // A stray approve (no confirm_purchase) is a 400.
+        let err = approve_all(true, true, false, false).unwrap_err();
+        assert_eq!(err.status(), axum::http::StatusCode::BAD_REQUEST, "{err}");
+        assert!(approve_all(true, true, true, false).is_err());
+        // Confirmed: approved, but "all" doesn't turn on auto_approve.
+        assert!(!approve_all(true, true, true, true).unwrap());
+        assert!(!approve_all(true, true, false, true).unwrap());
+        // Denying a purchase needs no confirmation.
+        assert!(!approve_all(true, false, true, false).unwrap());
+        // Anything else: as before.
+        assert!(approve_all(false, true, true, false).unwrap());
+        assert!(!approve_all(false, true, false, false).unwrap());
+        assert!(!approve_all(false, false, true, false).unwrap());
     }
 
     #[test]

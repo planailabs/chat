@@ -9,6 +9,11 @@
 //!    approve, are answered `ask`; subnet logs `approval_requested` and the
 //!    browser shows approve/deny (`chat.approve`). "Approve all" on the
 //!    conversation skips this layer.
+//!
+//! A **purchase** (a console tool that costs money, see `purchase`) skips
+//! all of that: it is always answered `ask` with the console's quote, or
+//! `deny` when it can't be priced — never allowed by the allow-list, the
+//! validator or "approve all".
 
 use axum::Json;
 use axum::extract::State;
@@ -209,14 +214,18 @@ struct Record<'a> {
 impl Record<'_> {
     /// Stores the decision (and the safety check's) and answers subnet.
     async fn answer(&self, app: &AppState, decision: &str, check: Option<(&str, &str)>, reason: String) -> Json<Value> {
+        self.answer_with(app, decision, check, None, reason).await
+    }
+
+    async fn answer_with(&self, app: &AppState, decision: &str, check: Option<(&str, &str)>, purchase: Option<&Value>, reason: String) -> Json<Value> {
         let recorded = match decision {
             "allow" => "allowed",
             "deny" => "denied",
             _ => "asked",
         };
         let res = sqlx::query(
-            "INSERT INTO approval_checks (agent_id, call_id, tool, agent_reason, decision, check_verdict, check_reasoning) VALUES ($1,$2,$3,$4,$5,$6,$7)
-             ON CONFLICT (agent_id, call_id) DO UPDATE SET decision = EXCLUDED.decision, check_verdict = EXCLUDED.check_verdict, check_reasoning = EXCLUDED.check_reasoning",
+            "INSERT INTO approval_checks (agent_id, call_id, tool, agent_reason, decision, check_verdict, check_reasoning, purchase) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+             ON CONFLICT (agent_id, call_id) DO UPDATE SET decision = EXCLUDED.decision, check_verdict = EXCLUDED.check_verdict, check_reasoning = EXCLUDED.check_reasoning, purchase = EXCLUDED.purchase",
         )
         .bind(self.agent)
         .bind(self.call_id)
@@ -225,13 +234,30 @@ impl Record<'_> {
         .bind(recorded)
         .bind(check.map(|c| c.0))
         .bind(check.map(|c| c.1))
+        .bind(purchase)
         .execute(&app.pool)
         .await;
         if let Err(e) = res {
+            if purchase.is_some() && decision == "ask" {
+                // `chat::approve` reads the purchase from this row to demand
+                // an explicit confirmation; without it, don't ask at all.
+                tracing::error!(agent = self.agent, call = self.call_id, "recording a purchase: {e}");
+                return decide("deny", "This purchase couldn't be recorded for your confirmation, so it wasn't made. Try again.");
+            }
             // The decision still stands; only its display is missing.
             tracing::error!(agent = self.agent, call = self.call_id, "recording an approval check: {e}");
         }
         decide(decision, reason)
+    }
+}
+
+/// What the hook answers about a purchase: the user confirms it with the
+/// quote in front of them, or — without a quote — it isn't made. Nothing
+/// else (allow-list, validator, "approve all") enters into it.
+pub fn purchase_outcome(quote: &Result<Value, String>) -> (&'static str, String) {
+    match quote {
+        Ok(q) => ("ask", format!("This is a purchase: {}. Confirm it to buy.", q["summary"].as_str().unwrap_or("it costs money"))),
+        Err(e) => ("deny", format!("This would buy something, and its price couldn't be determined ({e}), so it wasn't made. Don't retry it blindly; tell the user.")),
     }
 }
 
@@ -242,11 +268,8 @@ pub async fn pre_tool(State(app): State<AppState>, headers: HeaderMap, Json(h): 
     let tool = &h.input.tool;
     let call = effective(tool, &h.input.args);
     let rec = Record { agent: &h.agent.id, call_id: &h.input.call_id, tool: &call.name, agent_reason: h.input.reason.as_deref() };
-    if app.cfg.approval.allow.iter().any(|p| glob(p, tool)) {
-        return Ok(rec.answer(&app, "allow", None, "allow-listed".into()).await);
-    }
     // Only our conversations: an unknown agent has no user to answer for it.
-    let auto_approve: Option<bool> = sqlx::query_scalar("SELECT auto_approve FROM conversations WHERE agent_id = $1")
+    let conversation: Option<(uuid::Uuid, bool)> = sqlx::query_as("SELECT user_id, auto_approve FROM conversations WHERE agent_id = $1")
         .bind(&h.agent.id)
         .fetch_optional(&app.pool)
         .await
@@ -254,7 +277,21 @@ pub async fn pre_tool(State(app): State<AppState>, headers: HeaderMap, Json(h): 
             tracing::error!("approval hook: {e}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
-    let Some(auto_approve) = auto_approve else { return Ok(decide("deny", "not a chat conversation")) };
+    // Purchases first: before the allow-list, the validator and "approve all".
+    if let (Some(purchases), Some((user, _))) = (&app.purchases, conversation)
+        && let Some(quote) = purchases.check(&user.to_string(), tool, &h.input.args).await
+    {
+        let (decision, why) = purchase_outcome(&quote);
+        return Ok(rec.answer_with(&app, decision, None, quote.as_ref().ok(), why).await);
+    }
+    // A connector call with no user behind it can't be priced or confirmed.
+    if conversation.is_none() && tool == "connector.call_tool" {
+        return Ok(decide("deny", "not a chat conversation"));
+    }
+    if app.cfg.approval.allow.iter().any(|p| glob(p, tool)) {
+        return Ok(rec.answer(&app, "allow", None, "allow-listed".into()).await);
+    }
+    let Some((_, auto_approve)) = conversation else { return Ok(decide("deny", "not a chat conversation")) };
 
     let risk = risk_of(&call.name);
     let transcript = app.hub.transcript(&h.agent.id).await.map_err(|e| {
@@ -343,6 +380,20 @@ mod tests {
         assert_eq!(parse_verdict(&prose("**Approve.** It matches the stated intent.")).unwrap(), Verdict::Approved("It matches the stated intent.".into()));
         assert_eq!(parse_verdict(&prose("REJECT: deletes the wrong item")).unwrap(), Verdict::Rejected("deletes the wrong item".into()));
         assert!(parse_verdict(&prose("Hmm, hard to say.")).is_err(), "no verdict word: the user decides");
+    }
+
+    #[test]
+    fn a_purchase_is_asked_with_its_quote_and_never_bought_unpriced() {
+        let quote = json!({ "billable": true, "summary": "cms agent 'Shop' in Clover Inc — 49.00 USD / month, 14-day trial" });
+        // The outcome depends on the quote alone: auto_approve, the allow-list
+        // and the validator aren't inputs, and pre_tool answers it before
+        // consulting any of them.
+        let (decision, why) = purchase_outcome(&Ok(quote));
+        assert_eq!(decision, "ask");
+        assert!(why.contains("49.00 USD / month"), "{why}");
+        let (decision, why) = purchase_outcome(&Err("502 Bad Gateway: console down".into()));
+        assert_eq!(decision, "deny");
+        assert!(why.contains("console down") && why.contains("price couldn't be determined"), "{why}");
     }
 
     #[test]

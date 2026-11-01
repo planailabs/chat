@@ -14,6 +14,8 @@ pub struct App {
     pub owners: Owners,
     pub events: broadcast::Sender<BrowserEvent>,
     pub http: reqwest::Client,
+    /// Billable console calls (with `[connector.console]`).
+    pub purchases: Option<crate::purchase::Purchases>,
 }
 
 pub type AppState = Arc<App>;
@@ -33,8 +35,8 @@ pub async fn init(cfg: &'static Config) -> anyhow::Result<(AppState, Option<plan
     let owners = Owners::load(&pool).await?;
     let (events, _) = broadcast::channel(1024);
     tokio::spawn(Pump { hub: hub.clone(), pool: pool.clone(), owners: owners.clone(), tx: events.clone() }.run());
-    let connector = crate::connector::build(cfg, pool.clone())?;
-    Ok((Arc::new(App { cfg, pool, accounts, hub, owners, events, http: reqwest::Client::new() }), connector))
+    let (connector, purchases) = crate::connector::build(cfg, pool.clone())?;
+    Ok((Arc::new(App { cfg, pool, accounts, hub, owners, events, http: reqwest::Client::new(), purchases }), connector))
 }
 
 /// The first versions put every user on a limitless "free" plan; budgets come

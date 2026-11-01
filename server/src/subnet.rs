@@ -191,13 +191,13 @@ impl Pump {
 
     /// What the approval hook recorded about a call, if it judged it.
     async fn check(&self, agent: &str, call: &str) -> anyhow::Result<Option<Value>> {
-        let row: Option<(Option<String>, String, Option<String>, Option<String>)> =
-            sqlx::query_as("SELECT agent_reason, decision, check_verdict, check_reasoning FROM approval_checks WHERE agent_id = $1 AND call_id = $2")
+        let row: Option<(Option<String>, String, Option<String>, Option<String>, Option<Value>)> =
+            sqlx::query_as("SELECT agent_reason, decision, check_verdict, check_reasoning, purchase FROM approval_checks WHERE agent_id = $1 AND call_id = $2")
                 .bind(agent)
                 .bind(call)
                 .fetch_optional(&self.pool)
                 .await?;
-        Ok(row.map(|(agent_reason, decision, verdict, reasoning)| json!({ "agent_reason": agent_reason, "decision": decision, "verdict": verdict, "reasoning": reasoning })))
+        Ok(row.map(|(agent_reason, decision, verdict, reasoning, purchase)| json!({ "agent_reason": agent_reason, "decision": decision, "verdict": verdict, "reasoning": reasoning, "purchase": purchase })))
     }
 
     async fn apply(&self, agent: &str, seq: i64, user: Uuid, conv: Uuid, ev: &Value, turn: &mut Turn) -> anyhow::Result<()> {
@@ -282,7 +282,10 @@ impl Pump {
                 let call = ev["call_id"].as_str().unwrap_or_default();
                 let check = self.check(agent, call).await?;
                 let agent_reason = turn.reasons.get(call).cloned().or_else(|| check.as_ref().and_then(|c| c["agent_reason"].as_str().map(String::from)));
-                let data = json!({ "call_id": ev["call_id"], "name": ev["name"], "input": ev["input"], "reason": ev["reason"], "agent_reason": agent_reason, "check": check });
+                // The console's quote when the call buys something: the card
+                // shows it and approving needs `confirm_purchase`.
+                let purchase = check.as_ref().map(|c| c["purchase"].clone()).unwrap_or(Value::Null);
+                let data = json!({ "call_id": ev["call_id"], "name": ev["name"], "input": ev["input"], "reason": ev["reason"], "agent_reason": agent_reason, "check": check, "purchase": purchase });
                 self.mirror(agent, seq, user, "approval", ev["name"].as_str().unwrap_or_default(), Some(data.clone())).await?;
                 self.emit(user, conv, "approval", data);
             }

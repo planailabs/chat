@@ -4,6 +4,7 @@ mod chat;
 mod hook;
 mod config;
 mod connector;
+mod purchase;
 mod state;
 mod subnet;
 

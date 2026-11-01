@@ -15,7 +15,7 @@ use uuid::Uuid;
 use crate::config::{Config, Console};
 
 #[derive(Clone)]
-struct ProfileSubjects(PgPool);
+pub struct ProfileSubjects(pub PgPool);
 
 #[async_trait::async_trait]
 impl SubjectResolver for ProfileSubjects {
@@ -70,11 +70,14 @@ impl TargetSource for Targets {
     }
 }
 
-pub fn build(cfg: &'static Config, pool: PgPool) -> anyhow::Result<Option<Connector>> {
-    let Some(c) = &cfg.connector else { return Ok(None) };
+/// The connector, and the purchase checks that call the console as the user
+/// with the same token exchanger.
+pub fn build(cfg: &'static Config, pool: PgPool) -> anyhow::Result<(Option<Connector>, Option<crate::purchase::Purchases>)> {
+    let Some(c) = &cfg.connector else { return Ok((None, None)) };
     let http = reqwest::Client::new();
     let exchanger = Arc::new(TokenExchanger::new(http.clone(), c.exchange.clone()));
     let subjects = ProfileSubjects(pool);
+    let purchases = crate::purchase::Purchases::build(cfg, exchanger.clone(), subjects.clone(), http.clone());
     let targets: Arc<dyn TargetSource> = Arc::new(Targets {
         fixed: c.targets.clone(),
         console: c.console.as_ref().map(|console| (console, exchanger.clone(), subjects.clone(), http)),
@@ -87,5 +90,5 @@ pub fn build(cfg: &'static Config, pool: PgPool) -> anyhow::Result<Option<Connec
         .subjects(Arc::new(subjects))
         .build()
         .map_err(|e| anyhow::anyhow!("connector: {e}"))?;
-    Ok(Some(connector))
+    Ok((Some(connector), purchases))
 }

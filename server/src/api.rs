@@ -170,9 +170,14 @@ pub struct ApproveInput {
     call_id: String,
     approved: bool,
     reason: Option<String>,
-    /// Approve every further call in this conversation.
+    /// Approve every further call in this conversation. Ignored for a
+    /// purchase, which is only ever approved by itself.
     #[serde(default)]
     all: bool,
+    /// Required (true) to approve a call that buys something (its approval
+    /// carries `purchase`); 400 without it.
+    #[serde(default)]
+    confirm_purchase: bool,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -358,7 +363,7 @@ pub fn registry(auth: Arc<dyn plan_ai_api_mcp::Authenticator>) -> Registry<AppSt
         })
         .custom("approve", Risk::Mutating, OnItem::No, "Approve or deny a tool call waiting for you.", |app: AppState, p: Arc<Principal>, i: ApproveInput| async move {
             require_not_impersonating(&p)?;
-            chat::approve(&app, user_of(&p)?, i.id, &i.call_id, i.approved, i.reason, i.all).await?;
+            chat::approve(&app, user_of(&p)?, i.id, &i.call_id, i.approved, i.reason, i.all, i.confirm_purchase).await?;
             Ok(OK)
         })
         .custom("rename", Risk::Mutating, OnItem::No, "Rename a conversation.", |app: AppState, p: Arc<Principal>, i: RenameInput| async move {
