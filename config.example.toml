@@ -16,7 +16,7 @@ static_dir = "web/dist"
 #
 # [[auth.providers]]
 # slug = "zitadel"                 # redirect URI: {external_url}/auth/zitadel/callback
-# name = "plan.ai"
+# name = "plan.ai Partner"
 # issuer = "https://id.plan.ai"
 # client_id = "xxx"                 # project "plan.ai chat" in the plan.ai org
 # client_secret = "xxx"
