@@ -64,6 +64,8 @@ pub struct Profile {
     deletion_requested_at: Option<chrono::DateTime<chrono::Utc>>,
     /// An admin has let this account in; until then it can't chat.
     approved: bool,
+    /// Purchases may be made from an MCP client (each confirmed with its price).
+    mcp_purchases: bool,
     #[sqlx(skip)]
     impersonating: bool,
     /// The user's plan and its hourly token budget, with the last hour's use.
@@ -75,7 +77,7 @@ async fn load_profile(app: &AppState, user: Uuid) -> Result<Profile, ApiError> {
     ensure_profile(app, user).await?;
     sqlx::query_as(
         "SELECT p.user_id, u.email, u.name, u.is_admin AND u.approved_at IS NOT NULL AS is_admin, p.language, p.theme, p.newsletter_opt_in,
-                p.deletion_requested_at, u.approved_at IS NOT NULL AS approved
+                p.deletion_requested_at, u.approved_at IS NOT NULL AS approved, p.mcp_purchases
          FROM profiles p JOIN accounts.users u ON u.id = p.user_id WHERE p.user_id = $1",
     )
     .bind(user)
@@ -93,18 +95,22 @@ pub struct ProfileUpdate {
     newsletter_opt_in: Option<bool>,
     /// Where a newsletter change came from: `chat_flow` or `settings`.
     newsletter_source: Option<String>,
+    /// Allow purchases from MCP clients (each still confirmed with its price).
+    mcp_purchases: Option<bool>,
 }
 
 async fn update_profile(app: &AppState, user: Uuid, u: ProfileUpdate) -> Result<(), ApiError> {
     let mut tx = app.pool.begin().await.map_err(internal)?;
     sqlx::query(
         "UPDATE profiles SET language = COALESCE($2, language), theme = COALESCE($3, theme),
-         newsletter_opt_in = COALESCE($4, newsletter_opt_in), updated_at = now() WHERE user_id = $1",
+         newsletter_opt_in = COALESCE($4, newsletter_opt_in), mcp_purchases = COALESCE($5, mcp_purchases),
+         updated_at = now() WHERE user_id = $1",
     )
     .bind(user)
     .bind(&u.language)
     .bind(&u.theme)
     .bind(u.newsletter_opt_in)
+    .bind(u.mcp_purchases)
     .execute(&mut *tx)
     .await
     .map_err(|e| ApiError::bad_request(e.to_string()))?;
@@ -338,7 +344,7 @@ pub fn registry(auth: Arc<dyn plan_ai_api_mcp::Authenticator>) -> Registry<AppSt
             }
             Ok(profile)
         })
-        .update("Change language, theme or newsletter subscription.", |app: AppState, p: Arc<Principal>, u: ProfileUpdate| async move {
+        .update("Change language, theme, newsletter subscription, or whether MCP clients may make purchases.", |app: AppState, p: Arc<Principal>, u: ProfileUpdate| async move {
             require_not_impersonating(&p)?;
             let user = account_of(&p)?;
             ensure_profile(&app, user).await?;

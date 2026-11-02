@@ -1,5 +1,5 @@
 <script setup lang="ts">
-/** Settings: who is signed in, the newsletter, data export, account deletion, sign-out. */
+/** Settings: who is signed in, the newsletter, MCP apps, data export, account deletion, sign-out. */
 import { computed } from 'vue';
 import AppIcon from './AppIcon.vue';
 import PlanLogo from './PlanLogo.vue';
@@ -10,6 +10,7 @@ import { budgetBars } from '../utils/budget';
 import { handleSignOut } from '../actions/auth';
 import { closeSettingsOverlay } from '../actions/overlay';
 import { handleDataExport, handleSettingsNewsletterToggle, requestAccountDeletion } from '../actions/settings';
+import { persistMcpPurchases } from '../actions/profile';
 
 const state = store.state;
 const profileSection = computed(() => locale.value.settings.sections.profile);
@@ -36,6 +37,10 @@ const deletionNotice = computed(() =>
 );
 
 const onNewsletterChange = (event: Event) => handleSettingsNewsletterToggle((event.target as HTMLInputElement).checked);
+
+const mcpTexts = computed(() => locale.value.settings.sections.mcp);
+const mcpUrl = `${window.location.origin}/public/mcp`;
+const onMcpPurchasesChange = (event: Event) => void persistMcpPurchases((event.target as HTMLInputElement).checked);
 
 const planTexts = computed(() => locale.value.settings.sections.plan);
 const bars = computed(() => {
@@ -90,6 +95,30 @@ const signOut = () => {
           <span>{{ profileSection.fields.newsletter }}</span>
         </label>
       </section>
+      <template v-if="state.isAuthenticated && !state.awaitingApproval">
+        <div class="settings-divider" aria-hidden="true" />
+        <section class="settings-section" data-testid="settings-mcp">
+          <header class="settings-section__header">
+            <p class="settings-section__title">{{ mcpTexts.title }}</p>
+          </header>
+          <p class="text-xs text-(--text-muted)">{{ mcpTexts.connect }}</p>
+          <code class="mt-1 block text-xs break-all select-all">{{ mcpUrl }}</code>
+          <label class="settings-toggle mt-3">
+            <input
+              type="checkbox"
+              class="settings-toggle__input"
+              :checked="state.profile.mcpPurchases"
+              :disabled="state.impersonating"
+              @change="onMcpPurchasesChange"
+            />
+            <span class="settings-toggle__icon" aria-hidden="true">
+              <PlanLogo v-if="state.profile.mcpPurchases" class="settings-toggle__logo" />
+            </span>
+            <span>{{ mcpTexts.purchases }}</span>
+          </label>
+          <p class="text-xs text-(--text-muted)">{{ mcpTexts.purchasesHelp }}</p>
+        </section>
+      </template>
       <template v-if="state.budget">
         <div class="settings-divider" aria-hidden="true" />
         <section class="settings-section settings-plan">

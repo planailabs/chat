@@ -31,6 +31,18 @@ cd web && pnpm typecheck                   # vue-tsc
 cargo test                                 # server and shared crates
 ```
 
+## MCP for outside clients
+
+`/public/mcp` offers the chat's own API and the user's plan.ai services
+(`<service>__<tool>`, through the connector) to MCP clients such as Claude,
+ChatGPT or Cursor. They sign in with OAuth 2.1 against the chat itself
+(`common/plan-ai-oauth`: dynamic client registration, PKCE, consent on the
+usual Zitadel sign-in); accounts waiting for approval can't connect. Every call
+goes through the same approval as the agents' (`hook`): risky calls ask the
+user in the client (elicitation), and purchases are off unless the user turns
+on "Purchases from MCP clients" in the settings, then confirmed with the price.
+It needs `[auth]` (real sign-in); with `DEV_ONLY_NO_AUTH` it isn't mounted.
+
 ## Deployment
 
 `package.nix` packages the server and the UI (`web/`) separately; `module.nix` is the NixOS module and points the server at the UI (`web.static_dir`).

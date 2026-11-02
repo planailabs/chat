@@ -26,6 +26,8 @@ export interface ProfileState {
   phase: ProfilePhase;
   newsletterStatus: NewsletterStatus;
   newsletterSyncing: boolean;
+  /** Purchases from MCP clients allowed (off by default). */
+  mcpPurchases: boolean;
   deletionPending: boolean;
   deletionRequestedAt: number | null;
   dataExportStatus: DataExportStatus;
@@ -39,6 +41,7 @@ export const createProfileState = (): ProfileState => ({
   phase: 'idle',
   newsletterStatus: 'unknown',
   newsletterSyncing: false,
+  mcpPurchases: false,
   deletionPending: false,
   deletionRequestedAt: null,
   dataExportStatus: 'idle',
@@ -57,6 +60,7 @@ export const profileLoadSuccess = (ps: ProfileState, profile: Profile): void => 
   ps.phase = 'ready';
   ps.error = null;
   ps.newsletterStatus = profile.newsletter_opt_in ? 'subscribed' : 'unsubscribed';
+  ps.mcpPurchases = profile.mcp_purchases ?? false;
   const requestedAt = profile.deletion_requested_at ? Date.parse(profile.deletion_requested_at) : NaN;
   profileSetDeletion(ps, profile.deletion_requested_at !== null, Number.isNaN(requestedAt) ? null : requestedAt);
 };

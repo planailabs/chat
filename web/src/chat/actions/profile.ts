@@ -50,6 +50,15 @@ export const persistNewsletterChoice = async (
   return saved;
 };
 
+/** Allows or stops purchases from MCP clients; resolves whether it was saved. */
+export const persistMcpPurchases = async (on: boolean): Promise<boolean> => {
+  if (!canPersist()) return false;
+  const saved = await persistProfile({ mcp_purchases: on }, 'MCP purchases');
+  if (saved) store.state.profile.mcpPurchases = on;
+  store.notify();
+  return saved;
+};
+
 /** Reloads the plan and the last hour's use (settings overlay, after hitting the limit). */
 export const refreshBudget = async (): Promise<void> => {
   if (!store.state.isAuthenticated) return;

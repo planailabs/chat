@@ -140,6 +140,13 @@ export interface LocaleContent {
           newsletter: string;
         };
       };
+      mcp: {
+        title: string;
+        /** Above the endpoint URL. */
+        connect: string;
+        purchases: string;
+        purchasesHelp: string;
+      };
       plan: {
         title: string;
         input: string;
@@ -292,6 +299,12 @@ const en: LocaleContent = {
           name: 'Your name',
           newsletter: 'Subscribe to newsletter',
         },
+      },
+      mcp: {
+        title: 'Apps (MCP)',
+        connect: 'Connect Claude, ChatGPT or another MCP client with this address; it signs in with your plan.ai account:',
+        purchases: 'Allow purchases from MCP clients',
+        purchasesHelp: 'Each purchase is still shown with its price for you to confirm.',
       },
       plan: {
         title: 'Plan',
@@ -452,6 +465,12 @@ const de: LocaleContent = {
           name: 'Dein Name',
           newsletter: 'Newsletter abonnieren',
         },
+      },
+      mcp: {
+        title: 'Apps (MCP)',
+        connect: 'Verbinde Claude, ChatGPT oder einen anderen MCP-Client mit dieser Adresse; die Anmeldung läuft über dein plan.ai-Konto:',
+        purchases: 'Käufe aus MCP-Clients erlauben',
+        purchasesHelp: 'Jeder Kauf wird dir weiterhin mit seinem Preis zur Bestätigung angezeigt.',
       },
       plan: {
         title: 'Tarif',

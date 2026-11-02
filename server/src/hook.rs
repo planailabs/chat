@@ -69,7 +69,7 @@ fn reads(tool: &str) -> bool {
     risk_of(tool) == Risk::ReadOnly
 }
 
-fn glob(pattern: &str, name: &str) -> bool {
+pub(crate) fn glob(pattern: &str, name: &str) -> bool {
     match pattern.strip_suffix('*') {
         Some(prefix) => name.starts_with(prefix),
         None => pattern == name,
@@ -77,7 +77,7 @@ fn glob(pattern: &str, name: &str) -> bool {
 }
 
 /// A call as the hook judges it: connector calls are judged as the target tool.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Call {
     pub name: String,
     pub args: Value,
@@ -134,7 +134,7 @@ pub enum Verdict {
 }
 
 /// Layer 2.
-async fn validate(app: &AppState, call: &Call, risk: Risk, reason: &str, history: &[Call]) -> anyhow::Result<Option<Verdict>> {
+pub(crate) async fn validate(app: &AppState, call: &Call, risk: Risk, reason: &str, history: &[Call]) -> anyhow::Result<Option<Verdict>> {
     let a = &app.cfg.approval;
     let (Some(url), Some(model)) = (&a.validator_url, &a.validator_model) else { return Ok(None) };
     let recent: String = history.iter().rev().take(10).rev().map(|h| format!("- {}({})\n", h.name, truncate(&h.args.to_string(), 200))).collect();

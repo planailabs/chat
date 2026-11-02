@@ -4,6 +4,7 @@ mod chat;
 mod hook;
 mod config;
 mod connector;
+mod public_mcp;
 mod purchase;
 mod state;
 mod subnet;
@@ -56,7 +57,7 @@ async fn main() -> anyhow::Result<()> {
         plan_ai_auth::build_auth_layers(auth, &cfg.database.url).await.0
     };
 
-    let registry = api::registry(Arc::new(plan_ai_accounts::TokenAuth(app.accounts.clone())));
+    let registry = Arc::new(api::registry(Arc::new(plan_ai_accounts::TokenAuth(app.accounts.clone()))));
     let api = Router::new()
         .route("/api/v1/chat/events", get(chat_events).with_state(app.clone()))
         .merge(registry.http_router(app.clone()))
@@ -72,6 +73,18 @@ async fn main() -> anyhow::Result<()> {
         .route_service("/dashboard", dashboard.clone())
         .nest_service("/dashboard/", dashboard)
         .fallback_service(spa);
+    // OAuth for outside MCP clients (/public/mcp): sign-in and consent ride
+    // on the session, so only with real sign-in configured.
+    let oauth = match &cfg.auth {
+        Some(auth) if !auth_layers.is_empty() => {
+            let base = auth.external_url.trim_end_matches('/').to_string();
+            let oauth_cfg = plan_ai_oauth::Config::new(&base, vec![format!("{base}/public/mcp")], "plan.ai agent");
+            let server = plan_ai_oauth::OAuthServer::connect(&cfg.database.url, oauth_cfg, Arc::new(Approved(app.clone()))).await?;
+            web = web.merge(server.consent_routes().layer(from_fn(plan_ai_auth::require_auth)));
+            Some((server, format!("{base}/public/mcp")))
+        }
+        _ => None,
+    };
     if !auth_layers.is_empty() {
         web = web.route("/auth/login", get(plan_ai_auth::login_page)).route("/auth/logout", get(plan_ai_auth::logout_handler));
     }
@@ -88,10 +101,24 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let mcp = registry.mcp_service(app.clone());
-    let router = Router::new()
+    let mut router = Router::new()
         .route_service("/mcp", mcp.clone())
         .route_service("/mcp/", mcp)
-        .merge(callbacks)
+        .merge(callbacks);
+    if let Some((server, resource)) = oauth {
+        let (app, registry, connector) = (app.clone(), registry.clone(), connector.clone());
+        let public = rmcp::transport::streamable_http_server::StreamableHttpService::new(
+            move || Ok(public_mcp::PublicMcp::new(app.clone(), registry.clone(), connector.clone())),
+            Arc::new(rmcp::transport::streamable_http_server::session::local::LocalSessionManager::default()),
+            Default::default(),
+        );
+        router = router.merge(server.public_routes()).merge(
+            Router::new()
+                .route_service("/public/mcp", public)
+                .layer(from_fn_with_state((server, resource), plan_ai_oauth::OAuthServer::protect)),
+        );
+    }
+    let router = router
         .merge(web)
         .layer(mac_mgmt_common::otel::http::trace_layer())
         .layer(from_fn(mac_mgmt_common::otel::http::record_request_metrics));
@@ -129,6 +156,20 @@ async fn shutdown() {
     #[cfg(not(unix))]
     let _ = tokio::signal::ctrl_c().await;
     tracing::info!("shutting down");
+}
+
+/// Who may connect an MCP client: an account an admin has approved.
+struct Approved(AppState);
+
+#[async_trait::async_trait]
+impl plan_ai_oauth::Admission for Approved {
+    async fn admit(&self, user: &WebUser) -> Result<(), String> {
+        let p = self.0.accounts.principal(user).await.map_err(|e| e.to_string())?;
+        if p.scopes["pending"] == json!(true) {
+            return Err("Your account is waiting for an admin to approve it. Once it is approved, you can connect apps.".into());
+        }
+        Ok(())
+    }
 }
 
 /// API clients with a Bearer token authenticate in the handler; everyone

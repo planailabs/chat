@@ -2832,7 +2832,9 @@ dependencies = [
  "plan-ai-api-mcp",
  "plan-ai-auth",
  "plan-ai-connector",
+ "plan-ai-oauth",
  "reqwest 0.13.5",
+ "rmcp",
  "rustls",
  "schemars",
  "serde",
@@ -2879,6 +2881,30 @@ dependencies = [
  "fluent",
  "mustache",
  "unic-langid",
+]
+
+[[package]]
+name = "plan-ai-oauth"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "axum",
+ "base64 0.22.1",
+ "chrono",
+ "plan-ai-auth",
+ "plan-ai-html",
+ "rand 0.9.5",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "sqlx",
+ "tokio",
+ "tower",
+ "tower-http",
+ "tracing",
+ "url",
+ "uuid",
 ]
 
 [[package]]
@@ -3406,6 +3432,7 @@ dependencies = [
  "tokio-util",
  "tower-service",
  "tracing",
+ "url",
  "uuid",
 ]
 

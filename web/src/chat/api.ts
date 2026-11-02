@@ -88,6 +88,8 @@ export interface Profile {
   deletion_requested_at: string | null;
   /** An admin has let this account in; until then it can't chat. */
   approved: boolean;
+  /** Purchases may be made from MCP clients (each confirmed with its price). */
+  mcp_purchases: boolean;
   /** An admin is looking at this user's account (read-only). */
   impersonating: boolean;
   /** The user's plan and its hourly budget, with the last hour's use. */
@@ -129,6 +131,7 @@ export interface ProfileUpdate {
   theme?: ThemePreference;
   newsletter_opt_in?: boolean;
   newsletter_source?: 'chat_flow' | 'settings';
+  mcp_purchases?: boolean;
 }
 
 /** One of the user's conversations (`GET /api/v1/chat`, newest first). */
