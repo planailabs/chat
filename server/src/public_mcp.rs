@@ -1,6 +1,8 @@
 //! `/public/mcp`: the chat's own API and the user's services (mgmt.plan.ai,
 //! their cloud deployments) for an outside MCP client — Claude, ChatGPT,
-//! Cursor — signed in through OAuth (plan-ai-oauth, mounted in main).
+//! Cursor — signed in through OAuth (plan-ai-oauth, mounted in main). The
+//! services come as the connector's three tools (`list_services`,
+//! `list_tools`, `call_tool`), the way the chat's agents see them.
 //!
 //! Every call is judged like a chat agent's (see `hook`): the allow-list and
 //! static check, then the validator model. What the chat would put to the
@@ -8,7 +10,6 @@
 //! that can't ask gets a refusal saying so. Purchases are off unless the
 //! user turned on `mcp_purchases`, and then each is confirmed with its price.
 
-use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -28,9 +29,6 @@ use crate::state::AppState;
 
 type McpError = ErrorData;
 
-/// Separates a service from its tool in a listed name (`mac-mgmt__skill_list`).
-const SEP: &str = "__";
-
 /// One MCP session.
 #[derive(Clone)]
 pub struct PublicMcp {
@@ -43,8 +41,9 @@ pub struct PublicMcp {
 #[derive(Default)]
 struct Session {
     who: RwLock<Option<Who>>,
-    /// Listed service tools: name → (service, tool, risk by its annotations).
-    services: Mutex<HashMap<String, (String, String, Risk)>>,
+    /// Service tools' risk by their annotations, as listed in this session:
+    /// (service, tool) → risk.
+    risks: Mutex<HashMap<(String, String), Risk>>,
     /// This session's allowed calls, for the static check and the validator.
     history: Mutex<Vec<Call>>,
 }
@@ -67,13 +66,6 @@ impl PublicMcp {
     }
 }
 
-/// A service name as part of a tool name: MCP tool names are `[A-Za-z0-9_-]`.
-fn tool_name(service: &str, tool: &str) -> String {
-    let s: String = service.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect();
-    let name = format!("{s}{SEP}{tool}");
-    name.chars().take(64).collect()
-}
-
 fn risk_of_annotations(a: Option<&ToolAnnotations>, name: &str) -> Risk {
     match a {
         Some(a) if a.read_only_hint == Some(true) => Risk::ReadOnly,
@@ -93,6 +85,15 @@ fn api_risk(r: plan_ai_api_mcp::Risk) -> Risk {
 
 fn truncate(s: &str, max: usize) -> String {
     if s.chars().count() <= max { s.to_string() } else { format!("{}…", s.chars().take(max).collect::<String>()) }
+}
+
+fn json_result(v: Value) -> CallToolResult {
+    CallToolResult {
+        content: vec![Content::text(serde_json::to_string_pretty(&v).unwrap_or_else(|_| v.to_string()))],
+        structured_content: Some(v),
+        is_error: Some(false),
+        meta: None,
+    }
 }
 
 fn refused(why: impl Into<String>) -> CallToolResult {
@@ -205,39 +206,27 @@ impl PublicMcp {
             .unwrap_or(false)
     }
 
-    async fn list_service_tools(&self, who: &Who) -> Vec<Tool> {
-        let Some(connector) = &self.connector else { return vec![] };
-        let tenant = who.user.to_string();
-        let services = match connector.services(&tenant).await {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::warn!(user = %who.user, "public MCP: listing services: {e}");
-                return vec![];
-            }
-        };
-        let listed = futures::future::join_all(services.iter().map(|s| connector.service_tools(&tenant, &s.name))).await;
-        let mut map = HashMap::new();
-        let mut tools = Vec::new();
-        for (service, result) in services.iter().zip(listed) {
-            let list = match result {
-                Ok(l) => l,
-                Err(e) => {
-                    tracing::warn!(user = %who.user, service = %service.name, "public MCP: listing tools: {e}");
-                    continue;
-                }
-            };
-            for mut t in list {
-                let inner = t.name.to_string();
-                let name = tool_name(&service.name, &inner);
-                let risk = risk_of_annotations(t.annotations.as_ref(), &format!("{}.{inner}", service.name));
-                map.insert(name.clone(), (service.name.clone(), inner, risk));
-                t.description = Some(Cow::Owned(format!("[{}] {}", service.name, t.description.as_deref().unwrap_or(""))));
-                t.name = Cow::Owned(name);
-                tools.push(t);
-            }
+    /// One service's tools as the user, remembering each one's risk for
+    /// the approval of later calls.
+    async fn service_tools(&self, connector: &Connector, who: &Who, service: &str) -> Result<Vec<Tool>, String> {
+        let tools = connector.service_tools(&who.user.to_string(), service).await?;
+        let mut risks = self.session.risks.lock().await;
+        for t in &tools {
+            let risk = risk_of_annotations(t.annotations.as_ref(), &format!("{service}.{}", t.name));
+            risks.insert((service.to_string(), t.name.to_string()), risk);
         }
-        *self.session.services.lock().await = map;
-        tools
+        Ok(tools)
+    }
+
+    /// A service tool's risk: from its annotations (listed now if the client
+    /// hasn't), else from its name's verb.
+    async fn service_risk(&self, connector: &Connector, who: &Who, service: &str, tool: &str) -> Risk {
+        let key = (service.to_string(), tool.to_string());
+        if let Some(r) = self.session.risks.lock().await.get(&key) {
+            return *r;
+        }
+        let _ = self.service_tools(connector, who, service).await;
+        self.session.risks.lock().await.get(&key).copied().unwrap_or_else(|| hook::risk_of(&format!("{service}.{tool}")))
     }
 }
 
@@ -246,8 +235,9 @@ impl ServerHandler for PublicMcp {
         ServerInfo {
             instructions: Some(
                 "plan.ai as the signed-in user: the chat's own API (conversations, profile) and the user's plan.ai \
-                 services, named `<service>__<tool>`. Each call is checked like the plan.ai chat's agents' calls; risky \
-                 ones ask the user to confirm."
+                 services: list_services, then list_tools {service} (check each tool's annotations), then call_tool \
+                 {service, tool, arguments}. Each call is checked like the plan.ai chat's agents' calls; risky ones \
+                 ask the user to confirm."
                     .into(),
             ),
             capabilities: ServerCapabilities::builder().enable_tools().build(),
@@ -282,9 +272,11 @@ impl ServerHandler for PublicMcp {
     }
 
     async fn list_tools(&self, _request: Option<PaginatedRequestParams>, _context: RequestContext<RoleServer>) -> Result<ListToolsResult, McpError> {
-        let who = self.who().await?;
+        let _ = self.who().await?;
         let mut tools: Vec<Tool> = self.registry.endpoints().iter().map(|e| e.mcp_tool()).collect();
-        tools.extend(self.list_service_tools(&who).await);
+        if self.connector.is_some() {
+            tools.extend(plan_ai_connector::connector_tools());
+        }
         Ok(ListToolsResult { tools, next_cursor: None, meta: None })
     }
 
@@ -303,17 +295,39 @@ impl ServerHandler for PublicMcp {
             return ep.mcp_result(out);
         }
 
-        // A service's tool.
-        let mut entry = self.session.services.lock().await.get(&name).cloned();
-        if entry.is_none() {
-            self.list_service_tools(&who).await;
-            entry = self.session.services.lock().await.get(&name).cloned();
-        }
-        let Some((service, tool, risk)) = entry else {
+        // The user's services, through the connector's three tools.
+        let Some(connector) = &self.connector else {
             return Err(McpError::invalid_params(format!("unknown tool: {name}"), None));
         };
-        let Some(connector) = &self.connector else { return Ok(refused("no services are configured")) };
+        let field = |k: &str| args.get(k).and_then(Value::as_str).map(str::to_owned);
+        match name.as_str() {
+            // Reading which services and tools there are needs no approval.
+            "list_services" => {
+                return Ok(match connector.services(&who.user.to_string()).await {
+                    Ok(ts) => {
+                        let services: Vec<Value> = ts.iter().map(|t| json!({ "name": t.name, "description": t.description, "kind": t.kind })).collect();
+                        json_result(json!({ "services": services }))
+                    }
+                    Err(e) => refused(format!("listing your services failed: {e}")),
+                });
+            }
+            "list_tools" => {
+                let Some(service) = field("service") else { return Err(McpError::invalid_params("list_tools needs {service}", None)) };
+                return Ok(match self.service_tools(connector, &who, &service).await {
+                    Ok(tools) => json_result(json!({ "service": service, "tools": tools })),
+                    Err(e) => refused(e),
+                });
+            }
+            "call_tool" => {}
+            _ => return Err(McpError::invalid_params(format!("unknown tool: {name}"), None)),
+        }
+        let (Some(service), Some(tool)) = (field("service"), field("tool")) else {
+            return Err(McpError::invalid_params("call_tool needs {service, tool, arguments}", None));
+        };
+        let inner_args = args.get("arguments").and_then(Value::as_object).cloned();
+        let args = inner_args.clone().map(Value::Object).unwrap_or_else(|| json!({}));
         let call = Call { name: format!("{service}.{tool}"), args: args.clone() };
+        let risk = self.service_risk(connector, &who, &service, &tool).await;
 
         // Purchases: before everything else, as in the chat.
         let as_connector = json!({ "service": service, "tool": tool, "arguments": args });
@@ -337,7 +351,7 @@ impl ServerHandler for PublicMcp {
             return match self.confirm(&context, format!("{} wants to buy: {summary}. Confirm this purchase?", who.client)).await {
                 Ok(true) => {
                     self.audit(&who, &call.name, "allow", "purchase confirmed").await;
-                    Ok(connector.call(&who.user.to_string(), &service, &tool, request.arguments).await)
+                    Ok(connector.call(&who.user.to_string(), &service, &tool, inner_args).await)
                 }
                 Ok(false) => {
                     self.audit(&who, &call.name, "deny", "purchase declined").await;
@@ -353,20 +367,13 @@ impl ServerHandler for PublicMcp {
         if let Some(refusal) = self.gate(&who, &call, risk, &context).await {
             return Ok(refusal);
         }
-        Ok(connector.call(&who.user.to_string(), &service, &tool, request.arguments).await)
+        Ok(connector.call(&who.user.to_string(), &service, &tool, inner_args).await)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn service_tools_get_mcp_safe_names() {
-        assert_eq!(tool_name("mac-mgmt", "skill_list"), "mac-mgmt__skill_list");
-        assert_eq!(tool_name("cms agent.acme", "page_update"), "cms_agent_acme__page_update");
-        assert!(tool_name(&"x".repeat(80), "t").len() <= 64);
-    }
 
     #[test]
     fn a_service_tool_is_judged_by_its_annotations_then_its_verb() {

@@ -34,7 +34,8 @@ cargo test                                 # server and shared crates
 ## MCP for outside clients
 
 `/public/mcp` offers the chat's own API and the user's plan.ai services
-(`<service>__<tool>`, through the connector) to MCP clients such as Claude,
+(the connector's `list_services`, `list_tools`, `call_tool`, as the chat's
+agents see them) to MCP clients such as Claude,
 ChatGPT or Cursor. They sign in with OAuth 2.1 against the chat itself
 (`common/plan-ai-oauth`: dynamic client registration, PKCE, consent on the
 usual Zitadel sign-in); accounts waiting for approval can't connect. Every call
