@@ -144,7 +144,44 @@ async fn export(app: &AppState, user: Uuid) -> Result<Value, ApiError> {
         "data_export_events": rows("SELECT to_jsonb(e) - 'user_id' FROM data_export_events e WHERE user_id = $1 ORDER BY id").await?,
         "staff_pings": rows("SELECT to_jsonb(s) - 'user_id' FROM staff_pings s WHERE user_id = $1 ORDER BY id").await?,
         "token_usage": rows("SELECT to_jsonb(t) - 'user_id' FROM chat_token_usage t WHERE user_id = $1 ORDER BY created_at").await?,
+        "mcp_calls": rows("SELECT to_jsonb(c) - 'user_id' FROM mcp_calls c WHERE user_id = $1 ORDER BY id").await?,
+        "mcp_apps": match app.oauth.get() {
+            Some(o) => serde_json::to_value(o.connections(user).await.map_err(internal)?).map_err(internal)?,
+            None => json!([]),
+        },
     }))
+}
+
+// ── MCP clients ─────────────────────────────────────────────────────
+
+/// An app the user connected through /public/mcp.
+#[derive(Serialize, JsonSchema)]
+pub struct McpApp {
+    client_id: String,
+    name: String,
+    connected_at: chrono::DateTime<chrono::Utc>,
+    last_used_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct McpAppRef {
+    /// From the list.
+    client_id: String,
+}
+
+/// What happened to one call of a connected app.
+#[derive(Serialize, JsonSchema, sqlx::FromRow)]
+pub struct McpCall {
+    client: String,
+    tool: String,
+    /// `allow` or `deny`.
+    decision: String,
+    reason: String,
+    created_at: chrono::DateTime<chrono::Utc>,
+}
+
+fn oauth(app: &AppState) -> Result<&std::sync::Arc<plan_ai_oauth::OAuthServer>, ApiError> {
+    app.oauth.get().ok_or_else(|| ApiError::not_found("MCP clients aren't set up here (no sign-in configured)"))
 }
 
 // ── chat ────────────────────────────────────────────────────────────
@@ -364,6 +401,33 @@ pub fn registry(auth: Arc<dyn plan_ai_api_mcp::Authenticator>) -> Registry<AppSt
                 .await
                 .map_err(internal)?;
             Ok(OK)
+        });
+
+    reg.resource("mcp_app", "mcp_app", "Apps you connected through MCP (/public/mcp)")
+        .list("Your connected apps: when connected and last used.", |app: AppState, p: Arc<Principal>, _: Empty| async move {
+            let user = user_of(&p)?;
+            let list = oauth(&app)?.connections(user).await.map_err(internal)?;
+            Ok(list
+                .into_iter()
+                .map(|c| McpApp { client_id: c.client_id, name: c.client_name, connected_at: c.connected_at, last_used_at: c.last_used_at })
+                .collect::<Vec<_>>())
+        })
+        .custom("remove", Risk::Destructive, OnItem::No, "Disconnect an app: its access ends now; connecting again needs your consent.", |app: AppState, p: Arc<Principal>, i: McpAppRef| async move {
+            require_not_impersonating(&p)?;
+            if !oauth(&app)?.disconnect(user_of(&p)?, &i.client_id).await.map_err(internal)? {
+                return Err(ApiError::not_found("no such connected app"));
+            }
+            Ok(OK)
+        });
+
+    reg.resource("mcp_call", "mcp_call", "What your connected apps did through MCP")
+        .list("Your connected apps' latest calls (50): the tool, and whether it was allowed and why.", |app: AppState, p: Arc<Principal>, _: Empty| async move {
+            sqlx::query_as("SELECT client, tool, decision, reason, created_at FROM mcp_calls WHERE user_id = $1 ORDER BY id DESC LIMIT 50")
+                .bind(user_of(&p)?)
+                .fetch_all(&app.pool)
+                .await
+                .map_err(internal)
+                .map(|v: Vec<McpCall>| v)
         });
 
     reg.resource("chat", "chat", "Your conversations with the plan.ai assistant")

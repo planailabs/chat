@@ -146,6 +146,16 @@ export interface LocaleContent {
         connect: string;
         purchases: string;
         purchasesHelp: string;
+        apps: string;
+        noApps: string;
+        connected: string;
+        lastUsed: string;
+        never: string;
+        disconnect: string;
+        activity: string;
+        allowed: string;
+        refused: string;
+        loadFailed: string;
       };
       plan: {
         title: string;
@@ -305,6 +315,16 @@ const en: LocaleContent = {
         connect: 'Connect Claude, ChatGPT or another MCP client with this address; it signs in with your plan.ai account:',
         purchases: 'Allow purchases from MCP clients',
         purchasesHelp: 'Each purchase is still shown with its price for you to confirm.',
+        apps: 'Connected apps',
+        noApps: 'No apps connected.',
+        connected: 'connected',
+        lastUsed: 'last used',
+        never: 'not used yet',
+        disconnect: 'Disconnect',
+        activity: 'Recent activity',
+        allowed: 'allowed',
+        refused: 'refused',
+        loadFailed: "Couldn't load your connected apps.",
       },
       plan: {
         title: 'Plan',
@@ -471,6 +491,16 @@ const de: LocaleContent = {
         connect: 'Verbinde Claude, ChatGPT oder einen anderen MCP-Client mit dieser Adresse; die Anmeldung läuft über dein plan.ai-Konto:',
         purchases: 'Käufe aus MCP-Clients erlauben',
         purchasesHelp: 'Jeder Kauf wird dir weiterhin mit seinem Preis zur Bestätigung angezeigt.',
+        apps: 'Verbundene Apps',
+        noApps: 'Keine Apps verbunden.',
+        connected: 'verbunden',
+        lastUsed: 'zuletzt genutzt',
+        never: 'noch nicht genutzt',
+        disconnect: 'Trennen',
+        activity: 'Letzte Aktivität',
+        allowed: 'erlaubt',
+        refused: 'abgelehnt',
+        loadFailed: 'Deine verbundenen Apps konnten nicht geladen werden.',
       },
       plan: {
         title: 'Tarif',

@@ -3,6 +3,7 @@
 import { computed } from 'vue';
 import AppIcon from './AppIcon.vue';
 import PlanLogo from './PlanLogo.vue';
+import McpApps from './McpApps.vue';
 import { store } from '../app/store';
 import { locale } from '../app/locale';
 import { getLocaleDateString } from '../utils/date';
@@ -117,6 +118,7 @@ const signOut = () => {
             <span>{{ mcpTexts.purchases }}</span>
           </label>
           <p class="text-xs text-(--text-muted)">{{ mcpTexts.purchasesHelp }}</p>
+          <McpApps />
         </section>
       </template>
       <template v-if="state.budget">

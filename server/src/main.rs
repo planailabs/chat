@@ -81,6 +81,7 @@ async fn main() -> anyhow::Result<()> {
             let oauth_cfg = plan_ai_oauth::Config::new(&base, vec![format!("{base}/public/mcp")], "plan.ai agent");
             let server = plan_ai_oauth::OAuthServer::connect(&cfg.database.url, oauth_cfg, Arc::new(Approved(app.clone()))).await?;
             web = web.merge(server.consent_routes().layer(from_fn(plan_ai_auth::require_auth)));
+            let _ = app.oauth.set(server.clone());
             Some((server, format!("{base}/public/mcp")))
         }
         _ => None,

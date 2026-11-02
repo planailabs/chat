@@ -179,8 +179,20 @@ impl PublicMcp {
         }
     }
 
+    /// Logged, and kept for the user (settings, data export).
     async fn audit(&self, who: &Who, tool: &str, decision: &str, why: &str) {
         tracing::info!(target: "plan_ai_chat::public_mcp", user = %who.user, email = %who.email, client = %who.client, tool, decision, why, "public MCP call");
+        let res = sqlx::query("INSERT INTO mcp_calls (user_id, client, tool, decision, reason) VALUES ($1, $2, $3, $4, $5)")
+            .bind(who.user)
+            .bind(&who.client)
+            .bind(tool)
+            .bind(decision)
+            .bind(why)
+            .execute(&self.app.pool)
+            .await;
+        if let Err(e) = res {
+            tracing::error!(user = %who.user, tool, "recording an MCP call: {e}");
+        }
     }
 
     async fn mcp_purchases(&self, user: Uuid) -> bool {

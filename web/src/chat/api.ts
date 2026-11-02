@@ -134,6 +134,23 @@ export interface ProfileUpdate {
   mcp_purchases?: boolean;
 }
 
+/** An app the user connected through MCP (`GET /api/v1/mcp_app`). */
+export interface McpApp {
+  client_id: string;
+  name: string;
+  connected_at: string;
+  last_used_at: string | null;
+}
+
+/** One call a connected app made (`GET /api/v1/mcp_call`, newest first). */
+export interface McpCall {
+  client: string;
+  tool: string;
+  decision: 'allow' | 'deny';
+  reason: string;
+  created_at: string;
+}
+
 /** One of the user's conversations (`GET /api/v1/chat`, newest first). */
 export interface Conversation {
   id: string;
@@ -336,6 +353,12 @@ export const api = {
     /** Everything stored about the user. */
     export: () => request<unknown>('POST', '/api/v1/profile/export', {}),
     requestDeletion: () => request<Ok>('POST', '/api/v1/profile/request_deletion', {}),
+  },
+
+  mcp: {
+    apps: () => request<McpApp[]>('GET', '/api/v1/mcp_app'),
+    disconnect: (client_id: string) => request<Ok>('POST', '/api/v1/mcp_app/remove', { client_id }),
+    calls: () => request<McpCall[]>('GET', '/api/v1/mcp_call'),
   },
 
   chat: {

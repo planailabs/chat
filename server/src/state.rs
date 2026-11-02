@@ -16,6 +16,9 @@ pub struct App {
     pub http: reqwest::Client,
     /// Billable console calls (with `[connector.console]`).
     pub purchases: Option<crate::purchase::Purchases>,
+    /// OAuth for outside MCP clients, once main has set it up (only with real
+    /// sign-in): the user's connected apps.
+    pub oauth: std::sync::OnceLock<Arc<plan_ai_oauth::OAuthServer>>,
 }
 
 pub type AppState = Arc<App>;
@@ -38,7 +41,7 @@ pub async fn init(cfg: &'static Config) -> anyhow::Result<(AppState, Option<plan
     let (events, _) = broadcast::channel(1024);
     tokio::spawn(Pump { hub: hub.clone(), pool: pool.clone(), owners: owners.clone(), tx: events.clone() }.run());
     let (connector, purchases) = crate::connector::build(cfg, pool.clone())?;
-    Ok((Arc::new(App { cfg, pool, accounts, hub, owners, events, http: reqwest::Client::new(), purchases }), connector))
+    Ok((Arc::new(App { cfg, pool, accounts, hub, owners, events, http: reqwest::Client::new(), purchases, oauth: std::sync::OnceLock::new() }), connector))
 }
 
 /// The first versions put every user on a limitless "free" plan; budgets come
