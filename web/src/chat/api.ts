@@ -86,6 +86,8 @@ export interface Profile {
   theme: ThemePreference;
   newsletter_opt_in: boolean;
   deletion_requested_at: string | null;
+  /** An admin has let this account in; until then it can't chat. */
+  approved: boolean;
   /** An admin is looking at this user's account (read-only). */
   impersonating: boolean;
   /** The user's plan and its hourly budget, with the last hour's use. */
@@ -298,6 +300,9 @@ export interface UserHit {
   has_extension: boolean;
   /** Their plan (their personal team's). */
   plan_id: string;
+  /** An admin has let them in. */
+  approved: boolean;
+  created_at: string;
 }
 
 export interface PromptExtension {
@@ -367,5 +372,8 @@ export const api = {
     staffPings: (includeResolved: boolean) =>
       request<StaffPing[]>('GET', `/api/v1/staff_ping${query({ include_resolved: includeResolved })}`),
     resolvePing: (id: number) => request<Ok>('POST', '/api/v1/staff_ping/resolve', { id }),
+    /** Accounts waiting for approval, newest first. */
+    pendingUsers: () => request<UserHit[]>('GET', `/api/v1/user${query({ q: '', pending: 'true' })}`),
+    approveUser: (user_id: string) => request<Ok>('POST', '/api/v1/user/approve', { user_id }),
   },
 };

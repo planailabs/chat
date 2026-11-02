@@ -165,6 +165,12 @@ export interface LocaleContent {
     };
     savedLabel: string;
   };
+  approval: {
+    title: string;
+    body: string;
+    signedInAs: string;
+    signOut: string;
+  };
   footer: {
     consent: string;
     termsLabel: string;
@@ -314,6 +320,12 @@ const en: LocaleContent = {
       },
     },
     savedLabel: 'Saved',
+  },
+  approval: {
+    title: 'Your account needs to be approved',
+    body: 'Thanks for signing up. An admin has to approve your account before you can chat. You can come back here once it has been approved.',
+    signedInAs: 'Signed in as',
+    signOut: 'Sign out',
   },
   footer: {
     consent:
@@ -468,6 +480,12 @@ const de: LocaleContent = {
       },
     },
     savedLabel: 'Gespeichert',
+  },
+  approval: {
+    title: 'Dein Konto muss noch freigegeben werden',
+    body: 'Danke für deine Anmeldung. Ein Admin muss dein Konto freigeben, bevor du chatten kannst. Schau wieder vorbei, sobald es freigegeben ist.',
+    signedInAs: 'Angemeldet als',
+    signOut: 'Abmelden',
   },
   footer: {
     consent:

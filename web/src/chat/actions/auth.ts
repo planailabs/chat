@@ -84,6 +84,7 @@ const applyProfile = (profile: Profile) => {
   state.userDisplayName = profile.name.trim() || null;
   state.isAdmin = profile.is_admin;
   state.impersonating = profile.impersonating;
+  state.awaitingApproval = !profile.approved && !profile.impersonating;
   state.budget = profile.budget ?? null;
   state.isAuthMenuOpen = false;
   profileLoadSuccess(state.profile, profile);
@@ -123,6 +124,8 @@ export const startSession = async () => {
   }
   cacheUserState(state);
   store.notify();
+  // Nothing to load until an admin lets the account in: App shows why.
+  if (state.awaitingApproval) return;
 
   void connectEvents();
   void loadConversations();

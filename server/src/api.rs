@@ -17,8 +17,17 @@ fn internal(e: impl std::fmt::Display) -> ApiError {
     ApiError::internal(e.to_string())
 }
 
-/// The signed-in user behind a principal (set by `session_principal`).
+/// The signed-in, approved user behind a principal (set by `session_principal`).
 fn user_of(p: &Principal) -> Result<Uuid, ApiError> {
+    if p.scopes["pending"] == json!(true) {
+        return Err(ApiError::forbidden("your account is waiting for an admin to approve it"));
+    }
+    account_of(p)
+}
+
+/// The signed-in user, approved or still waiting: their own profile, export
+/// and deletion work either way.
+fn account_of(p: &Principal) -> Result<Uuid, ApiError> {
     p.scopes["user_id"].as_str().and_then(|s| s.parse().ok()).ok_or_else(|| ApiError::forbidden("only signed-in users can chat"))
 }
 
@@ -53,6 +62,8 @@ pub struct Profile {
     theme: String,
     newsletter_opt_in: bool,
     deletion_requested_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// An admin has let this account in; until then it can't chat.
+    approved: bool,
     #[sqlx(skip)]
     impersonating: bool,
     /// The user's plan and its hourly token budget, with the last hour's use.
@@ -63,7 +74,8 @@ pub struct Profile {
 async fn load_profile(app: &AppState, user: Uuid) -> Result<Profile, ApiError> {
     ensure_profile(app, user).await?;
     sqlx::query_as(
-        "SELECT p.user_id, u.email, u.name, u.is_admin, p.language, p.theme, p.newsletter_opt_in, p.deletion_requested_at
+        "SELECT p.user_id, u.email, u.name, u.is_admin AND u.approved_at IS NOT NULL AS is_admin, p.language, p.theme, p.newsletter_opt_in,
+                p.deletion_requested_at, u.approved_at IS NOT NULL AS approved
          FROM profiles p JOIN accounts.users u ON u.id = p.user_id WHERE p.user_id = $1",
     )
     .bind(user)
@@ -199,9 +211,12 @@ pub struct RenameInput {
 #[derive(Deserialize, JsonSchema)]
 pub struct UserSearch {
     /// Substring of the email or name.
-    #[serde(deserialize_with = "text")]
+    #[serde(deserialize_with = "text", default)]
     #[schemars(with = "String")]
     q: String,
+    /// Only accounts still waiting for approval.
+    #[serde(default)]
+    pending: bool,
 }
 
 /// Query strings arrive coerced (`?q=123` is a number); a search term is text.
@@ -221,6 +236,9 @@ pub struct UserHit {
     has_extension: bool,
     /// Their plan (personal team's).
     plan_id: String,
+    /// An admin has let them in; pending accounts are listed first.
+    approved: bool,
+    created_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -313,24 +331,26 @@ pub fn registry(auth: Arc<dyn plan_ai_api_mcp::Authenticator>) -> Registry<AppSt
 
     reg.resource("profile", "profile", "Your profile and settings")
         .get("Your profile.", |app: AppState, p: Arc<Principal>, _: Empty| async move {
-            let mut profile = load_profile(&app, user_of(&p)?).await?;
+            let mut profile = load_profile(&app, account_of(&p)?).await?;
             profile.impersonating = !p.scopes["impersonating_from"].is_null();
-            profile.budget = Some(chat::budget(&app, profile.user_id).await?);
+            if profile.approved {
+                profile.budget = Some(chat::budget(&app, profile.user_id).await?);
+            }
             Ok(profile)
         })
         .update("Change language, theme or newsletter subscription.", |app: AppState, p: Arc<Principal>, u: ProfileUpdate| async move {
             require_not_impersonating(&p)?;
-            let user = user_of(&p)?;
+            let user = account_of(&p)?;
             ensure_profile(&app, user).await?;
             update_profile(&app, user, u).await?;
             load_profile(&app, user).await
         })
         .custom("export", Risk::ReadOnly, OnItem::No, "Everything stored about you, as JSON.", |app: AppState, p: Arc<Principal>, _: Empty| async move {
-            export(&app, user_of(&p)?).await
+            export(&app, account_of(&p)?).await
         })
         .custom("request_deletion", Risk::Destructive, OnItem::No, "Ask for your account and data to be deleted.", |app: AppState, p: Arc<Principal>, _: Empty| async move {
             require_not_impersonating(&p)?;
-            let user = user_of(&p)?;
+            let user = account_of(&p)?;
             ensure_profile(&app, user).await?;
             sqlx::query("UPDATE profiles SET deletion_requested_at = COALESCE(deletion_requested_at, now()) WHERE user_id = $1")
                 .bind(user)
@@ -380,17 +400,27 @@ pub fn registry(auth: Arc<dyn plan_ai_api_mcp::Authenticator>) -> Registry<AppSt
     reg.resource("user", "user", "Users (admin)").list("Search users by email or name.", |app: AppState, p: Arc<Principal>, s: UserSearch| async move {
         p.require_admin()?;
         sqlx::query_as(
-            "SELECT u.id, u.email, u.name, e.user_id IS NOT NULL AS has_extension, t.plan_id
+            "SELECT u.id, u.email, u.name, e.user_id IS NOT NULL AS has_extension, t.plan_id,
+                    u.approved_at IS NOT NULL AS approved, u.created_at
              FROM accounts.users u LEFT JOIN prompt_extensions e ON e.user_id = u.id
              JOIN accounts.teams t ON t.owner_id = u.id AND t.personal AND t.deleted_at IS NULL
-             WHERE u.email ILIKE '%' || $1 || '%' OR u.name ILIKE '%' || $1 || '%'
-             ORDER BY u.email LIMIT 20",
+             WHERE (u.email ILIKE '%' || $1 || '%' OR u.name ILIKE '%' || $1 || '%')
+               AND (NOT $2 OR u.approved_at IS NULL)
+             ORDER BY u.approved_at IS NOT NULL, u.created_at DESC LIMIT 100",
         )
         .bind(s.q.replace(['%', '_'], ""))
+        .bind(s.pending)
         .fetch_all(&app.pool)
         .await
         .map_err(internal)
         .map(|v: Vec<UserHit>| v)
+    })
+    .custom("approve", Risk::Mutating, OnItem::No, "Let a waiting account in: it can chat from its next request.", |app: AppState, p: Arc<Principal>, i: UserRef| async move {
+        p.require_admin()?;
+        if !app.accounts.approve_user(i.user_id).await? {
+            return Err(ApiError::not_found("no such user"));
+        }
+        Ok(OK)
     });
 
     reg.resource("prompt_extension", "prompt_extension", "Per-user system prompt extensions (admin)")

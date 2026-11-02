@@ -31,7 +31,7 @@ const groups = computed(() => groupConversations(state.conversations));
 const regionClass = computed(() => [
   'sidebar',
   {
-    'is-hidden': !state.isAuthenticated,
+    'is-hidden': !state.isAuthenticated || state.awaitingApproval,
     'is-open': state.isSidebarOpen,
     'is-collapsed': state.isSidebarCollapsed,
   },

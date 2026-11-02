@@ -26,6 +26,8 @@ pub async fn init(cfg: &'static Config) -> anyhow::Result<(AppState, Option<plan
     let pool = PgPool::connect(&cfg.database.url).await?;
     let acc_cfg = plan_ai_accounts::Config { admin_emails: cfg.accounts.admin_emails.clone(), default_plan: cfg.accounts.default_plan.clone() };
     let accounts = plan_ai_accounts::Accounts::connect(&cfg.database.url, acc_cfg, Arc::new(plan_ai_accounts::NoHooks)).await?;
+    // New accounts wait for an admin before they can chat.
+    accounts.require_approval();
     accounts.ensure_plans(&cfg.accounts.plans).await.map_err(|e| anyhow::anyhow!("seeding plans: {e}"))?;
     move_off_unlimited_free(&accounts, &cfg.accounts.default_plan).await?;
     sqlx::migrate!().run(&pool).await?;

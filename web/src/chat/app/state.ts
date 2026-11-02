@@ -144,6 +144,8 @@ export interface AppState {
   isAdmin: boolean;
   /** An admin looks at this user's account (read-only). */
   impersonating: boolean;
+  /** Signed in, but an admin hasn't approved the account yet. */
+  awaitingApproval: boolean;
 
   /** The user's plan and the last hour's use (null until known). */
   budget: Budget | null;
@@ -254,7 +256,7 @@ export const clearCachedUserState = (): void => {
 /** The signed-out user state. */
 export const signedOutUserState = (): Pick<
   AppState,
-  'isAuthenticated' | 'userId' | 'userEmail' | 'userDisplayName' | 'isAdmin' | 'impersonating'
+  'isAuthenticated' | 'userId' | 'userEmail' | 'userDisplayName' | 'isAdmin' | 'impersonating' | 'awaitingApproval'
 > => ({
   isAuthenticated: false,
   userId: null,
@@ -262,6 +264,7 @@ export const signedOutUserState = (): Pick<
   userDisplayName: null,
   isAdmin: false,
   impersonating: false,
+  awaitingApproval: false,
 });
 
 const readSidebarCollapsed = (): boolean => {
@@ -296,6 +299,7 @@ export const createInitialState = (): AppState => {
     isSidebarOpen: false,
     isSidebarCollapsed: readSidebarCollapsed(),
     renamingConversationId: null,
+    awaitingApproval: false,
     ...user,
     conversations: [],
     budget: null,

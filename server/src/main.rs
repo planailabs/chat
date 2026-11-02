@@ -152,7 +152,13 @@ async fn session_principal(State(app): State<AppState>, mut req: Request, next: 
         }
     }
     if let Some(user) = req.extensions().get::<WebUser>() {
-        let mut p = plan_ai_accounts::principal_for(user);
+        let mut p = match app.accounts.principal(user).await {
+            Ok(p) => p,
+            Err(e) => {
+                tracing::error!("the principal of {}: {e}", user.email);
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
+        };
         p.scopes["impersonating_from"] = json!(user.impersonating_from);
         req.extensions_mut().insert(SessionPrincipal(Arc::new(p)));
     }
