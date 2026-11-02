@@ -98,7 +98,21 @@ async fn main() -> anyhow::Result<()> {
 
     let listener = tokio::net::TcpListener::bind(&cfg.web.listen).await?;
     tracing::info!("listening on {}", cfg.web.listen);
-    axum::serve(listener, router).with_graceful_shutdown(shutdown()).await?;
+    // Graceful shutdown waits for every open connection, and a browser's
+    // event stream (/api/v1/chat/events) never ends by itself: without a
+    // bound, every stop waited out systemd's 90 s and then got killed.
+    let (stopping, stop) = tokio::sync::oneshot::channel::<()>();
+    let serve = axum::serve(listener, router).with_graceful_shutdown(async move {
+        shutdown().await;
+        let _ = stopping.send(());
+    });
+    tokio::select! {
+        served = serve => served?,
+        _ = async {
+            let _ = stop.await;
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        } => tracing::info!("connections still open after 5 s; stopping anyway"),
+    }
     mac_mgmt_common::otel::shutdown();
     Ok(())
 }
