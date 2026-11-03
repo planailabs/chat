@@ -42,9 +42,25 @@ async fn main() -> anyhow::Result<()> {
     let (app, connector) = state::init(cfg).await?;
     {
         let app = app.clone();
+        // The hub starts after us (it calls us back), so at first it may not
+        // answer yet: retry with growing pauses for about ten minutes.
         tokio::spawn(async move {
-            if let Err(e) = chat::upgrade_outdated(&app).await {
-                tracing::error!("upgrading outdated conversation agents: {e:#}");
+            let mut pause = std::time::Duration::from_secs(2);
+            let mut waited = std::time::Duration::ZERO;
+            loop {
+                match chat::upgrade_outdated(&app).await {
+                    Ok(()) => break,
+                    Err(e) if waited < std::time::Duration::from_secs(600) => {
+                        tracing::info!("upgrading outdated conversation agents: hub not ready ({e:#}); retrying in {}s", pause.as_secs());
+                        tokio::time::sleep(pause).await;
+                        waited += pause;
+                        pause = (pause * 2).min(std::time::Duration::from_secs(60));
+                    }
+                    Err(e) => {
+                        tracing::error!("upgrading outdated conversation agents: gave up after {}s: {e:#}", waited.as_secs());
+                        break;
+                    }
+                }
             }
         });
     }
