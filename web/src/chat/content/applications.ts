@@ -1,18 +1,16 @@
 /**
- * plan.ai's applications, linked from the sidebar (new tab). One entry per
- * application: adding one is a one-line change.
+ * plan.ai's applications, linked from the sidebar (new tab). The server sends
+ * the ones this user may see (`[[apps]]` in its config, gated by email).
  */
 
+import type { AppLink } from '../api';
+import type { IconName } from '../ui/icons';
+import { ICONS } from '../ui/icons';
 import type { LocaleKey } from './locales';
 
-export interface Application {
-  url: string;
-  icon: 'cloud' | 'agency' | 'machine';
-  label: Record<LocaleKey, string>;
-}
+/** The configured icon if the web has it, else a globe. */
+export const appIcon = (app: AppLink): IconName =>
+  app.icon && app.icon in ICONS ? (app.icon as IconName) : 'globe';
 
-export const APPLICATIONS: Application[] = [
-  { url: 'https://cloud.plan.ai', icon: 'cloud', label: { en: 'Cloud', de: 'Cloud' } },
-  { url: 'https://agency.plan.ai', icon: 'agency', label: { en: 'Web Agency', de: 'Webagentur' } },
-  { url: 'https://mgmt.plan.ai', icon: 'machine', label: { en: 'Machine management', de: 'Maschinenverwaltung' } },
-];
+/** The label in `lang`, else English, else the app's name. */
+export const appLabel = (app: AppLink, lang: LocaleKey): string => app.label[lang] ?? app.label.en ?? app.name;

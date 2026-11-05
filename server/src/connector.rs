@@ -30,7 +30,8 @@ impl SubjectResolver for ProfileSubjects {
 const CACHE_FOR: Duration = Duration::from_secs(60);
 
 struct Targets {
-    fixed: Vec<Target>,
+    fixed: &'static [crate::config::App],
+    pool: PgPool,
     console: Option<(&'static Console, Arc<TokenExchanger>, ProfileSubjects, reqwest::Client)>,
     cache: Mutex<HashMap<String, (Instant, Vec<Target>)>>,
 }
@@ -60,9 +61,16 @@ impl Targets {
 #[async_trait::async_trait]
 impl TargetSource for Targets {
     async fn targets(&self, tenant: &str) -> Result<Vec<Target>, SourceError> {
-        let mut out = self.fixed.clone();
+        // Services limited to some emails are invisible (and uncallable) to the rest.
+        let email = if self.fixed.iter().any(|a| a.mcp.is_some() && !a.emails.is_open()) {
+            let user: Uuid = tenant.parse()?;
+            sqlx::query_scalar::<_, String>("SELECT email FROM accounts.users WHERE id = $1").bind(user).fetch_one(&self.pool).await?
+        } else {
+            String::new()
+        };
+        let mut out: Vec<Target> = self.fixed.iter().filter(|a| a.emails.admit(&email)).filter_map(|a| a.target()).collect();
         for t in self.deployments(tenant).await? {
-            if !out.iter().any(|f| f.name == t.name) {
+            if !out.iter().any(|f| f.name == t.name) && !self.fixed.iter().any(|f| f.name == t.name) {
                 out.push(t);
             }
         }
@@ -79,7 +87,8 @@ pub fn build(cfg: &'static Config, pool: PgPool) -> anyhow::Result<(Option<Conne
     let subjects = ProfileSubjects(pool);
     let purchases = crate::purchase::Purchases::build(cfg, exchanger.clone(), subjects.clone(), http.clone());
     let targets: Arc<dyn TargetSource> = Arc::new(Targets {
-        fixed: c.targets.clone(),
+        fixed: &cfg.apps,
+        pool: subjects.0.clone(),
         console: c.console.as_ref().map(|console| (console, exchanger.clone(), subjects.clone(), http)),
         cache: Mutex::new(HashMap::new()),
     });

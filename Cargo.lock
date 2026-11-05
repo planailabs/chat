@@ -2827,6 +2827,7 @@ dependencies = [
  "axum",
  "chrono",
  "futures",
+ "glob",
  "mac-mgmt-common",
  "plan-ai-accounts",
  "plan-ai-api-mcp",

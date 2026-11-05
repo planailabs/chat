@@ -94,6 +94,18 @@ export interface Profile {
   impersonating: boolean;
   /** The user's plan and its hourly budget, with the last hour's use. */
   budget?: Budget | null;
+  /** The plan.ai applications this user may see. */
+  apps?: AppLink[];
+}
+
+/** A sidebar link to a plan.ai application. */
+export interface AppLink {
+  name: string;
+  url: string;
+  icon?: string | null;
+  description: string;
+  /** Per language; fall back to `en`, then `name`. */
+  label: Record<string, string>;
 }
 
 /** A plan's hourly token budget (0 = unlimited) and the last rolling hour's use. */

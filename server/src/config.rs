@@ -28,6 +28,10 @@ pub struct Config {
     /// Acting as the user on plan.ai services (`/connector/mcp`). Without it,
     /// modes that need a service are unavailable.
     pub connector: Option<Connector>,
+    /// plan.ai applications: the sidebar's links and the assistant's services,
+    /// each shown to the emails it names.
+    #[serde(default)]
+    pub apps: Vec<App>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -35,14 +39,83 @@ pub struct Config {
 pub struct Connector {
     /// Zitadel token exchange: the exchange app and the impersonating service account.
     pub exchange: plan_ai_connector::ExchangeConfig,
-    /// Services every user can reach (each authorizes the user itself).
-    // ponytail: one list for everyone; per-user deployments come from a
-    // plan-ai-cloud TargetSource once the console lists them.
-    #[serde(default)]
-    pub targets: Vec<plan_ai_connector::Target>,
     /// plan-ai-cloud's console: lists each user's deployments
     /// (`GET /api/v1/connector_targets`, called as the user).
     pub console: Option<Console>,
+}
+
+/// Who sees something: email patterns (`*@plan.ai`, `ops-*@example.com`,
+/// case-insensitive). Empty: everyone.
+#[derive(Debug, Default)]
+pub struct EmailPatterns(Vec<glob::Pattern>);
+
+impl EmailPatterns {
+    pub fn admit(&self, email: &str) -> bool {
+        let opts = glob::MatchOptions { case_sensitive: false, ..Default::default() };
+        self.0.is_empty() || self.0.iter().any(|p| p.matches_with(email, opts))
+    }
+
+    pub fn is_open(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl<'de> Deserialize<'de> for EmailPatterns {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        Vec::<String>::deserialize(d)?
+            .iter()
+            .map(|p| glob::Pattern::new(p).map_err(|e| serde::de::Error::custom(format!("email pattern {p:?}: {e}"))))
+            .collect::<Result<_, _>>()
+            .map(EmailPatterns)
+    }
+}
+
+/// A plan.ai application: linked from the sidebar (`url`) and/or reachable by
+/// the assistant as the user (`mcp`, through the connector) — one entry, one
+/// access rule. Nobody outside `emails` sees it in either place or can call it.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct App {
+    /// Unique; the service name the assistant passes.
+    pub name: String,
+    /// One line: what it is for (the assistant reads it; the sidebar's tooltip).
+    pub description: String,
+    /// Kind of service, e.g. `mac-mgmt`, `plan-ai-cloud`.
+    pub kind: String,
+    /// The web application, linked from the sidebar. None: not in the sidebar.
+    pub url: Option<String>,
+    /// The web's icon name (`cloud`, `agency`, `machine`, `vpn`, `server`; else a globe).
+    pub icon: Option<String>,
+    /// Sidebar label per language (`en`, `de`); `en`, then `name` are the fallback.
+    #[serde(default)]
+    pub label: std::collections::BTreeMap<String, String>,
+    /// Its MCP endpoint. None: the assistant can't act on it.
+    pub mcp: Option<AppMcp>,
+    #[serde(default)]
+    pub emails: EmailPatterns,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AppMcp {
+    /// Streamable HTTP, e.g. `https://mgmt.plan.ai/mcp`.
+    pub url: String,
+    /// The Zitadel project the service introspects tokens for.
+    pub audience_project_id: String,
+}
+
+impl App {
+    /// As the connector's service, if it has one.
+    pub fn target(&self) -> Option<plan_ai_connector::Target> {
+        let mcp = self.mcp.as_ref()?;
+        Some(plan_ai_connector::Target {
+            name: self.name.clone(),
+            description: self.description.clone(),
+            kind: self.kind.clone(),
+            mcp_url: mcp.url.clone(),
+            audience_project_id: mcp.audience_project_id.clone(),
+        })
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -223,6 +296,26 @@ pub fn load() -> &'static Config {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_app_is_visible_to_the_emails_it_names() {
+        let app = |extra: &str| toml::from_str::<super::App>(&format!("name = \"redream\"\ndescription = \"d\"\nkind = \"redream\"\n{extra}"));
+        let staff = app("emails = [\"*@plan.ai\", \"guest@example.com\"]").unwrap().emails;
+        assert!(staff.admit("ada@plan.ai"));
+        assert!(staff.admit("Ada@PLAN.ai"));
+        assert!(staff.admit("guest@example.com"));
+        assert!(!staff.admit("eve@elsewhere.com"));
+        assert!(!staff.admit("eve@plan.ai.evil.com"));
+        assert!(app("").unwrap().emails.admit("anyone@anywhere"));
+        // A misspelt key must not silently open an app to everyone.
+        assert!(app("email = [\"*@plan.ai\"]").is_err());
+        assert!(app("emails = [\"[\"]").is_err());
+        // The connector's service only where there is an MCP endpoint, given whole.
+        assert!(app("url = \"https://redream.plan.ai\"").unwrap().target().is_none());
+        let t = app("mcp = { url = \"https://r/mcp\", audience_project_id = \"1\" }").unwrap().target().unwrap();
+        assert_eq!((t.name.as_str(), t.mcp_url.as_str()), ("redream", "https://r/mcp"));
+        assert!(app("mcp = { url = \"https://r/mcp\" }").is_err());
+    }
+
     #[test]
     fn example_config_parses() {
         let cfg: super::Config = toml::from_str(include_str!("../../config.example.toml")).unwrap();

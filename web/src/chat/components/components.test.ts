@@ -3,7 +3,6 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { defineComponent, h, nextTick } from 'vue';
 import ErrorBoundary from './ErrorBoundary.vue';
 import { store } from '../app/store';
-import { APPLICATIONS } from '../content/applications';
 import type { ConversationItem } from '../actions/chat/conversationList';
 
 const actions = vi.hoisted(() => ({
@@ -56,11 +55,21 @@ describe('AppSidebar', () => {
     expect(w.find('.sidebar-heading').text()).toBe('Today');
   });
 
-  it('shows the applications from the one list', () => {
+  it('shows the applications the server lists for this user', () => {
+    store.state.profile.apps = [
+      { name: 'mac-mgmt', url: 'https://mgmt.plan.ai', icon: 'machine', description: 'm', label: { en: 'Machines', de: 'Maschinen' } },
+      { name: 'odd', url: 'https://odd.plan.ai', icon: 'no-such-icon', description: 'o', label: {} },
+    ];
     const w = mount(AppSidebar);
     const links = w.findAll('.sidebar-app');
-    expect(links.map((l) => l.attributes('href'))).toEqual(APPLICATIONS.map((a) => a.url));
+    expect(links.map((l) => l.attributes('href'))).toEqual(['https://mgmt.plan.ai', 'https://odd.plan.ai']);
     expect(links[0].attributes('target')).toBe('_blank');
+    expect(links.map((l) => l.find('.sidebar-item__title').text())).toEqual(['Machines', 'odd']);
+  });
+
+  it('has no applications section when the user may see none', () => {
+    store.state.profile.apps = [];
+    expect(mount(AppSidebar).find('.sidebar-apps').exists()).toBe(false);
   });
 
   it('is empty when signed out', () => {

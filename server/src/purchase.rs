@@ -39,7 +39,7 @@ impl Purchases {
     /// Whether `service` is the console: its own entry, or a configured
     /// target of the console's kind.
     pub fn is_console(&self, service: &str) -> bool {
-        service == CONSOLE_KIND || self.cfg.connector.as_ref().is_some_and(|c| c.targets.iter().any(|t| t.name == service && t.kind == CONSOLE_KIND))
+        service == CONSOLE_KIND || self.cfg.apps.iter().any(|a| a.name == service && a.kind == CONSOLE_KIND && a.mcp.is_some())
     }
 
     async fn post(&self, tenant: &str, path: &str, body: Value) -> anyhow::Result<Value> {

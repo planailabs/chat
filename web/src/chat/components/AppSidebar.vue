@@ -11,7 +11,7 @@ import { store } from '../app/store';
 import { locale } from '../app/locale';
 import { isDesktop } from '../app/viewport';
 import { pathForConversation } from '../app/route';
-import { APPLICATIONS } from '../content/applications';
+import { appIcon, appLabel } from '../content/applications';
 import { groupConversations, type ConversationItem } from '../actions/chat/conversationList';
 import {
   closeSidebarDrawer,
@@ -215,13 +215,13 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown));
           </template>
         </div>
 
-        <nav class="sidebar-apps" :aria-label="locale.sidebar.applications">
+        <nav v-if="state.profile.apps.length" class="sidebar-apps" :aria-label="locale.sidebar.applications">
           <h2 class="sidebar-heading">{{ locale.sidebar.applications }}</h2>
           <ul class="sidebar-list">
-            <li v-for="app in APPLICATIONS" :key="app.url">
-              <a class="sidebar-app" :href="app.url" target="_blank" rel="noopener noreferrer">
-                <AppIcon :name="app.icon" class="sidebar-icon" />
-                <span class="sidebar-item__title">{{ app.label[state.localeKey] }}</span>
+            <li v-for="app in state.profile.apps" :key="app.url">
+              <a class="sidebar-app" :href="app.url" :title="app.description" target="_blank" rel="noopener noreferrer">
+                <AppIcon :name="appIcon(app)" class="sidebar-icon" />
+                <span class="sidebar-item__title">{{ appLabel(app, state.localeKey) }}</span>
                 <AppIcon name="external" class="sidebar-icon sidebar-icon--small" />
                 <span class="sr-only">({{ locale.sidebar.newTab }})</span>
               </a>

@@ -71,11 +71,42 @@ pub struct Profile {
     /// The user's plan and its hourly token budget, with the last hour's use.
     #[sqlx(skip)]
     budget: Option<chat::Budget>,
+    /// The plan.ai applications this user may see (`[[apps]]` with a `url`).
+    #[sqlx(skip)]
+    apps: Vec<AppLink>,
+}
+
+/// A sidebar link to a plan.ai application.
+#[derive(Serialize, JsonSchema)]
+pub struct AppLink {
+    name: String,
+    url: String,
+    icon: Option<String>,
+    description: String,
+    /// Per language; the web falls back to `en`, then `name`.
+    label: std::collections::BTreeMap<String, String>,
+}
+
+fn apps_for(app: &AppState, email: &str) -> Vec<AppLink> {
+    app.cfg
+        .apps
+        .iter()
+        .filter(|a| a.emails.admit(email))
+        .filter_map(|a| {
+            Some(AppLink {
+                name: a.name.clone(),
+                url: a.url.clone()?,
+                icon: a.icon.clone(),
+                description: a.description.clone(),
+                label: a.label.clone(),
+            })
+        })
+        .collect()
 }
 
 async fn load_profile(app: &AppState, user: Uuid) -> Result<Profile, ApiError> {
     ensure_profile(app, user).await?;
-    sqlx::query_as(
+    let mut profile: Profile = sqlx::query_as(
         "SELECT p.user_id, u.email, u.name, u.is_admin AND u.approved_at IS NOT NULL AS is_admin, p.language, p.theme, p.newsletter_opt_in,
                 p.deletion_requested_at, u.approved_at IS NOT NULL AS approved, p.mcp_purchases
          FROM profiles p JOIN accounts.users u ON u.id = p.user_id WHERE p.user_id = $1",
@@ -83,7 +114,9 @@ async fn load_profile(app: &AppState, user: Uuid) -> Result<Profile, ApiError> {
     .bind(user)
     .fetch_one(&app.pool)
     .await
-    .map_err(internal)
+    .map_err(internal)?;
+    profile.apps = apps_for(app, &profile.email);
+    Ok(profile)
 }
 
 #[derive(Deserialize, JsonSchema)]

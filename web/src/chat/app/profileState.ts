@@ -12,7 +12,7 @@
  * All mutations go through typed transitions.
  */
 
-import type { Profile } from '../api';
+import type { AppLink, Profile } from '../api';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -28,6 +28,8 @@ export interface ProfileState {
   newsletterSyncing: boolean;
   /** Purchases from MCP clients allowed (off by default). */
   mcpPurchases: boolean;
+  /** The plan.ai applications this user may see (from the profile). */
+  apps: AppLink[];
   deletionPending: boolean;
   deletionRequestedAt: number | null;
   dataExportStatus: DataExportStatus;
@@ -42,6 +44,7 @@ export const createProfileState = (): ProfileState => ({
   newsletterStatus: 'unknown',
   newsletterSyncing: false,
   mcpPurchases: false,
+  apps: [],
   deletionPending: false,
   deletionRequestedAt: null,
   dataExportStatus: 'idle',
@@ -61,6 +64,7 @@ export const profileLoadSuccess = (ps: ProfileState, profile: Profile): void => 
   ps.error = null;
   ps.newsletterStatus = profile.newsletter_opt_in ? 'subscribed' : 'unsubscribed';
   ps.mcpPurchases = profile.mcp_purchases ?? false;
+  ps.apps = profile.apps ?? [];
   const requestedAt = profile.deletion_requested_at ? Date.parse(profile.deletion_requested_at) : NaN;
   profileSetDeletion(ps, profile.deletion_requested_at !== null, Number.isNaN(requestedAt) ? null : requestedAt);
 };
