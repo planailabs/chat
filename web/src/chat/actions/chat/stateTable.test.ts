@@ -92,8 +92,9 @@ describe('live events', () => {
     vi.advanceTimersByTime(1000);
     const mc = store.state.chat!;
     expect(mc.phase).toBe(expected);
-    const textQuestion = expected === 'question' && (mc.clientPrompt?.input as { type?: string }).type === 'text';
-    expect(showsComposer(mc)).toBe(expected === 'idle' || expected === 'error' || textQuestion);
+    // An ask_question is answered in the composer too: text ones, and multiple choice in the user's own words.
+    const askQuestion = expected === 'question' && mc.clientPrompt?.toolName === 'ask_question';
+    expect(showsComposer(mc)).toBe(expected === 'idle' || expected === 'error' || askQuestion);
     // What the user must act on never disappears.
     if (state === 'approval' && expected !== 'error') expect(mc.approvals.some((a) => a.callId === 'p1')).toBe(true);
     if (expected === 'approval') expect(mc.approvals.length).toBeGreaterThan(0);
@@ -148,11 +149,11 @@ const RELOAD: { name: string; body: object; phase: ChatPhase; composer: boolean 
   { name: 'idle', body: { phase: 'idle' }, phase: 'idle', composer: true },
   { name: 'thinking', body: { phase: 'thinking' }, phase: 'waiting', composer: false },
   { name: 'tools', body: { phase: 'tools' }, phase: 'tool', composer: false },
-  { name: 'a pending question', body: { phase: 'idle', pending_questions: [pendingQuestion] }, phase: 'question', composer: false },
+  { name: 'a pending question', body: { phase: 'idle', pending_questions: [pendingQuestion] }, phase: 'question', composer: true },
   { name: 'a pending approval', body: { phase: 'idle', pending_approvals: [pendingApproval] }, phase: 'approval', composer: false },
   // Older servers: one raw object instead of a list (must not break the chat).
   { name: 'a pending approval (single object)', body: { phase: 'tools', pending_approvals: pendingApproval }, phase: 'approval', composer: false },
-  { name: 'a pending question (single object)', body: { pending_questions: pendingQuestion }, phase: 'question', composer: false },
+  { name: 'a pending question (single object)', body: { pending_questions: pendingQuestion }, phase: 'question', composer: true },
   { name: 'malformed pending entries', body: { phase: 'idle', pending_approvals: [{ tool: 'x' }], pending_questions: 'nope' }, phase: 'idle', composer: true },
 ];
 

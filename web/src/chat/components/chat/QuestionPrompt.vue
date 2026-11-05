@@ -1,5 +1,5 @@
 <script setup lang="ts">
-/** ask_question: the question, and for multiple choice its options and Skip (text questions use the composer). */
+/** ask_question: the question, and for multiple choice its options and Skip. Text questions, and an own answer to a multiple-choice one, go through the composer. */
 import { computed, ref, type PropType } from 'vue';
 import type { ClientPrompt } from '../../app/state';
 import { locale } from '../../app/locale';

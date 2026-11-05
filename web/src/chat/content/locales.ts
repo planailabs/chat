@@ -67,6 +67,8 @@ export interface LocaleContent {
     placeholder: string;
     /** Dismisses a question. */
     skipLabel: string;
+    /** The composer while a multiple-choice question waits: answering in one's own words. */
+    ownAnswerPlaceholder: string;
     /** While the assistant runs a tool. */
     workingLabel: string;
     /** Shown to anonymous users after their first prompt. */
@@ -248,6 +250,7 @@ const en: LocaleContent = {
     heading: 'What can we do for you?',
     placeholder: 'Ask about plan.ai, or tell me what your Mac should do…',
     skipLabel: 'Skip',
+    ownAnswerPlaceholder: 'Or type your own answer…',
     workingLabel: 'Working…',
     loginInvite: {
       text: 'Please sign in to chat with our assistant.',
@@ -424,6 +427,7 @@ const de: LocaleContent = {
     heading: 'Was können wir für dich tun?',
     placeholder: 'Frag nach plan.ai oder sag mir, was dein Mac können soll…',
     skipLabel: 'Überspringen',
+    ownAnswerPlaceholder: 'Oder schreib deine eigene Antwort…',
     workingLabel: 'Arbeite…',
     loginInvite: {
       text: 'Bitte melde dich an, um mit unserem Assistenten zu chatten.',

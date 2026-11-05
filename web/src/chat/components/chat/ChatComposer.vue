@@ -1,7 +1,8 @@
 <script setup lang="ts">
 /**
- * The input: shown when idle, after an error, and for text questions (with
- * Skip). Enter sends, Shift+Enter is a new line. What is typed stays while
+ * The input: shown when idle, after an error, for text questions (with Skip)
+ * and for multiple-choice ones (an answer of the user's own instead of an
+ * option). Enter sends, Shift+Enter is a new line. What is typed stays while
  * the rest of the page changes.
  */
 import { computed, ref, type PropType } from 'vue';
@@ -19,7 +20,10 @@ const textQuestion = computed(() => {
   return input?.type === 'text' ? input : undefined;
 });
 const visible = computed(() => showsComposer(props.chat));
-const placeholder = computed(() => textQuestion.value?.question ?? locale.value.chat.placeholder);
+const choiceQuestion = computed(() => props.chat.phase === 'question' && props.chat.clientPrompt?.toolName === 'ask_question' && !textQuestion.value);
+const placeholder = computed(() =>
+  textQuestion.value?.question ?? (choiceQuestion.value ? locale.value.chat.ownAnswerPlaceholder : locale.value.chat.placeholder),
+);
 
 const input = ref<HTMLElement | null>(null);
 const hasContent = ref(false);

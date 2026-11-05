@@ -186,6 +186,21 @@ describe('ChatComposer', () => {
     expect(w.find('.composer-send-button').attributes('disabled')).toBeDefined();
   });
 
+  it('takes an own answer to a multiple-choice question (Skip stays with the options)', async () => {
+    const w = mount(ChatComposer, {
+      props: {
+        chat: { messages: [], phase: 'question', approvals: [], clientPrompt: { callId: 'q', toolName: 'ask_question', input: { type: 'multiple_choice', question: 'A or B?', options: ['A', 'B'] } } },
+      },
+    });
+    const input = w.find('.composer-input');
+    expect(input.attributes('aria-label')).toBe('Or type your own answer…');
+    expect(w.find('.composer-skip-button').exists()).toBe(false);
+    input.element.textContent = 'Neither, C';
+    await input.trigger('input');
+    await input.trigger('keydown', { key: 'Enter' });
+    expect(actions.sendChatMessage).toHaveBeenCalledWith('Neither, C');
+  });
+
   it('is hidden while the assistant works and shows Skip for text questions', () => {
     expect(mount(ChatComposer, { props: { chat: { messages: [], phase: 'waiting', approvals: [] } } }).find('.composer-card').exists()).toBe(false);
     const w = mount(ChatComposer, {

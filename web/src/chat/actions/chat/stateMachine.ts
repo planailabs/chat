@@ -352,5 +352,7 @@ export const showsComposer = (mc: ChatSession): boolean => {
   if (mc.phase === 'idle' || mc.phase === 'error') return true;
   if (mc.phase !== 'question') return false;
   const prompt = mc.clientPrompt;
-  return prompt?.toolName === 'ask_question' && (prompt.input as { type?: string }).type === 'text';
+  // Text questions are answered here; multiple choice too, in the user's own words.
+  const type = (prompt?.input as { type?: string } | undefined)?.type;
+  return prompt?.toolName === 'ask_question' && (type === 'text' || type === 'multiple_choice');
 };
