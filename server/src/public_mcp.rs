@@ -303,11 +303,8 @@ impl ServerHandler for PublicMcp {
         match name.as_str() {
             // Reading which services and tools there are needs no approval.
             "list_services" => {
-                return Ok(match connector.services(&who.user.to_string()).await {
-                    Ok(ts) => {
-                        let services: Vec<Value> = ts.iter().map(|t| json!({ "name": t.name, "description": t.description, "kind": t.kind })).collect();
-                        json_result(json!({ "services": services }))
-                    }
+                return Ok(match connector.service_entries(&who.user.to_string()).await {
+                    Ok(services) => json_result(json!({ "services": services })),
                     Err(e) => refused(format!("listing your services failed: {e}")),
                 });
             }

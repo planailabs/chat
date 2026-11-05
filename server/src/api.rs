@@ -178,6 +178,10 @@ async fn export(app: &AppState, user: Uuid) -> Result<Value, ApiError> {
         "staff_pings": rows("SELECT to_jsonb(s) - 'user_id' FROM staff_pings s WHERE user_id = $1 ORDER BY id").await?,
         "token_usage": rows("SELECT to_jsonb(t) - 'user_id' FROM chat_token_usage t WHERE user_id = $1 ORDER BY created_at").await?,
         "mcp_calls": rows("SELECT to_jsonb(c) - 'user_id' FROM mcp_calls c WHERE user_id = $1 ORDER BY id").await?,
+        "connectors": match &app.connectors {
+            Some(c) => c.export(user).await?,
+            None => json!({}),
+        },
         "mcp_apps": match app.oauth.get() {
             Some(o) => serde_json::to_value(o.connections(user).await.map_err(internal)?).map_err(internal)?,
             None => json!([]),
@@ -215,6 +219,23 @@ pub struct McpCall {
 
 fn oauth(app: &AppState) -> Result<&std::sync::Arc<plan_ai_oauth::OAuthServer>, ApiError> {
     app.oauth.get().ok_or_else(|| ApiError::not_found("MCP clients aren't set up here (no sign-in configured)"))
+}
+
+// ── connectors ──────────────────────────────────────────────────────
+
+fn connectors(app: &AppState) -> Result<&Arc<crate::connectors::Connectors>, ApiError> {
+    app.connectors.as_ref().ok_or_else(|| ApiError::not_found("connectors aren't set up here"))
+}
+
+/// Names a user's connectors can't take: the configured apps' (with an MCP
+/// endpoint) they can see. Deployments are added by the connector itself.
+async fn taken_names(app: &AppState, user: Uuid) -> Result<std::collections::HashSet<String>, ApiError> {
+    let email = app.accounts.user(user).await?.map(|u| u.email).unwrap_or_default();
+    Ok(app.cfg.apps.iter().filter(|a| a.mcp.is_some() && a.emails.admit(&email)).map(|a| a.name.clone()).collect())
+}
+
+fn approved(p: &Principal) -> bool {
+    p.scopes["pending"] != json!(true) && !p.scopes["user_id"].is_null()
 }
 
 // ── chat ────────────────────────────────────────────────────────────
@@ -452,6 +473,36 @@ pub fn registry(auth: Arc<dyn plan_ai_api_mcp::Authenticator>) -> Registry<AppSt
             }
             Ok(OK)
         });
+
+    reg.resource("connector", "connector", "MCP servers you and your teams added for the assistant (Settings → Connectors)")
+        .list("Your connectors and your teams', and the configured OAuth apps you can connect: each with the name the assistant knows it by, its auth (bearer, oauth, none) and status (ready, connected, connect_first, needs_reconnect). Tokens are never shown.", |app: AppState, p: Arc<Principal>, _: Empty| async move {
+            let user = user_of(&p)?;
+            connectors(&app)?.list(user, &taken_names(&app, user).await?).await
+        }).visible_if(approved)
+        .create("Add an MCP server to a team (absent team_id: your personal team; you must be the team's admin). auth: {type: bearer, token} | {type: oauth, mode: shared | per_member} | {type: none}. The URL must be https on a public address; an OAuth server must support dynamic client registration.", |app: AppState, p: Arc<Principal>, i: crate::connectors::CreateInput| async move {
+            require_not_impersonating(&p)?;
+            let user = user_of(&p)?;
+            connectors(&app)?.create(user, i, &taken_names(&app, user).await?).await
+        }).visible_if(approved)
+        .update("Change a connector's name, description, URL, token (bearer) or mode (OAuth). Team admins only.", |app: AppState, p: Arc<Principal>, i: crate::connectors::UpdateInput| async move {
+            require_not_impersonating(&p)?;
+            let user = user_of(&p)?;
+            connectors(&app)?.update(user, i, &taken_names(&app, user).await?).await
+        }).visible_if(approved)
+        .delete("Remove a connector and its connections. Team admins only.", |app: AppState, p: Arc<Principal>, i: crate::connectors::RefInput| async move {
+            require_not_impersonating(&p)?;
+            connectors(&app)?.delete(user_of(&p)?, &i.id).await?;
+            Ok(OK)
+        }).visible_if(approved)
+        .custom("connect", Risk::Mutating, OnItem::Yes, "The link that connects an OAuth connector (yours, or the team's shared one if you're its admin); open it in the browser where you're signed in.", |app: AppState, p: Arc<Principal>, i: crate::connectors::RefInput| async move {
+            require_not_impersonating(&p)?;
+            connectors(&app)?.connect(user_of(&p)?, &i.id).await
+        }).visible_if(approved)
+        .custom("disconnect", Risk::Destructive, OnItem::Yes, "End an OAuth connection: yours, or the team's shared one (team admins).", |app: AppState, p: Arc<Principal>, i: crate::connectors::RefInput| async move {
+            require_not_impersonating(&p)?;
+            connectors(&app)?.disconnect(user_of(&p)?, &i.id).await?;
+            Ok(OK)
+        }).visible_if(approved);
 
     reg.resource("mcp_call", "mcp_call", "What your connected apps did through MCP")
         .list("Your connected apps' latest calls (50): the tool, and whether it was allowed and why.", |app: AppState, p: Arc<Principal>, _: Empty| async move {
@@ -693,6 +744,24 @@ mod tests {
             assert!(!mine.contains(&hidden.to_string()) && all.contains(&hidden.to_string()), "{hidden}");
         }
         assert!(mine.contains(&"profile_get".to_string()) && mine.contains(&"chat_send".to_string()));
+    }
+
+    #[test]
+    fn connector_tools_are_for_approved_users() {
+        let reg = super::registry(std::sync::Arc::new(NoAuth));
+        let mut user = plan_ai_api_mcp::Principal::scoped("u@x", Default::default(), Default::default());
+        user.scopes = serde_json::json!({ "user_id": "9b2f6a7e-0000-4000-8000-000000000001" });
+        let mut pending = user.clone();
+        pending.scopes["pending"] = serde_json::json!(true);
+        let seen = |p| reg.endpoints().iter().filter(|e| e.visible_to(p)).map(|e| e.tool_name()).collect::<Vec<_>>();
+        let tools = ["connector_list", "connector_create", "connector_update", "connector_delete", "connector_connect", "connector_disconnect"];
+        for t in tools {
+            assert!(seen(&user).contains(&t.to_string()), "{t}");
+            assert!(!seen(&pending).contains(&t.to_string()), "{t}");
+        }
+        let paths: Vec<(String, String)> = reg.endpoints().iter().filter(|e| e.resource == "connector").map(|e| (e.http_method().to_string(), e.path())).collect();
+        assert!(paths.contains(&("POST".into(), "/api/v1/connector/{id}/connect".into())), "{paths:?}");
+        assert!(paths.contains(&("DELETE".into(), "/api/v1/connector/{id}".into())), "{paths:?}");
     }
 
     #[test]

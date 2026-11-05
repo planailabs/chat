@@ -19,6 +19,9 @@ pub struct App {
     /// OAuth for outside MCP clients, once main has set it up (only with real
     /// sign-in): the user's connected apps.
     pub oauth: std::sync::OnceLock<Arc<plan_ai_oauth::OAuthServer>>,
+    /// Users' and teams' MCP servers, and OAuth connections (also to
+    /// configured OAuth apps).
+    pub connectors: Option<Arc<crate::connectors::Connectors>>,
 }
 
 pub type AppState = Arc<App>;
@@ -40,8 +43,16 @@ pub async fn init(cfg: &'static Config) -> anyhow::Result<(AppState, Option<plan
     let owners = Owners::load(&pool).await?;
     let (events, _) = broadcast::channel(1024);
     tokio::spawn(Pump { hub: hub.clone(), pool: pool.clone(), owners: owners.clone(), tx: events.clone() }.run());
-    let (connector, purchases) = crate::connector::build(cfg, pool.clone())?;
-    Ok((Arc::new(App { cfg, pool, accounts, hub, owners, events, http: reqwest::Client::new(), purchases, oauth: std::sync::OnceLock::new() }), connector))
+    let base_url = match &cfg.auth {
+        Some(a) => a.external_url.clone(),
+        None => format!("http://{}", cfg.web.listen),
+    };
+    let connectors = Arc::new(crate::connectors::Connectors::new(pool.clone(), cfg, accounts.clone(), plan_ai_connector::net::Guard::PUBLIC, base_url)?);
+    // Stored connector secrets without the key to read them: refuse to start.
+    connectors.check_startup().await?;
+    let (connector, purchases) = crate::connector::build(cfg, pool.clone(), Some(connectors.clone()))?;
+    let app = App { cfg, pool, accounts, hub, owners, events, http: reqwest::Client::new(), purchases, oauth: std::sync::OnceLock::new(), connectors: Some(connectors) };
+    Ok((Arc::new(app), connector))
 }
 
 /// The first versions put every user on a limitless "free" plan; budgets come

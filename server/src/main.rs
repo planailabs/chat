@@ -4,6 +4,7 @@ mod chat;
 mod hook;
 mod config;
 mod connector;
+mod connectors;
 mod public_mcp;
 mod purchase;
 mod state;
@@ -102,6 +103,15 @@ async fn main() -> anyhow::Result<()> {
         }
         _ => None,
     };
+    // Connecting OAuth connectors: the browser, signed in, goes to the
+    // service's authorization server and back.
+    web = web.merge(
+        Router::new()
+            .route("/connectors/oauth/start", get(connectors::oauth::start_route))
+            .route("/connectors/oauth/callback", get(connectors::oauth::callback_route))
+            .with_state(app.clone())
+            .layer(from_fn(plan_ai_auth::require_auth)),
+    );
     if !auth_layers.is_empty() {
         web = web.route("/auth/login", get(plan_ai_auth::login_page)).route("/auth/logout", get(plan_ai_auth::logout_handler));
     }

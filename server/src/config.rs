@@ -32,6 +32,78 @@ pub struct Config {
     /// each shown to the emails it names.
     #[serde(default)]
     pub apps: Vec<App>,
+    /// Secrets, best kept in the secrets file (`CONFIG_SECRETS_PATH`).
+    #[serde(default)]
+    pub secrets: Secrets,
+}
+
+/// `[secrets]`: kept out of the config proper (it can end up in the Nix
+/// store); put this section in the file `CONFIG_SECRETS_PATH` names.
+#[derive(Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Secrets {
+    /// 32 random bytes, base64 (`openssl rand -base64 32`): encrypts what
+    /// connectors store (bearer tokens, OAuth tokens and client secrets).
+    /// Without it users can't add connectors, and OAuth apps can't start.
+    pub connector_encryption_key: Option<String>,
+    /// The token of each `[[apps]]` entry with `mcp.auth = "bearer"`, by
+    /// the app's name.
+    #[serde(default)]
+    pub app_tokens: std::collections::BTreeMap<String, String>,
+}
+
+impl std::fmt::Debug for Secrets {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Secrets")
+            .field("connector_encryption_key", &self.connector_encryption_key.as_ref().map(|_| "<set>"))
+            .field("app_tokens", &self.app_tokens.keys().collect::<Vec<_>>())
+            .finish()
+    }
+}
+
+impl Secrets {
+    /// The connector encryption key, if set and valid.
+    pub fn connector_key(&self) -> Result<Option<[u8; 32]>, String> {
+        use base64::Engine;
+        let Some(k) = &self.connector_encryption_key else { return Ok(None) };
+        let bytes = base64::engine::general_purpose::STANDARD.decode(k.trim()).map_err(|e| format!("[secrets].connector_encryption_key is not base64: {e}"))?;
+        <[u8; 32]>::try_from(bytes.as_slice())
+            .map(Some)
+            .map_err(|_| format!("[secrets].connector_encryption_key must be 32 bytes (base64 of `openssl rand -base64 32`), not {}", bytes.len()))
+    }
+}
+
+impl Config {
+    /// What serde can't check: every bearer app has its token, OAuth apps
+    /// have the encryption key, app names are unique and fit the assistant.
+    pub fn check(&self) -> Result<(), String> {
+        let key = self.secrets.connector_key()?;
+        let mut names = std::collections::HashSet::new();
+        for a in &self.apps {
+            if !names.insert(a.name.as_str()) {
+                return Err(format!("[[apps]] {:?} is listed twice", a.name));
+            }
+            let Some(mcp) = &a.mcp else { continue };
+            if a.name.contains(['.', '/']) {
+                return Err(format!("[[apps]] {:?}: a name with an MCP endpoint can't contain '.' or '/'", a.name));
+            }
+            match mcp.auth {
+                AppAuth::Bearer if !self.secrets.app_tokens.get(&a.name).is_some_and(|t| !t.trim().is_empty()) => {
+                    return Err(format!("[[apps]] {:?} has mcp.auth = \"bearer\" but no token: set [secrets.app_tokens] {} = \"…\" in the secrets file", a.name, a.name));
+                }
+                AppAuth::Oauth if key.is_none() => {
+                    return Err(format!("[[apps]] {:?} has mcp.auth = \"oauth\", which needs [secrets].connector_encryption_key", a.name));
+                }
+                _ => {}
+            }
+        }
+        for name in self.secrets.app_tokens.keys() {
+            if !self.apps.iter().any(|a| &a.name == name && a.mcp.as_ref().is_some_and(|m| m.auth == AppAuth::Bearer)) {
+                return Err(format!("[secrets.app_tokens] {name:?}: no [[apps]] entry of that name with mcp.auth = \"bearer\""));
+            }
+        }
+        Ok(())
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -84,36 +156,88 @@ pub struct App {
     pub kind: String,
     /// The web application, linked from the sidebar. None: not in the sidebar.
     pub url: Option<String>,
-    /// The web's icon name (`cloud`, `agency`, `machine`, `vpn`, `server`; else a globe).
+    /// The web's icon name (`cloud`, `agency`, `machine`, `vpn`, `server`, `chart`; else a globe).
     pub icon: Option<String>,
     /// Sidebar label per language (`en`, `de`); `en`, then `name` are the fallback.
     #[serde(default)]
     pub label: std::collections::BTreeMap<String, String>,
-    /// Its MCP endpoint. None: the assistant can't act on it.
+    /// Its MCP endpoint. None: the assistant can't act on it. Independent of
+    /// `url`: an app can be a sidebar link, a service, or both.
     pub mcp: Option<AppMcp>,
     #[serde(default)]
     pub emails: EmailPatterns,
 }
 
+/// How the connector authenticates to an app's MCP endpoint.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AppAuth {
+    /// Zitadel token exchange as the user (plan.ai's own services); needs
+    /// `audience_project_id`.
+    #[default]
+    Zitadel,
+    /// A static token: `[secrets.app_tokens] <name> = "…"`.
+    Bearer,
+    /// MCP OAuth (discovery, dynamic client registration); each user
+    /// connects their own account in Settings → Connectors.
+    Oauth,
+    /// No auth (trusted internal servers).
+    None,
+}
+
+/// `mcp = { url, audience_project_id }` (Zitadel), or `mcp = { url, auth =
+/// "bearer" | "oauth" | "none" }`.
 #[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, try_from = "AppMcpRaw")]
 pub struct AppMcp {
     /// Streamable HTTP, e.g. `https://mgmt.plan.ai/mcp`.
     pub url: String,
-    /// The Zitadel project the service introspects tokens for.
-    pub audience_project_id: String,
+    pub auth: AppAuth,
+    /// The Zitadel project the service introspects tokens for (`zitadel` only).
+    pub audience_project_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AppMcpRaw {
+    url: String,
+    #[serde(default)]
+    auth: AppAuth,
+    audience_project_id: Option<String>,
+}
+
+impl TryFrom<AppMcpRaw> for AppMcp {
+    type Error = String;
+
+    fn try_from(r: AppMcpRaw) -> Result<Self, String> {
+        match (r.auth, &r.audience_project_id) {
+            (AppAuth::Zitadel, None) => Err("mcp: auth = \"zitadel\" (the default) needs audience_project_id".into()),
+            (AppAuth::Bearer | AppAuth::Oauth | AppAuth::None, Some(_)) => Err("mcp: audience_project_id is only for auth = \"zitadel\"".into()),
+            _ => Ok(AppMcp { url: r.url, auth: r.auth, audience_project_id: r.audience_project_id }),
+        }
+    }
 }
 
 impl App {
-    /// As the connector's service, if it has one.
-    pub fn target(&self) -> Option<plan_ai_connector::Target> {
+    /// As the connector's service, if it has one. Bearer tokens come from
+    /// `[secrets.app_tokens]`.
+    pub fn target(&self, secrets: &Secrets) -> Option<plan_ai_connector::Target> {
+        use plan_ai_connector::TargetAuth;
         let mcp = self.mcp.as_ref()?;
+        let auth = match mcp.auth {
+            AppAuth::Zitadel => TargetAuth::Zitadel { audience_project_id: mcp.audience_project_id.clone()? },
+            AppAuth::Bearer => TargetAuth::Bearer { token: secrets.app_tokens.get(&self.name)?.trim().to_owned() },
+            AppAuth::Oauth => TargetAuth::Oauth { connection: format!("app:{}", self.name) },
+            AppAuth::None => TargetAuth::None,
+        };
         Some(plan_ai_connector::Target {
             name: self.name.clone(),
             description: self.description.clone(),
             kind: self.kind.clone(),
             mcp_url: mcp.url.clone(),
-            audience_project_id: mcp.audience_project_id.clone(),
+            auth,
+            // The operator's own: exempt from the public-address rule.
+            public_only: false,
         })
     }
 }
@@ -290,7 +414,9 @@ pub fn load() -> &'static Config {
         if let Ok(secrets) = std::env::var("CONFIG_SECRETS_PATH") {
             merge(&mut table, read(&secrets));
         }
-        toml::Value::Table(table).try_into().unwrap_or_else(|e| panic!("config {path}: {e}"))
+        let cfg: Config = toml::Value::Table(table).try_into().unwrap_or_else(|e| panic!("config {path}: {e}"));
+        cfg.check().unwrap_or_else(|e| panic!("config {path}: {e}"));
+        cfg
     })
 }
 
@@ -310,16 +436,74 @@ mod tests {
         assert!(app("email = [\"*@plan.ai\"]").is_err());
         assert!(app("emails = [\"[\"]").is_err());
         // The connector's service only where there is an MCP endpoint, given whole.
-        assert!(app("url = \"https://redream.plan.ai\"").unwrap().target().is_none());
-        let t = app("mcp = { url = \"https://r/mcp\", audience_project_id = \"1\" }").unwrap().target().unwrap();
-        assert_eq!((t.name.as_str(), t.mcp_url.as_str()), ("redream", "https://r/mcp"));
+        let none = super::Secrets::default();
+        assert!(app("url = \"https://redream.plan.ai\"").unwrap().target(&none).is_none());
+        let t = app("mcp = { url = \"https://r/mcp\", audience_project_id = \"1\" }").unwrap().target(&none).unwrap();
+        assert_eq!((t.name.as_str(), t.mcp_url.as_str(), t.audience_project_id()), ("redream", "https://r/mcp", Some("1")));
         assert!(app("mcp = { url = \"https://r/mcp\" }").is_err());
+        assert!(app("mcp = { url = \"https://r/mcp\", auth = \"bearer\", audience_project_id = \"1\" }").is_err());
+        assert!(app("mcp = { url = \"https://r/mcp\", auth = \"basic\" }").is_err());
+        let t = app("mcp = { url = \"https://r/mcp\", auth = \"none\" }").unwrap().target(&none).unwrap();
+        assert_eq!(t.auth, plan_ai_connector::TargetAuth::None);
+        let t = app("mcp = { url = \"https://r/mcp\", auth = \"oauth\" }").unwrap().target(&none).unwrap();
+        assert_eq!(t.auth, plan_ai_connector::TargetAuth::Oauth { connection: "app:redream".into() });
+    }
+
+    /// The owner's case: one entry that is a sidebar link and a bearer
+    /// service, the token in the secrets file.
+    #[test]
+    fn a_bearer_app_is_a_sidebar_link_and_a_service() {
+        let config = r#"
+            [database]
+            url = "postgres://x"
+            [subnet]
+            url = "http://hub"
+            token = "t"
+            callback_secret = "s"
+            [approval]
+
+            [[apps]]
+            name = "prometheus"
+            description = "Prometheus metrics of plan.ai's infrastructure"
+            kind = "prometheus"
+            url = "https://prometheus.plan.ai"
+            icon = "chart"
+            label = { en = "Metrics", de = "Metriken" }
+            mcp = { url = "https://prometheus-mcp.plan.ai/mcp", auth = "bearer" }
+            emails = ["*@plan.ai"]
+        "#;
+        let mut table: toml::Table = toml::from_str(config).unwrap();
+        let without: super::Config = toml::Value::Table(table.clone()).try_into().unwrap();
+        assert!(without.check().unwrap_err().contains("[secrets.app_tokens] prometheus"));
+        super::merge(&mut table, toml::from_str("[secrets.app_tokens]\nprometheus = \"prom-token\"\n").unwrap());
+        let cfg: super::Config = toml::Value::Table(table).try_into().unwrap();
+        cfg.check().unwrap();
+        let app = &cfg.apps[0];
+        assert_eq!((app.url.as_deref(), app.icon.as_deref(), app.label["de"].as_str()), (Some("https://prometheus.plan.ai"), Some("chart"), "Metriken"));
+        assert!(app.emails.admit("ops@plan.ai") && !app.emails.admit("eve@example.com"));
+        let t = app.target(&cfg.secrets).unwrap();
+        assert_eq!(t.mcp_url, "https://prometheus-mcp.plan.ai/mcp");
+        assert_eq!(t.auth, plan_ai_connector::TargetAuth::Bearer { token: "prom-token".into() });
+        assert!(!format!("{cfg:?}").contains("prom-token"), "secrets stay out of debug output");
+    }
+
+    #[test]
+    fn the_encryption_key_is_32_bytes_of_base64() {
+        let s = |k: &str| super::Secrets { connector_encryption_key: Some(k.into()), ..Default::default() };
+        assert!(s("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=").connector_key().unwrap().is_some());
+        assert!(s("c2hvcnQ=").connector_key().is_err());
+        assert!(s("not base64!").connector_key().is_err());
+        assert!(super::Secrets::default().connector_key().unwrap().is_none());
     }
 
     #[test]
     fn example_config_parses() {
-        let cfg: super::Config = toml::from_str(include_str!("../../config.example.toml")).unwrap();
+        let mut table: toml::Table = toml::from_str(include_str!("../../config.example.toml")).unwrap();
+        // The example's bearer app takes its token from the secrets file.
+        super::merge(&mut table, toml::from_str("[secrets.app_tokens]\nprometheus = \"t\"\n").unwrap());
+        let cfg: super::Config = toml::Value::Table(table).try_into().unwrap();
         assert_eq!(cfg.subnet.agent_type, "chat");
+        cfg.check().unwrap();
     }
 
     #[test]

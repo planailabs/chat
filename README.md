@@ -31,6 +31,63 @@ cd web && pnpm typecheck                   # vue-tsc
 cargo test                                 # server and shared crates
 ```
 
+## Connectors (the assistant's MCP servers)
+
+The assistant reaches services through the connector (`/connector/mcp`,
+`common/plan-ai-connector`): `list_services`, `list_tools`, `call_tool`.
+Its services for a user are
+
+- **configured apps**, `[[apps]]` with `mcp` (see `config.example.toml`),
+  gated by `emails`. `mcp.auth` is `zitadel` (default: token exchange as the
+  user, `audience_project_id`), `bearer` (a static token from the secrets
+  file, `[secrets.app_tokens] <name> = "…"`), `oauth` (MCP OAuth; every user
+  connects their own account in Settings → Connectors) or `none`. `url`,
+  `icon` and `label` make the same entry a sidebar link, independently. E.g.
+
+  ```toml
+  [[apps]]
+  name = "prometheus"
+  description = "Prometheus metrics of plan.ai's infrastructure"
+  kind = "prometheus"
+  url = "https://prometheus.plan.ai"        # sidebar link
+  icon = "chart"
+  label = { en = "Metrics", de = "Metriken" }
+  mcp = { url = "https://prometheus-mcp.plan.ai/mcp", auth = "bearer" }
+  emails = ["*@plan.ai"]
+
+  # in the secrets file (CONFIG_SECRETS_PATH):
+  [secrets.app_tokens]
+  prometheus = "…"
+  ```
+
+- the user's **plan-ai-cloud deployments** (`[connector.console]`);
+- **connectors** users add themselves (Settings → Connectors, API
+  `connector_*`), stored in Postgres (`server/migrations/0009_connectors.sql`).
+  A connector belongs to a team (plan-ai-accounts); every member uses it,
+  only team admins add, change or remove it; personal connectors are the
+  personal team's. Auth: a bearer token (one per connector), OAuth (generic
+  MCP OAuth: RFC 9728/8414 discovery, dynamic client registration required,
+  PKCE, RFC 8707 resource, refresh; `shared` = one connection made by an
+  admin for the team, `per_member` = everyone connects their own), or none.
+  User servers must be https on public addresses (checked on save and on
+  every connection, DNS answers pinned; redirects too), and what they send is
+  size-limited. Calls are approved like any service call (by the tool's own
+  annotations: read-only runs, mutating/destructive asks).
+
+  **Names**: a personal connector is listed by its name (`docs`), a team's as
+  `<team>/<name>` (`acme/crm`; `<team>` is the team name lowercased, other
+  characters as `-`, at most 24); teams whose names come out the same get
+  `-<6 hex of the team id>`; a configured app or deployment of the same name
+  wins over a personal connector, which becomes `me/<name>`.
+
+Connector secrets (bearer tokens, OAuth tokens, client secrets) are
+encrypted with `[secrets].connector_encryption_key` (32 bytes, base64:
+`openssl rand -base64 32`) and never returned by the API. Without the key,
+users can't add connectors and OAuth apps don't start; the server refuses to
+start when connectors are stored but the key is missing. OAuth sign-ins
+come back to `/connectors/oauth/callback` (`[auth].external_url`); the
+state is bound to the signed-in user and the browser that started it.
+
 ## MCP for outside clients
 
 `/public/mcp` offers the chat's own API and the user's plan.ai services

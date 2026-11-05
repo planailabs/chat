@@ -71,10 +71,21 @@ max_chars = 2048
 # url = "https://cloud.plan.ai"
 # audience_project_id = "397603595463164040"   # Zitadel project "cloud.plan.ai API"
 
-# plan.ai applications: each is a sidebar link (`url`) and/or a service the
-# assistant acts on as the user (`mcp`, needs [connector]). `emails` (glob
+# plan.ai applications: each is a sidebar link (`url`, with `icon`: cloud,
+# agency, machine, vpn, server, chart; `label` per language) and/or a service
+# the assistant acts on as the user (`mcp`), independently. `emails` (glob
 # patterns, case-insensitive; omitted = everyone) decides who sees it, in both
 # places, and who the assistant may call it for.
+#
+# `mcp.auth` says how the assistant authenticates to the service:
+# - "zitadel" (the default): token exchange as the user; needs
+#   `audience_project_id` and [connector.exchange].
+# - "bearer": a static token, from the secrets file:
+#   [secrets.app_tokens] <name> = "…"
+# - "oauth": MCP OAuth (discovery + dynamic client registration); every user
+#   connects their own account in Settings → Connectors. Needs
+#   [secrets].connector_encryption_key.
+# - "none": no auth (trusted internal servers).
 [[apps]]
 name = "mac-mgmt"
 description = "plan.ai machine management (mgmt.plan.ai): your clusters' config, skills, bundles, MCP servers, SSH keys"
@@ -92,3 +103,24 @@ url = "https://redream.plan.ai"
 icon = "server"
 label = { en = "Servers", de = "Server" }
 emails = ["*@plan.ai"]
+
+[[apps]]
+name = "prometheus"
+description = "Prometheus metrics of plan.ai's infrastructure: query series, alerts, targets"
+kind = "prometheus"
+url = "https://prometheus.plan.ai"
+icon = "chart"
+label = { en = "Metrics", de = "Metriken" }
+mcp = { url = "https://prometheus-mcp.plan.ai/mcp", auth = "bearer" }   # token: [secrets.app_tokens] prometheus
+emails = ["*@plan.ai"]
+
+# Secrets: put these in the file CONFIG_SECRETS_PATH names, not here.
+# [secrets]
+# # 32 random bytes (`openssl rand -base64 32`). Encrypts what connectors
+# # store; without it users can't add their own MCP servers (Settings →
+# # Connectors) and OAuth apps don't work. Changing it loses every stored
+# # connector token.
+# connector_encryption_key = "…"
+#
+# [secrets.app_tokens]
+# prometheus = "…"

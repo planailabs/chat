@@ -2825,6 +2825,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "axum",
+ "base64 0.22.1",
  "chrono",
  "futures",
  "glob",
@@ -2835,11 +2836,13 @@ dependencies = [
  "plan-ai-connector",
  "plan-ai-oauth",
  "reqwest 0.13.5",
+ "ring",
  "rmcp",
  "rustls",
  "schemars",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "sqlx",
  "sse-stream",
  "tokio",
@@ -2847,6 +2850,7 @@ dependencies = [
  "toml",
  "tower-http",
  "tracing",
+ "url",
  "uuid",
 ]
 
@@ -2858,6 +2862,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "futures",
+ "getrandom 0.3.4",
  "http 1.5.0",
  "jsonwebtoken",
  "plan-ai-api-mcp",
@@ -2868,11 +2873,13 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "sse-stream",
  "subtle",
  "thiserror",
  "tokio",
  "tower",
  "tracing",
+ "url",
 ]
 
 [[package]]
