@@ -134,6 +134,7 @@ export interface LocaleContent {
   };
   settings: {
     title: string;
+    accountTab: string;
     sections: {
       profile: {
         title: string;
@@ -343,6 +344,7 @@ const en: LocaleContent = {
   },
   settings: {
     title: 'Settings',
+    accountTab: 'Account',
     sections: {
       profile: {
         title: 'Newsletter & Updates',
@@ -555,6 +557,7 @@ const de: LocaleContent = {
   },
   settings: {
     title: 'Einstellungen',
+    accountTab: 'Konto',
     sections: {
       profile: {
         title: 'Profil',

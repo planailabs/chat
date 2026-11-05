@@ -585,6 +585,47 @@ html.is-first-visit #app {
     display: flex;
     flex-direction: column;
     gap: 1.5rem;
+    max-height: calc(100dvh - 4rem);
+  }
+
+  .settings-tabs {
+    display: flex;
+    gap: 0.25rem;
+    border-bottom: 1px solid color-mix(in lab, var(--border-muted) 70%, transparent);
+    overflow-x: auto;
+    flex-shrink: 0;
+  }
+
+  .settings-tab {
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: var(--text-muted);
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .settings-tab:hover,
+  .settings-tab.is-active {
+    color: var(--text-primary);
+  }
+
+  .settings-tab.is-active {
+    border-bottom-color: var(--text-primary);
+  }
+
+  .settings-body {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    margin-right: -1rem;
+    padding-right: 1rem;
   }
 
   [data-theme='light'] .settings-panel {
