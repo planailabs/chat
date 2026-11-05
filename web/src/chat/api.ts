@@ -21,7 +21,7 @@ export class ApiError extends Error {
 export const isUnauthorized = (error: unknown): boolean =>
   error instanceof ApiError && error.status === 401;
 
-type Method = 'GET' | 'POST' | 'PATCH';
+type Method = 'GET' | 'POST' | 'PATCH' | 'DELETE';
 
 const request = async <T>(method: Method, path: string, body?: unknown): Promise<T> => {
   const res = await fetch(path, {
@@ -161,6 +161,67 @@ export interface McpCall {
   decision: 'allow' | 'deny';
   reason: string;
   created_at: string;
+}
+
+/** A team the user is in, as the connectors settings show it. */
+export interface ConnectorTeam {
+  id: string;
+  name: string;
+  /** The user's personal team: their own connectors. */
+  personal: boolean;
+  role: 'admin' | 'write' | 'read';
+  /** May add, change and remove its connectors (team admins). */
+  can_manage: boolean;
+}
+
+export type ConnectorStatus = 'ready' | 'connected' | 'connect_first' | 'needs_reconnect';
+export type OauthMode = 'shared' | 'per_member';
+
+/** An MCP server of the user's or a team's, or a configured OAuth app (`GET /api/v1/connector`). */
+export interface Connector {
+  /** A uuid, or `app:<name>` for a configured app. */
+  id: string;
+  team_id: string | null;
+  name: string;
+  /** The name the assistant knows it by (`acme/crm`). */
+  service: string;
+  description: string;
+  url: string;
+  auth: 'bearer' | 'oauth' | 'none';
+  oauth_mode: OauthMode | null;
+  /** A bearer token's last four characters (`…abcd`) or `set`; never the token. */
+  token: string | null;
+  status: ConnectorStatus;
+  status_detail: string | null;
+  can_manage: boolean;
+  can_connect: boolean;
+  source: 'team' | 'config';
+}
+
+export interface ConnectorList {
+  /** The server can store connectors. */
+  enabled: boolean;
+  teams: ConnectorTeam[];
+  connectors: Connector[];
+}
+
+export type ConnectorAuth = { type: 'bearer'; token: string } | { type: 'oauth'; mode: OauthMode } | { type: 'none' };
+
+export interface ConnectorInput {
+  /** Absent: the personal team. */
+  team_id?: string;
+  name: string;
+  description?: string;
+  url: string;
+  auth: ConnectorAuth;
+}
+
+export interface ConnectorChange {
+  name?: string;
+  description?: string;
+  url?: string;
+  token?: string;
+  mode?: OauthMode;
 }
 
 /** One of the user's conversations (`GET /api/v1/chat`, newest first). */
@@ -371,6 +432,16 @@ export const api = {
     apps: () => request<McpApp[]>('GET', '/api/v1/mcp_app'),
     disconnect: (client_id: string) => request<Ok>('POST', '/api/v1/mcp_app/remove', { client_id }),
     calls: () => request<McpCall[]>('GET', '/api/v1/mcp_call'),
+  },
+
+  connectors: {
+    list: () => request<ConnectorList>('GET', '/api/v1/connector'),
+    create: (input: ConnectorInput) => request<Connector>('POST', '/api/v1/connector', input),
+    update: (id: string, change: ConnectorChange) => request<Connector>('PATCH', `/api/v1/connector/${encodeURIComponent(id)}`, change),
+    remove: (id: string) => request<Ok>('DELETE', `/api/v1/connector/${encodeURIComponent(id)}`),
+    /** The link that starts the OAuth sign-in (open it in this browser). */
+    connect: (id: string) => request<{ url: string }>('POST', `/api/v1/connector/${encodeURIComponent(id)}/connect`, {}),
+    disconnect: (id: string) => request<Ok>('POST', `/api/v1/connector/${encodeURIComponent(id)}/disconnect`, {}),
   },
 
   chat: {

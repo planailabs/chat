@@ -1,9 +1,10 @@
 <script setup lang="ts">
-/** Settings: who is signed in, the newsletter, MCP apps, data export, account deletion, sign-out. */
+/** Settings: who is signed in, the newsletter, connectors, MCP apps, data export, account deletion, sign-out. */
 import { computed } from 'vue';
 import AppIcon from './AppIcon.vue';
 import PlanLogo from './PlanLogo.vue';
 import McpApps from './McpApps.vue';
+import Connectors from './Connectors.vue';
 import { store } from '../app/store';
 import { locale } from '../app/locale';
 import { getLocaleDateString } from '../utils/date';
@@ -40,6 +41,7 @@ const deletionNotice = computed(() =>
 const onNewsletterChange = (event: Event) => handleSettingsNewsletterToggle((event.target as HTMLInputElement).checked);
 
 const mcpTexts = computed(() => locale.value.settings.sections.mcp);
+const connectorTexts = computed(() => locale.value.settings.sections.connectors);
 const mcpUrl = `${window.location.origin}/public/mcp`;
 const onMcpPurchasesChange = (event: Event) => void persistMcpPurchases((event.target as HTMLInputElement).checked);
 
@@ -97,6 +99,13 @@ const signOut = () => {
         </label>
       </section>
       <template v-if="state.isAuthenticated && !state.awaitingApproval">
+        <div class="settings-divider" aria-hidden="true" />
+        <section class="settings-section" data-testid="settings-connectors">
+          <header class="settings-section__header">
+            <p class="settings-section__title">{{ connectorTexts.title }}</p>
+          </header>
+          <Connectors />
+        </section>
         <div class="settings-divider" aria-hidden="true" />
         <section class="settings-section" data-testid="settings-mcp">
           <header class="settings-section__header">

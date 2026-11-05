@@ -159,6 +159,44 @@ export interface LocaleContent {
         refused: string;
         loadFailed: string;
       };
+      connectors: {
+        title: string;
+        intro: string;
+        personal: string;
+        /** `{{team}}` */
+        team: string;
+        configured: string;
+        none: string;
+        disabled: string;
+        loadFailed: string;
+        add: string;
+        name: string;
+        description: string;
+        url: string;
+        auth: string;
+        authBearer: string;
+        authOauthPerMember: string;
+        authOauthShared: string;
+        authNone: string;
+        token: string;
+        /** Shown in place of the token: `{{hint}}` */
+        tokenSet: string;
+        newToken: string;
+        save: string;
+        cancel: string;
+        edit: string;
+        remove: string;
+        connect: string;
+        reconnect: string;
+        disconnect: string;
+        /** `{{service}}`: the assistant's name for it */
+        service: string;
+        status: { ready: string; connected: string; connect_first: string; needs_reconnect: string };
+        sharedByAdmin: string;
+        perMember: string;
+        shared: string;
+        failed: string;
+      };
       plan: {
         title: string;
         input: string;
@@ -328,6 +366,41 @@ const en: LocaleContent = {
         allowed: 'allowed',
         refused: 'refused',
         loadFailed: "Couldn't load your connected apps.",
+      },
+      connectors: {
+        title: 'Connectors',
+        intro: 'MCP servers the assistant may use for you. Team connectors work for every member; only team admins change them.',
+        personal: 'Yours',
+        team: 'Team {{team}}',
+        configured: 'From plan.ai',
+        none: 'No connectors yet.',
+        disabled: "Connectors aren't available on this server.",
+        loadFailed: "Couldn't load your connectors.",
+        add: 'Add connector',
+        name: 'Name',
+        description: 'What it is for (optional)',
+        url: 'MCP server URL (https)',
+        auth: 'Authentication',
+        authBearer: 'Bearer token',
+        authOauthPerMember: 'OAuth, each member connects their own account',
+        authOauthShared: 'OAuth, one connection for the team',
+        authNone: 'None',
+        token: 'Token',
+        tokenSet: 'token {{hint}}',
+        newToken: 'New token (leave empty to keep it)',
+        save: 'Save',
+        cancel: 'Cancel',
+        edit: 'Edit',
+        remove: 'Remove',
+        connect: 'Connect',
+        reconnect: 'Reconnect',
+        disconnect: 'Disconnect',
+        service: 'The assistant calls it {{service}}',
+        status: { ready: 'ready', connected: 'connected', connect_first: 'connect first', needs_reconnect: 'needs reconnecting' },
+        sharedByAdmin: 'A team admin connects it.',
+        perMember: 'each member connects',
+        shared: 'shared',
+        failed: "That didn't work: {{message}}",
       },
       plan: {
         title: 'Plan',
@@ -505,6 +578,41 @@ const de: LocaleContent = {
         allowed: 'erlaubt',
         refused: 'abgelehnt',
         loadFailed: 'Deine verbundenen Apps konnten nicht geladen werden.',
+      },
+      connectors: {
+        title: 'Konnektoren',
+        intro: 'MCP-Server, die der Assistent für dich nutzen darf. Team-Konnektoren gelten für alle Mitglieder; ändern können sie nur Team-Admins.',
+        personal: 'Deine',
+        team: 'Team {{team}}',
+        configured: 'Von plan.ai',
+        none: 'Noch keine Konnektoren.',
+        disabled: 'Konnektoren sind auf diesem Server nicht verfügbar.',
+        loadFailed: 'Deine Konnektoren konnten nicht geladen werden.',
+        add: 'Konnektor hinzufügen',
+        name: 'Name',
+        description: 'Wofür er ist (optional)',
+        url: 'URL des MCP-Servers (https)',
+        auth: 'Anmeldung',
+        authBearer: 'Bearer-Token',
+        authOauthPerMember: 'OAuth, jedes Mitglied verbindet sein eigenes Konto',
+        authOauthShared: 'OAuth, eine Verbindung für das Team',
+        authNone: 'Keine',
+        token: 'Token',
+        tokenSet: 'Token {{hint}}',
+        newToken: 'Neues Token (leer lassen, um es zu behalten)',
+        save: 'Speichern',
+        cancel: 'Abbrechen',
+        edit: 'Bearbeiten',
+        remove: 'Entfernen',
+        connect: 'Verbinden',
+        reconnect: 'Neu verbinden',
+        disconnect: 'Trennen',
+        service: 'Der Assistent nennt ihn {{service}}',
+        status: { ready: 'bereit', connected: 'verbunden', connect_first: 'erst verbinden', needs_reconnect: 'neu verbinden' },
+        sharedByAdmin: 'Ein Team-Admin verbindet ihn.',
+        perMember: 'jedes Mitglied verbindet',
+        shared: 'geteilt',
+        failed: 'Das hat nicht geklappt: {{message}}',
       },
       plan: {
         title: 'Tarif',
