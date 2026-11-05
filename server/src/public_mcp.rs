@@ -272,8 +272,8 @@ impl ServerHandler for PublicMcp {
     }
 
     async fn list_tools(&self, _request: Option<PaginatedRequestParams>, _context: RequestContext<RoleServer>) -> Result<ListToolsResult, McpError> {
-        let _ = self.who().await?;
-        let mut tools: Vec<Tool> = self.registry.endpoints().iter().map(|e| e.mcp_tool()).collect();
+        let who = self.who().await?;
+        let mut tools: Vec<Tool> = self.registry.endpoints().iter().filter(|e| e.visible_to(&who.principal)).map(|e| e.mcp_tool()).collect();
         if self.connector.is_some() {
             tools.extend(plan_ai_connector::connector_tools());
         }
@@ -286,7 +286,7 @@ impl ServerHandler for PublicMcp {
         let args = request.arguments.clone().map(Value::Object).unwrap_or_else(|| json!({}));
 
         // The chat's own API.
-        if let Some(ep) = self.registry.endpoints().iter().find(|e| e.tool_name() == name).cloned() {
+        if let Some(ep) = self.registry.endpoints().iter().find(|e| e.tool_name() == name && e.visible_to(&who.principal)).cloned() {
             let call = Call { name: format!("chat.{name}"), args: args.clone() };
             if let Some(refusal) = self.gate(&who, &call, api_risk(ep.risk()), &context).await {
                 return Ok(refusal);

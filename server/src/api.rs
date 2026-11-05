@@ -517,14 +517,14 @@ pub fn registry(auth: Arc<dyn plan_ai_api_mcp::Authenticator>) -> Registry<AppSt
         .await
         .map_err(internal)
         .map(|v: Vec<UserHit>| v)
-    })
+    }).admin_only()
     .custom("approve", Risk::Mutating, OnItem::No, "Let a waiting account in: it can chat from its next request.", |app: AppState, p: Arc<Principal>, i: UserRef| async move {
         p.require_admin()?;
         if !app.accounts.approve_user(i.user_id).await? {
             return Err(ApiError::not_found("no such user"));
         }
         Ok(OK)
-    });
+    }).admin_only();
 
     reg.resource("prompt_extension", "prompt_extension", "Per-user system prompt extensions (admin)")
         .list("A user's prompt extension (empty list: none).", |app: AppState, p: Arc<Principal>, i: UserRef| async move {
@@ -535,7 +535,7 @@ pub fn registry(auth: Arc<dyn plan_ai_api_mcp::Authenticator>) -> Registry<AppSt
                 .await
                 .map_err(internal)
                 .map(|v: Vec<Extension>| v)
-        })
+        }).admin_only()
         .custom("set", Risk::Mutating, OnItem::No, "Set a user's extension; it applies from their next conversation.", |app: AppState, p: Arc<Principal>, i: ExtensionInput| async move {
             p.require_admin()?;
             sqlx::query(
@@ -548,12 +548,12 @@ pub fn registry(auth: Arc<dyn plan_ai_api_mcp::Authenticator>) -> Registry<AppSt
             .await
             .map_err(internal)?;
             Ok(OK)
-        })
+        }).admin_only()
         .custom("remove", Risk::Destructive, OnItem::No, "Remove a user's extension.", |app: AppState, p: Arc<Principal>, i: UserRef| async move {
             p.require_admin()?;
             sqlx::query("DELETE FROM prompt_extensions WHERE user_id = $1").bind(i.user_id).execute(&app.pool).await.map_err(internal)?;
             Ok(OK)
-        });
+        }).admin_only();
 
     reg.resource("plan", "plan", "Plans: hourly token budgets, assigned to users by admins (no charges)")
         .list("Every plan with its limits, and how many users are on it.", |app: AppState, p: Arc<Principal>, _: Empty| async move {
@@ -570,7 +570,7 @@ pub fn registry(auth: Arc<dyn plan_ai_api_mcp::Authenticator>) -> Registry<AppSt
                     PlanInfo { users, plan }
                 })
                 .collect::<Vec<_>>())
-        })
+        }).admin_only()
         .custom("put", Risk::Mutating, OnItem::No, "Create or change a plan's name and limits (hourly_input_tokens, hourly_output_tokens; 0 = unlimited). Plans are free: the price stays 0.", |app: AppState, p: Arc<Principal>, i: PlanInput| async move {
             p.require_admin()?;
             if i.id.trim().is_empty() || i.name.trim().is_empty() {
@@ -589,7 +589,7 @@ pub fn registry(auth: Arc<dyn plan_ai_api_mcp::Authenticator>) -> Registry<AppSt
                 .into(),
             };
             app.accounts.put_plan(&plan).await
-        });
+        }).admin_only();
 
     reg.resource("user", "user", "Users (admin)").custom("set_plan", Risk::Mutating, OnItem::No, "Put a user on a plan (their personal team's).", |app: AppState, p: Arc<Principal>, i: SetPlanInput| async move {
         p.require_admin()?;
@@ -598,7 +598,7 @@ pub fn registry(auth: Arc<dyn plan_ai_api_mcp::Authenticator>) -> Registry<AppSt
         let by = user_of(&p).unwrap_or(user.id);
         app.accounts.assign_plan(team.id, &i.plan_id, by).await?;
         chat::budget(&app, user.id).await
-    });
+    }).admin_only();
 
     reg.resource("staff_ping", "staff_ping", "Requests for a human from the assistants (admin)")
         .list("Staff pings, newest first.", |app: AppState, p: Arc<Principal>, f: PingFilter| async move {
@@ -613,12 +613,12 @@ pub fn registry(auth: Arc<dyn plan_ai_api_mcp::Authenticator>) -> Registry<AppSt
             .await
             .map_err(internal)
             .map(|v: Vec<Ping>| v)
-        })
+        }).admin_only()
         .custom("resolve", Risk::Mutating, OnItem::No, "Mark a ping resolved.", |app: AppState, p: Arc<Principal>, i: PingId| async move {
             p.require_admin()?;
             sqlx::query("UPDATE staff_pings SET resolved_at = now() WHERE id = $1 AND resolved_at IS NULL").bind(i.id).execute(&app.pool).await.map_err(internal)?;
             Ok(OK)
-        });
+        }).admin_only();
 
     reg.resource("message", "message", "Chat traffic (admin)").list("The latest chat messages of all users.", |app: AppState, p: Arc<Principal>, f: MessageFilter| async move {
         p.require_admin()?;
@@ -632,7 +632,7 @@ pub fn registry(auth: Arc<dyn plan_ai_api_mcp::Authenticator>) -> Registry<AppSt
         .await
         .map_err(internal)
         .map(|v: Vec<AdminMessage>| v)
-    });
+    }).admin_only();
 
     reg.resource("stats", "stats", "Dashboard numbers (admin)").get("Counts and hourly series for the dashboard.", |app: AppState, p: Arc<Principal>, _: Empty| async move {
         p.require_admin()?;
@@ -667,13 +667,34 @@ pub fn registry(auth: Arc<dyn plan_ai_api_mcp::Authenticator>) -> Registry<AppSt
                  WHERE t.created_at > now() - interval '24 hours' GROUP BY u.email ORDER BY sum(t.input_tokens + t.output_tokens) DESC LIMIT 10"
             ).await?,
         }))
-    });
+    }).admin_only();
 
     reg
 }
 
 #[cfg(test)]
 mod tests {
+    struct NoAuth;
+    #[async_trait::async_trait]
+    impl plan_ai_api_mcp::Authenticator for NoAuth {
+        async fn authenticate(&self, _: &str) -> Result<plan_ai_api_mcp::Principal, plan_ai_api_mcp::ApiError> {
+            Err(plan_ai_api_mcp::ApiError::unauthorized("no"))
+        }
+    }
+
+    #[test]
+    fn users_see_only_their_own_tools() {
+        let reg = super::registry(std::sync::Arc::new(NoAuth));
+        let user = plan_ai_api_mcp::Principal::scoped("u@x", Default::default(), Default::default());
+        let admin = plan_ai_api_mcp::Principal::admin("a@x");
+        let seen = |p| reg.endpoints().iter().filter(|e| e.visible_to(p)).map(|e| e.tool_name()).collect::<Vec<_>>();
+        let (mine, all) = (seen(&user), seen(&admin));
+        for hidden in ["user_list", "user_approve", "plan_put", "stats_get", "message_list", "prompt_extension_set"] {
+            assert!(!mine.contains(&hidden.to_string()) && all.contains(&hidden.to_string()), "{hidden}");
+        }
+        assert!(mine.contains(&"profile_get".to_string()) && mine.contains(&"chat_send".to_string()));
+    }
+
     #[test]
     fn numeric_search_terms_stay_text() {
         let s: super::UserSearch = serde_json::from_value(serde_json::json!({ "q": 123 })).unwrap();
