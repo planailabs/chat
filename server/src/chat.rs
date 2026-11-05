@@ -234,7 +234,7 @@ pub struct Budget {
     /// Tokens per rolling hour; 0 = unlimited.
     pub hourly_input_tokens: u64,
     pub hourly_output_tokens: u64,
-    /// Used in the last hour.
+    /// Used in the last hour. Cache hits count a tenth (see [`CACHED_INPUT_DIVISOR`]).
     pub used_input_tokens: u64,
     pub used_output_tokens: u64,
 }
@@ -246,15 +246,22 @@ impl Budget {
     }
 }
 
+/// A cached input token weighs this much less than a fresh one against the
+/// hourly budget: providers bill cache reads at about a tenth of fresh input,
+/// and a conversation re-reads its whole history on every turn.
+pub const CACHED_INPUT_DIVISOR: i64 = 10;
+
 pub async fn budget(app: &App, user: Uuid) -> Result<Budget, ApiError> {
     let u = app.accounts.user(user).await?.ok_or_else(|| ApiError::not_found("no such user"))?;
     let team = app.accounts.personal_team(&u).await?;
     let plan = app.accounts.plan(&team.plan_id).await?.ok_or_else(|| internal(format!("team {} is on unknown plan {}", team.id, team.plan_id)))?;
     let (input, output): (i64, i64) = sqlx::query_as(
-        "SELECT COALESCE(SUM(input_tokens),0)::bigint, COALESCE(SUM(output_tokens),0)::bigint
+        "SELECT COALESCE(SUM(GREATEST(input_tokens - cached_tokens, 0) + cached_tokens / $2::float8),0)::bigint,
+                COALESCE(SUM(output_tokens),0)::bigint
          FROM chat_token_usage WHERE user_id = $1 AND created_at > now() - interval '1 hour'",
     )
     .bind(user)
+    .bind(CACHED_INPUT_DIVISOR as f64)
     .fetch_one(&app.pool)
     .await
     .map_err(internal)?;
