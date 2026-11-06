@@ -203,6 +203,8 @@ fn truncate(s: &str, max: usize) -> &str {
 pub enum Judgement {
     Allow(String),
     Deny(String),
+    /// The validator model objects (its reasoning).
+    Rejected(String),
     /// Only the user can allow it; the text says why it needs them.
     Ask(String),
 }
@@ -220,7 +222,7 @@ pub async fn judge_present(app: &crate::state::App, call: &Call, risk: Risk, his
         return Judgement::Allow("read-only".into());
     }
     match validate(app, call, risk, reason, history).await {
-        Ok(Some(Verdict::Rejected(why))) => Judgement::Deny(format!("Rejected by the safety check: {why}")),
+        Ok(Some(Verdict::Rejected(why))) => Judgement::Rejected(why),
         Ok(Some(Verdict::Approved(why))) if risk == Risk::Mutating => Judgement::Allow(why),
         Ok(Some(Verdict::Approved(why))) => Judgement::Ask(format!("The safety check had no objection ({why}), but this is a destructive call.")),
         Ok(None) => Judgement::Ask("No safety check is configured for this call.".into()),

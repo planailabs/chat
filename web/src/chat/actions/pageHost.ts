@@ -185,11 +185,11 @@ export class PageHost {
         const args = (p.arguments && typeof p.arguments === 'object' ? p.arguments : {}) as Json;
         const first = await api.pages.call(id, { name: p.name, arguments: args });
         if (!('confirm' in first)) return first;
-        const confirm = first.confirm as { message: string };
+        const confirm = first.confirm as { message: string; token: string };
         if (!(await this.opts.confirm(confirm.message))) {
           return { content: [{ type: 'text', text: 'The user declined this call; it was not made.' }], isError: true };
         }
-        return api.pages.call(id, { name: p.name, arguments: args, confirmed: true });
+        return api.pages.call(id, { name: p.name, arguments: args, confirmed: confirm.token });
       }
       case 'ui/message': {
         const content = p.content as { type?: string; text?: unknown } | undefined;

@@ -62,19 +62,19 @@ describe('PageHost', () => {
   it('asks the user when the server wants confirmation, then calls again confirmed', async () => {
     const f = frame();
     const confirm = vi.fn(async () => true);
-    call.mockResolvedValueOnce({ confirm: { message: 'The page wants to run svc.page_delete', tool: 'svc.page_delete' } }).mockResolvedValueOnce({ content: [], structuredContent: { ok: true } });
+    call.mockResolvedValueOnce({ confirm: { message: 'The page wants to run svc.page_delete', tool: 'svc.page_delete', token: 'tok' } }).mockResolvedValueOnce({ content: [], structuredContent: { ok: true } });
     const host = new PageHost(() => f.win, doc(), opts(confirm));
     send(host, f.win, { jsonrpc: '2.0', id: 7, method: 'tools/call', params: { name: 'call_tool', arguments: { service: 'svc', tool: 'page_delete' } } });
     await settle();
     await settle();
     expect(confirm).toHaveBeenCalledWith('The page wants to run svc.page_delete');
-    expect(call.mock.calls[1]).toEqual(['p1', { name: 'call_tool', arguments: { service: 'svc', tool: 'page_delete' }, confirmed: true }]);
+    expect(call.mock.calls[1]).toEqual(['p1', { name: 'call_tool', arguments: { service: 'svc', tool: 'page_delete' }, confirmed: 'tok' }]);
     expect(f.posted[0]).toEqual({ jsonrpc: '2.0', id: 7, result: { content: [], structuredContent: { ok: true } } });
   });
 
   it('a declined call is an error result, not a call', async () => {
     const f = frame();
-    call.mockResolvedValueOnce({ confirm: { message: 'm', tool: 't' } });
+    call.mockResolvedValueOnce({ confirm: { message: 'm', tool: 't', token: 'x' } });
     const host = new PageHost(() => f.win, doc(), opts(vi.fn(async () => false)));
     send(host, f.win, { jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'call_tool', arguments: {} } });
     await settle();

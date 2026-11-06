@@ -132,6 +132,7 @@ impl PublicMcp {
         let verdict = match self.judge(call, risk).await {
             Judgement::Allow(why) => Ok(why),
             Judgement::Deny(why) => Err(why),
+            Judgement::Rejected(why) => Err(format!("Rejected by the safety check: {why}")),
             Judgement::Ask(why) => {
                 let message = format!("{} wants to run {} with {}.\n{why}\nAllow it?", who.client, call.name, truncate(&call.args.to_string(), 600));
                 match self.confirm(context, message).await {

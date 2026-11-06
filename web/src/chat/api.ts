@@ -289,7 +289,7 @@ export interface PageDoc {
 }
 
 /** A page's tool call: the result, or what the user has to confirm first. */
-export type PageCallResult = { confirm: { message: string; tool: string } } | Record<string, unknown>;
+export type PageCallResult = { confirm: { message: string; tool: string; token: string } } | Record<string, unknown>;
 
 export interface ApprovalData {
   call_id: string;
@@ -481,7 +481,7 @@ export const api = {
     kv: (id: string) => request<{ kv: Record<string, unknown> }>('GET', `/api/v1/pages/${encodeURIComponent(id)}/kv`),
     backflow: (id: string, body: { action: string; component: string | null; value: unknown; version: string | null; lang: string }) =>
       request<{ response: unknown; kv?: Record<string, unknown>; sent?: boolean }>('POST', `/api/v1/pages/${encodeURIComponent(id)}/backflow`, body),
-    call: (id: string, body: { name: string; arguments: Record<string, unknown>; confirmed?: boolean }) =>
+    call: (id: string, body: { name: string; arguments: Record<string, unknown>; confirmed?: string }) =>
       request<PageCallResult>('POST', `/api/v1/pages/${encodeURIComponent(id)}/call`, body),
     message: (id: string, text: string, lang: string) => request<Empty>('POST', `/api/v1/pages/${encodeURIComponent(id)}/message`, { text, lang }),
     context: (id: string, report: unknown) => request<Empty>('POST', `/api/v1/pages/${encodeURIComponent(id)}/context`, report),

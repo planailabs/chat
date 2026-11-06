@@ -714,9 +714,30 @@ pub struct CallInput {
     pub name: String,
     #[serde(default)]
     pub arguments: Map<String, Value>,
-    /// The user confirmed this call in the chat (after a `confirm` answer).
-    #[serde(default)]
-    pub confirmed: bool,
+    /// The token of a `confirm` answer: the user allowed that call in the chat.
+    pub confirmed: Option<String>,
+}
+
+/// Calls the user is asked to allow: token → (page, call, when asked).
+// ponytail: in memory; a restart only means asking again.
+static ASKED: LazyLock<Mutex<HashMap<String, (Uuid, Call, std::time::Instant)>>> = LazyLock::new(Default::default);
+const ASK_VALID: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// Takes a confirmation: it holds once, for that page's same call, while fresh.
+fn take_confirmation(token: &str, page: Uuid, call: &Call) -> bool {
+    let mut asked = ASKED.lock().expect("asked calls");
+    asked.retain(|_, (_, _, at)| at.elapsed() < ASK_VALID);
+    asked.remove(token).is_some_and(|(p, c, _)| p == page && &c == call)
+}
+
+fn ask_token(page: Uuid, call: &Call) -> String {
+    let token = Uuid::new_v4().to_string();
+    let mut asked = ASKED.lock().expect("asked calls");
+    if asked.len() > 10_000 {
+        asked.clear();
+    }
+    asked.insert(token.clone(), (page, call.clone(), std::time::Instant::now()));
+    token
 }
 
 /// Each page's recent calls, for the static check (duplicates, loops).
@@ -781,15 +802,40 @@ pub async fn call(app: &App, user: Uuid, id: Uuid, i: CallInput) -> Result<Value
     }
     let listed = connector.tool(&tenant, &service, &tool).await.ok().flatten();
     let risk = risk_of_tool(listed.as_ref(), &call.name);
-    let history = PAGE_CALLS.lock().expect("page calls").get(&id).cloned().unwrap_or_default();
-    let reason = format!("(called by the page \"{}\" in the chat, while the user has it open)", a.title);
-    let verdict = match hook::judge_present(app, &call, risk, &history, &reason).await {
+    let mut history = PAGE_CALLS.lock().expect("page calls").get(&id).cloned().unwrap_or_default();
+    if history.is_empty() && from_view {
+        // A view exists because of its tool's call: that's what it read first.
+        let made: Option<Value> = sqlx::query_scalar("SELECT meta FROM artifact_versions WHERE artifact_id = $1 AND version = 1").bind(id).fetch_optional(&app.pool).await.map_err(internal)?;
+        if let Some(m) = made.filter(|m| m["tool"].is_string()) {
+            history.push(Call { name: format!("{service}.{}", m["tool"].as_str().unwrap_or_default()), args: m["arguments"].clone() });
+        }
+    }
+    let reason = format!(
+        "The user is using the interactive page \"{}\" in the chat (it only runs while they have it open) and acted on it; the page makes this call for them.",
+        a.title
+    );
+    // A page refreshing its data repeats reads by design: the duplicate and
+    // loop rules are for the assistant's own reasoning, not for pages. A call
+    // the user just allowed (its token) isn't judged again.
+    let judged = if i.confirmed.as_deref().is_some_and(|t| take_confirmation(t, id, &call)) {
+        Judgement::Allow("confirmed by the user".into())
+    } else if risk == Risk::ReadOnly {
+        Judgement::Allow("read-only".into())
+    } else {
+        hook::judge_present(app, &call, risk, &history, &reason).await
+    };
+    let verdict = match judged {
         Judgement::Allow(why) => Ok(why),
         Judgement::Deny(why) => Err(why),
-        Judgement::Ask(_) if i.confirmed => Ok("confirmed by the user".into()),
+        // The user is right there, acting on the page: they hear the
+        // objection and decide (the assistant's own calls are denied instead).
+        Judgement::Rejected(why) => {
+            let message = format!("The page \"{}\" wants to run {} with {}.\nThe safety check objects: {why}", a.title, call.name, truncate(&call.args.to_string(), 600));
+            return Ok(json!({ "confirm": { "message": message, "tool": call.name, "token": ask_token(id, &call) } }));
+        }
         Judgement::Ask(why) => {
             let message = format!("The page \"{}\" wants to run {} with {}.\n{why}", a.title, call.name, truncate(&call.args.to_string(), 600));
-            return Ok(json!({ "confirm": { "message": message, "tool": call.name } }));
+            return Ok(json!({ "confirm": { "message": message, "tool": call.name, "token": ask_token(id, &call) } }));
         }
     };
     match verdict {
@@ -1009,6 +1055,20 @@ mod tests {
         assert!(csp.contains("frame-src 'none'") && csp.contains("object-src 'none'"));
         let default = view_csp(&Value::Null);
         assert!(default.contains("connect-src 'none'") && default.contains("base-uri 'self'"));
+    }
+
+    #[test]
+    fn a_confirmation_holds_once_for_its_page_and_call() {
+        let (page, other) = (Uuid::new_v4(), Uuid::new_v4());
+        let call = Call { name: "svc.restart".into(), args: json!({}) };
+        let token = ask_token(page, &call);
+        assert!(!take_confirmation(&token, other, &call), "another page");
+        let token = ask_token(page, &call);
+        assert!(!take_confirmation(&token, page, &Call { name: "svc.delete".into(), args: json!({}) }), "another call");
+        let token = ask_token(page, &call);
+        assert!(take_confirmation(&token, page, &call));
+        assert!(!take_confirmation(&token, page, &call), "only once");
+        assert!(!take_confirmation("made-up", page, &call));
     }
 
     #[test]
