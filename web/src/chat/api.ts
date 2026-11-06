@@ -289,6 +289,24 @@ export interface PageDoc {
   prefers_border: boolean | null;
 }
 
+/** A worker (sub-agent) of a conversation. */
+export interface Worker {
+  id: string;
+  task: string | null;
+  state: 'running' | 'waiting' | 'done' | 'failed' | 'stopped' | 'paused';
+  tokens: number;
+  started_at: string;
+  finished_at: string | null;
+  error: string | null;
+}
+
+/** One step of a worker's transcript. */
+export interface WorkerStep {
+  kind: 'task' | 'text' | 'tool' | 'result' | 'message';
+  text: string;
+  tool?: string;
+}
+
 /** A page's tool call: the result, or what the user has to confirm first. */
 export type PageCallResult = { confirm: { message: string; tool: string; token: string } } | Record<string, unknown>;
 
@@ -373,6 +391,8 @@ export interface ChatEvents {
   resync: Empty;
   /** A page's KV view changed (a handler ran, the assistant set values). */
   artifact_kv: { artifact: string; kv: Record<string, unknown> };
+  /** A worker of the conversation moved on (spawned, a step, done). */
+  worker: { agent: string };
 }
 
 export type ChatEventName = keyof ChatEvents;
@@ -392,6 +412,7 @@ export const CHAT_EVENT_NAMES: ChatEventName[] = [
   'error',
   'resync',
   'artifact_kv',
+  'worker',
 ];
 
 export interface Stats {
@@ -476,6 +497,13 @@ export const api = {
     disconnect: (id: string) => request<Ok>('POST', `/api/v1/connector/${encodeURIComponent(id)}/disconnect`, {}),
   },
 
+  /** The conversations' workers (sub-agents). */
+  workers: {
+    list: (conversation: string) => request<Worker[]>('GET', `/api/v1/conversations/${encodeURIComponent(conversation)}/workers`),
+    get: (id: string) => request<{ id: string; steps: WorkerStep[]; phase: string | null }>('GET', `/api/v1/workers/${encodeURIComponent(id)}`),
+    stop: (id: string) => request<Empty>('POST', `/api/v1/workers/${encodeURIComponent(id)}/stop`, {}),
+    message: (id: string, text: string) => request<Empty>('POST', `/api/v1/workers/${encodeURIComponent(id)}/message`, { text }),
+  },
   /** Pages (artifacts, MCP Apps views): what their iframe host asks for. */
   pages: {
     get: (id: string, opts: { version?: number; theme?: 'light' | 'dark' }) => request<PageDoc>('GET', `/api/v1/pages/${encodeURIComponent(id)}${query(opts)}`),

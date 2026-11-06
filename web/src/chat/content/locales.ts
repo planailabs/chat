@@ -61,6 +61,25 @@ export interface LocaleContent {
   composer: {
     submitLabel: string;
   };
+  /** The conversation's workers (sub-agents). */
+  workers: {
+    title: string;
+    /** "{n} workers" */
+    count: string;
+    /** "{n} running" */
+    running: string;
+    worker: string;
+    untitled: string;
+    task: string;
+    result: string;
+    working: string;
+    waiting: string;
+    stop: string;
+    close: string;
+    send: string;
+    placeholder: string;
+    states: { running: string; waiting: string; done: string; failed: string; stopped: string; paused: string };
+  };
   /** Pages beside the conversation (artifacts, services' views). */
   pages: {
     page: string;
@@ -308,6 +327,22 @@ const en: LocaleContent = {
   composer: {
     submitLabel: 'Send',
   },
+  workers: {
+    title: 'Workers',
+    count: '{n} workers',
+    running: '{n} running',
+    worker: 'Worker',
+    untitled: 'Untitled task',
+    task: 'Task',
+    result: 'Result',
+    working: 'Working…',
+    waiting: 'Waiting for your approval in the conversation…',
+    stop: 'Stop',
+    close: 'Close',
+    send: 'Send',
+    placeholder: 'Message this worker…',
+    states: { running: 'running', waiting: 'waiting for you', done: 'done', failed: 'failed', stopped: 'stopped', paused: 'paused' },
+  },
   pages: {
     page: 'Page',
     serviceView: 'Service view',
@@ -539,6 +574,22 @@ const de: LocaleContent = {
   },
   composer: {
     submitLabel: 'Senden',
+  },
+  workers: {
+    title: 'Helfer',
+    count: '{n} Helfer',
+    running: '{n} aktiv',
+    worker: 'Helfer',
+    untitled: 'Aufgabe ohne Titel',
+    task: 'Aufgabe',
+    result: 'Ergebnis',
+    working: 'Arbeitet…',
+    waiting: 'Wartet im Gespräch auf deine Freigabe…',
+    stop: 'Stoppen',
+    close: 'Schließen',
+    send: 'Senden',
+    placeholder: 'Nachricht an diesen Helfer…',
+    states: { running: 'aktiv', waiting: 'wartet auf dich', done: 'fertig', failed: 'fehlgeschlagen', stopped: 'gestoppt', paused: 'pausiert' },
   },
   pages: {
     page: 'Seite',

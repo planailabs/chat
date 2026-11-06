@@ -56,6 +56,11 @@ export const routeServerEvent = <E extends ChatEventName>(name: E, data: Convers
     window.dispatchEvent(new CustomEvent('page-kv', { detail: data }));
     return;
   }
+  // A worker moved on: the conversation on screen refreshes its workers.
+  if (name === 'worker') {
+    if (data.conversation === store.state.activeConversationId) store.state.workersRev++;
+    return;
+  }
   const state = store.state;
   const id = data.conversation;
   const destination = eventDestination(name, id, state.activeConversationId, state.conversations);

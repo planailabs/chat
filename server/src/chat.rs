@@ -299,7 +299,7 @@ pub async fn budget(app: &App, user: Uuid) -> Result<Budget, ApiError> {
 }
 
 /// Rolling-hour budget of the user's plan, checked before each message.
-async fn check_budget(app: &App, user: Uuid) -> Result<(), ApiError> {
+pub(crate) async fn check_budget(app: &App, user: Uuid) -> Result<(), ApiError> {
     if budget(app, user).await?.exhausted() {
         return Err(ApiError::payment_required("You've reached the hourly message limit of your plan. Please try again later."));
     }

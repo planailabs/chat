@@ -236,7 +236,17 @@ impl Pump {
     /// conversation (approvals wait for the user like the assistant's own);
     /// its text and turns are its parent's business (the report goes there).
     async fn apply_child(&self, agent: &str, seq: i64, user: Uuid, conv: Uuid, ev: &Value, turn: &mut Turn) -> anyhow::Result<()> {
-        match ev["type"].as_str().unwrap_or_default() {
+        let kind = ev["type"].as_str().unwrap_or_default();
+        // The list in the browser follows a worker's steps.
+        if matches!(kind, "inbox" | "llm_done" | "tool_result" | "approval_requested" | "llm_failed" | "cancelled" | "paused" | "resumed") {
+            self.emit(user, conv, "worker", json!({ "agent": agent }));
+        }
+        match kind {
+            "inbox" => {
+                // Its first message is its task.
+                let task: String = ev["content"].as_str().unwrap_or_default().lines().find(|l| !l.trim().is_empty()).unwrap_or_default().chars().take(200).collect();
+                sqlx::query("UPDATE conversation_children SET task = $2 WHERE agent_id = $1 AND task IS NULL").bind(agent).bind(task).execute(&self.pool).await?;
+            }
             "llm_delta" => {
                 let delta = &ev["delta"];
                 turn.fold_tool_calls(delta);
@@ -422,12 +432,14 @@ impl Pump {
             "child_spawned" => {
                 if let Some(child) = ev["id"].as_str() {
                     self.adopt(child, agent, user, conv).await?;
+                    self.emit(user, conv, "worker", json!({ "agent": child }));
                 }
             }
             "child_report" => {
                 if let Some(child) = ev["id"].as_str() {
                     sqlx::query("UPDATE conversation_children SET finished_at = now() WHERE agent_id = $1").bind(child).execute(&self.pool).await?;
                     self.owners.1.write().await.remove(child);
+                    self.emit(user, conv, "worker", json!({ "agent": child }));
                 }
             }
             "cancelled" | "superseded" => {

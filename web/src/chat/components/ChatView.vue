@@ -9,6 +9,7 @@ import { store } from '../app/store';
 import { locale } from '../app/locale';
 import { renderMarkdown } from '../utils/markdown';
 import ChatMessages from './chat/ChatMessages.vue';
+import WorkersBar from './chat/WorkersBar.vue';
 import QuestionPrompt from './chat/QuestionPrompt.vue';
 import PreferencePrompt from './chat/PreferencePrompt.vue';
 import ApprovalCard from './chat/ApprovalCard.vue';
@@ -95,6 +96,8 @@ onBeforeUnmount(() => highlightTimer && clearTimeout(highlightTimer));
       <div v-if="isEmpty" class="text-center">
         <h1 class="text-3xl font-semibold tracking-tight sm:text-4xl md:text-5xl">{{ locale.chat.heading }}</h1>
       </div>
+
+      <ErrorBoundary v-if="!isEmpty" :reset-key="`workers:${store.state.activeConversationId}`"><WorkersBar /></ErrorBoundary>
 
       <ErrorBoundary :reset-key="store.state.activeConversationId">
         <ChatMessages :messages="chat.messages" />

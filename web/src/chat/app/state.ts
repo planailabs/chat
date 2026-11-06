@@ -172,6 +172,10 @@ export interface AppState {
   chat: ChatSession | null;
   /** The page in the side panel, if one is open. */
   openPage: OpenPage | null;
+  /** The worker in the side panel, if one is open (instead of a page). */
+  openWorker: string | null;
+  /** Bumped when a worker of the conversation on screen moves on. */
+  workersRev: number;
 
   // ─── Profile State Machine ─────────────────────────────────────────────────
   profile: ProfileState;
@@ -320,6 +324,8 @@ export const createInitialState = (): AppState => {
     highlightMessageId: null,
     chat: null,
     openPage: null,
+    openWorker: null,
+    workersRev: 0,
     profile: createProfileState(),
   };
 };
