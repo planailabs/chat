@@ -221,7 +221,7 @@ pub async fn upgrade_outdated(app: &App) -> anyhow::Result<()> {
         let Some((user, id, agent)) = ours.iter().find(|(_, _, ag)| a["id"] == ag.as_str()) else { continue };
         if let Err(e) = upgrade(app, *user, *id, agent).await {
             // Right after a deploy the node may not offer the new agent yet: the caller retries.
-            if e.to_string().contains("no live node offers") {
+            if e.to_string().contains(NOT_READY) {
                 anyhow::bail!("{e}");
             }
             tracing::error!(conversation = %id, agent, "upgrading an outdated agent: {e}");
@@ -230,9 +230,15 @@ pub async fn upgrade_outdated(app: &App) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// What the hub says when no node offers an agent type's new version yet.
+const NOT_READY: &str = "no live node offers";
+
 async fn upgrade(app: &App, user: Uuid, id: Uuid, agent: &str) -> Result<String, ApiError> {
     let agent = agent.to_string();
-    let up = app.hub.call("upgrade", json!({ "id": agent })).await.map_err(internal)?;
+    let up = app.hub.call("upgrade", json!({ "id": agent })).await.map_err(|e| {
+        // Right after a deploy: kept recognisable, so the start-up pass retries.
+        if e.to_string().contains(NOT_READY) { ApiError::conflict(format!("{NOT_READY} yet: {e}")) } else { internal(e) }
+    })?;
     let new = up["id"].as_str().ok_or_else(|| internal(format!("upgrade of {agent} returned no id: {up}")))?.to_string();
     // Its log up to now is the copied history: mirrored already.
     let copied = app.hub.transcript(&new).await.map_err(internal)?["seq"].as_i64().unwrap_or(0);
