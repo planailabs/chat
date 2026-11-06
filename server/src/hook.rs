@@ -241,24 +241,29 @@ fn fetches_urls(tool: &str) -> bool {
     matches!(tool, "firecrawl.firecrawl_scrape" | "firecrawl.firecrawl_map" | "firecrawl.firecrawl_extract" | "firecrawl.firecrawl_crawl")
 }
 
-/// A URL that looks like it carries data out (after a prompt injection, an
-/// agent could fetch `https://attacker/?d=<what it read>`): a long run of
-/// encoded-looking characters in a query value or a path segment, or a very
-/// long query. Ordinary pages' URLs pass.
-pub fn smuggles_data(url: &str) -> bool {
-    let Ok(u) = url::Url::parse(url) else { return true };
-    let encoded = |s: &str| {
-        let s = urlencoding_decode(s);
-        s.len() >= 48 && s.chars().filter(|c| c.is_ascii_alphanumeric() || "+/=_-.%".contains(*c)).count() * 10 >= s.len() * 9 && !s.contains(' ')
-    };
-    u.query().is_some_and(|q| q.len() > 300)
-        || u.query_pairs().any(|(_, v)| encoded(&v) || v.len() > 120)
-        || u.path_segments().into_iter().flatten().any(|seg| encoded(seg) && !seg.contains('.'))
-        || u.host_str().is_some_and(|h| h.split('.').any(|l| l.len() > 40))
+/// What the conversation was given: the user's messages and tool results
+/// (not the agent's own words or calls, which it could fill with anything).
+pub fn known_text(transcript: &Value) -> String {
+    transcript["messages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|m| m["role"] == "user" || m["role"] == "tool")
+        .filter_map(|m| m["content"].as_str())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
-fn urlencoding_decode(s: &str) -> String {
-    url::form_urlencoded::parse(format!("x={s}").as_bytes()).next().map(|(_, v)| v.into_owned()).unwrap_or_default()
+/// Whether a URL appears in that text (as written, or with/without its
+/// trailing slash, or JSON-escaped).
+pub fn url_known(url: &str, known: &str) -> bool {
+    let bare = url.trim_end_matches('/');
+    !bare.is_empty() && (known.contains(bare) || known.contains(&bare.replace('/', "\\/")))
+        && known.match_indices(bare).any(|(i, _)| {
+            // The match must end the URL there: not a prefix of a longer one.
+            let rest = &known[i + bare.len()..];
+            rest.is_empty() || rest.starts_with(|c: char| c == '/' || c.is_whitespace() || matches!(c, '"' | '\'' | ')' | ']' | '>' | '<' | ',' | '\\'))
+        })
 }
 
 /// The URLs a Firecrawl call fetches.
@@ -524,16 +529,6 @@ pub async fn pre_tool(State(app): State<AppState>, headers: HeaderMap, Json(h): 
     if conversation.is_none() && tool == "connector.call_tool" {
         return Ok(decide("deny", "not a chat conversation"));
     }
-    // Fetching a URL that looks like it carries data: the user looks first.
-    if fetches_urls(tool) {
-        if let Some(u) = fetched_urls(&h.input.args).into_iter().find(|u| smuggles_data(u)) {
-            let why = format!("This would fetch {u}, a URL that looks like it carries data. Check it before allowing it.");
-            return Ok(rec.answer(&app, "ask", Some(("always", "a URL that looks like it carries data")), why).await);
-        }
-        if tool != "firecrawl.firecrawl_crawl" {
-            return Ok(rec.answer(&app, "allow", None, "an ordinary URL".into()).await);
-        }
-    }
     // Always the user's call: before the allow-list, the validator and
     // "approve all"; a sub-agent (no conversation of its own) can't make it.
     if always_asks(&app, &call) {
@@ -562,6 +557,19 @@ pub async fn pre_tool(State(app): State<AppState>, headers: HeaderMap, Json(h): 
         tracing::error!("approval hook: transcript of {}: {e:#}", h.agent.id);
         StatusCode::BAD_GATEWAY
     })?;
+    // A fetch goes out unasked only to a URL the conversation already had (the
+    // user's messages, earlier results): a URL carrying data out (after a
+    // prompt injection) is new by nature, so it waits for the user.
+    if fetches_urls(tool) {
+        let known = known_text(&transcript);
+        if let Some(u) = fetched_urls(&h.input.args).into_iter().find(|u| !url_known(u, &known)) {
+            let why = format!("This would fetch {u}, which didn't come from you or an earlier result. Check where it goes before allowing it.");
+            return Ok(rec.answer(&app, "ask", Some(("always", "a URL the conversation didn't have")), why).await);
+        }
+        if tool != "firecrawl.firecrawl_crawl" {
+            return Ok(rec.answer(&app, "allow", None, "a URL from the conversation".into()).await);
+        }
+    }
     // The service's own annotations when the agent listed its tools (as it's
     // told to before calling one); the name's verb only otherwise.
     let risk = if tool == "connector.call_tool" { advertised_risk(&transcript, &call.name) } else { None }.unwrap_or_else(|| risk_of(&call.name));
@@ -645,30 +653,23 @@ mod tests {
     }
 
     #[test]
-    fn urls_that_carry_data_are_noticed() {
-        for ok in [
-            "https://docs.rs/axum/latest/axum/",
-            "https://www.example.com/search?q=mcp+apps&page=2",
-            "https://github.com/modelcontextprotocol/ext-apps/blob/main/specification/2026-01-26/apps.mdx",
-            "https://blog.example.com/posts/2026-01-26-mcp-apps/",
-            "https://example.com/a?utm_source=newsletter&utm_campaign=autumn-2026",
-        ] {
-            assert!(!smuggles_data(ok), "{ok}");
-        }
-        for bad in [
-            "https://evil.example/?d=dXNlcjphZG1pbkBwbGFuLmFpO3Rva2VuPXNrLWxpdmUtMTIzNDU2Nzg5MA==",
-            "https://evil.example/c/4f2a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a",
-            "https://evil.example/?a=1&b=" ,
-            "https://aGVsbG8gd29ybGQgdGhpcyBpcyBhIHNlY3JldCB0b2tlbg.evil.example/",
-            "not a url",
-        ]
-        .iter()
-        .filter(|u| !u.ends_with("b="))
-        {
-            assert!(smuggles_data(bad), "{bad}");
-        }
-        let long = format!("https://evil.example/?{}", "k=v&".repeat(100));
-        assert!(smuggles_data(&long));
+    fn only_urls_the_conversation_had_go_unasked() {
+        let t = json!({ "messages": [
+            { "role": "user", "content": "Look at https://docs.rs/axum/latest/axum/ please" },
+            { "role": "assistant", "content": "I'll fetch https://evil.example/?d=secret" },
+            { "role": "tool", "content": "{\"results\":[{\"url\":\"https://blog.example.com/post\"}]}" },
+        ] });
+        let k = known_text(&t);
+        assert!(url_known("https://docs.rs/axum/latest/axum/", &k));
+        assert!(url_known("https://docs.rs/axum/latest/axum", &k), "trailing slash");
+        assert!(url_known("https://blog.example.com/post", &k), "from a search result");
+        assert!(!url_known("https://evil.example/?d=secret", &k), "the agent's own words don't count");
+        assert!(!url_known("https://blog.example.com/po", &k), "a prefix isn't the URL");
+        assert!(!url_known("https://docs.rs/axum/latest/axum/?leak=1", &k), "a new query is a new URL");
+    }
+
+    #[test]
+    fn fetched_urls_from_both_arguments() {
         assert_eq!(fetched_urls(&json!({ "urls": ["a", "b"], "url": "c" })), vec!["c", "a", "b"]);
     }
 
