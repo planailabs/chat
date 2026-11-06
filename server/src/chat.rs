@@ -202,6 +202,10 @@ pub async fn upgrade_outdated(app: &App) -> anyhow::Result<()> {
     for a in agents.as_array().into_iter().flatten().filter(|a| a["outdated"] == true && a["phase"] != "cancelled") {
         let Some((user, id, agent)) = ours.iter().find(|(_, _, ag)| a["id"] == ag.as_str()) else { continue };
         if let Err(e) = upgrade(app, *user, *id, agent).await {
+            // Right after a deploy the node may not offer the new agent yet: the caller retries.
+            if e.to_string().contains("no live node offers") {
+                anyhow::bail!("{e}");
+            }
             tracing::error!(conversation = %id, agent, "upgrading an outdated agent: {e}");
         }
     }
