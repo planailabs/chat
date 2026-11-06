@@ -54,6 +54,8 @@ struct Who {
     email: String,
     client: String,
     principal: Arc<Principal>,
+    /// Connected with `mcp:read`: it may only read.
+    read_only: bool,
 }
 
 impl PublicMcp {
@@ -102,6 +104,9 @@ fn json_result(v: Value) -> CallToolResult {
         meta: None,
     }
 }
+
+/// What a read-only connection is told about a change.
+const READ_ONLY: &str = "This app was connected read-only (mcp:read): it can't change anything. Connect it again with full access, or do it in the plan.ai chat.";
 
 fn refused(why: impl Into<String>) -> CallToolResult {
     CallToolResult::error(vec![Content::text(why.into())])
@@ -252,7 +257,8 @@ impl ServerHandler for PublicMcp {
         }
         let mut p = principal;
         p.scopes["mcp_client"] = json!(grant.client_name);
-        *self.session.who.write().await = Some(Who { user: web.id, email: web.email.clone(), client: grant.client_name, principal: Arc::new(p) });
+        let read_only = grant.read_only();
+        *self.session.who.write().await = Some(Who { user: web.id, email: web.email.clone(), client: grant.client_name, principal: Arc::new(p), read_only });
         Ok(self.get_info())
     }
 
@@ -273,6 +279,10 @@ impl ServerHandler for PublicMcp {
         // The chat's own API.
         if let Some(ep) = self.registry.endpoints().iter().find(|e| e.tool_name() == name && e.visible_to(&who.principal)).cloned() {
             let call = Call { name: format!("chat.{name}"), args: args.clone() };
+            if who.read_only && api_risk(ep.risk()) != Risk::ReadOnly {
+                self.audit(&who, &call.name, "deny", "read-only connection").await;
+                return Ok(refused(READ_ONLY));
+            }
             // Not the agents' allow-list (`chat.*`): an outside client could
             // otherwise approve calls, buy, add servers or (admins) act on
             // other users unasked. Those the user confirms in the client.
@@ -326,6 +336,10 @@ impl ServerHandler for PublicMcp {
         let args = inner_args.clone().map(Value::Object).unwrap_or_else(|| json!({}));
         let call = Call { name: format!("{service}.{tool}"), args: args.clone() };
         let risk = self.service_risk(connector, &who, &service, &tool).await;
+        if who.read_only && risk != Risk::ReadOnly {
+            self.audit(&who, &call.name, "deny", "read-only connection").await;
+            return Ok(refused(READ_ONLY));
+        }
 
         // Purchases: before everything else, as in the chat.
         let as_connector = json!({ "service": service, "tool": tool, "arguments": args });
