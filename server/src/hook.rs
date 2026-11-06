@@ -58,7 +58,8 @@ pub fn advertised_risk(transcript: &Value, call: &str) -> Option<Risk> {
         .filter_map(|c| c["id"].as_str())
         .collect();
     transcript["messages"].as_array()?.iter().rev().filter(|m| m["role"] == "tool" && m["tool_call_id"].as_str().is_some_and(|id| listings.contains(id))).find_map(|m| {
-        let listed: Value = serde_json::from_str(m["content"].as_str()?).ok()?;
+        // `full`: the whole result when the model was sent a cut one (grep_results).
+        let listed: Value = serde_json::from_str(m["full"].as_str().or_else(|| m["content"].as_str())?).ok()?;
         if listed["service"] != service {
             return None;
         }
@@ -279,7 +280,7 @@ pub fn known_text(transcript: &Value) -> String {
         .into_iter()
         .flatten()
         .filter(|m| m["role"] == "user" || m["role"] == "tool")
-        .filter_map(|m| m["content"].as_str())
+        .filter_map(|m| m["full"].as_str().or_else(|| m["content"].as_str()))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -681,6 +682,18 @@ mod tests {
         for t in ["spawn_agent", "wait_for", "connector.call_tool", "chat.send_message"] {
             assert!(!cross_agent(t), "{t}");
         }
+    }
+
+    #[test]
+    fn whole_results_are_read_when_the_model_got_them_cut() {
+        let t = json!({ "messages": [
+            { "role": "assistant", "tool_calls": [{ "id": "l", "function": { "name": "connector.list_tools" } }] },
+            { "role": "tool", "tool_call_id": "l", "content": "{\"service\":\"s\",\"tools\":[{\"na [cut: …]",
+              "full": "{\"service\":\"s\",\"tools\":[{\"name\":\"x_get\",\"annotations\":{\"readOnlyHint\":true}}]}" },
+            { "role": "tool", "tool_call_id": "r", "content": "https://a.example/page [cut]", "full": "https://a.example/page and https://b.example/deep/link" },
+        ] });
+        assert_eq!(advertised_risk(&t, "s.x_get"), Some(Risk::ReadOnly));
+        assert!(url_known("https://b.example/deep/link", &known_text(&t)));
     }
 
     #[test]
