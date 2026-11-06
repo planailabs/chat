@@ -101,6 +101,27 @@ user in the client (elicitation), and purchases are off unless the user turns
 on "Purchases from MCP clients" in the settings, then confirmed with the price.
 It needs `[auth]` (real sign-in); with `DEV_ONLY_NO_AUTH` it isn't mounted.
 
+## Pages (artifacts and MCP Apps views)
+
+The assistant can show the user an interactive page beside the conversation
+(`chat.artifact_publish`; the `artifacts` skill tells it how): HTML on the
+generative-ui suite (`generative-ui/`, a submodule: `<ui-*>` components and
+the chat's design as MCP Apps style variables), versioned by name, with a KV
+view the page binds and optional backflow handlers (JavaScript run by
+gui-runtime with only their KV: no network, no files). A service tool with an
+MCP Apps view (`_meta.ui.resourceUri`) gets its view kept with the call
+(`artifacts::ChatViews`, via the connector).
+
+The browser shows a page in a sandboxed iframe without origin (`srcdoc`,
+`sandbox="allow-scripts"`, a CSP without network for artifacts, the view's
+declared origins for views) and is its MCP Apps host (`web/…/pageHost.ts`):
+the page's tool calls go to `/api/v1/pages/{id}/call` and are judged like the
+assistant's (reads go through; the validator's objection or a destructive
+call asks the user, who confirms with a one-time token; purchases never
+happen from a page); an action without a handler, and `ui/message`, reach the
+assistant as the user's message; `ui/update-model-context` rides on the next
+one.
+
 ## Deployment
 
 `package.nix` packages the server and the UI (`web/`) separately; `module.nix` is the NixOS module and points the server at the UI (`web.static_dir`).

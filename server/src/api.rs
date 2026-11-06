@@ -178,6 +178,15 @@ async fn export(app: &AppState, user: Uuid) -> Result<Value, ApiError> {
         "staff_pings": rows("SELECT to_jsonb(s) - 'user_id' FROM staff_pings s WHERE user_id = $1 ORDER BY id").await?,
         "token_usage": rows("SELECT to_jsonb(t) - 'user_id' FROM chat_token_usage t WHERE user_id = $1 ORDER BY created_at").await?,
         "mcp_calls": rows("SELECT to_jsonb(c) - 'user_id' FROM mcp_calls c WHERE user_id = $1 ORDER BY id").await?,
+        // Pages (artifacts, services' views): their versions, KV views and events.
+        "pages": rows(
+            "SELECT to_jsonb(a) - 'user_id' || jsonb_build_object(
+                 'versions', (SELECT jsonb_agg(to_jsonb(v) - 'artifact_id' ORDER BY v.version) FROM artifact_versions v WHERE v.artifact_id = a.id),
+                 'state', (SELECT to_jsonb(s) - 'artifact_id' FROM artifact_state s WHERE s.artifact_id = a.id),
+                 'events', (SELECT jsonb_agg(to_jsonb(e) - 'artifact_id' ORDER BY e.id) FROM artifact_events e WHERE e.artifact_id = a.id))
+             FROM artifacts a WHERE a.user_id = $1 ORDER BY a.created_at",
+        )
+        .await?,
         "connectors": match &app.connectors {
             Some(c) => c.export(user).await?,
             None => json!({}),
