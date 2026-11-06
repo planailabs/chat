@@ -149,6 +149,7 @@ async fn main() -> anyhow::Result<()> {
     }
     let router = router
         .merge(web)
+        .layer(from_fn(no_frame_navigation))
         .layer(mac_mgmt_common::otel::http::trace_layer())
         .layer(from_fn(mac_mgmt_common::otel::http::record_request_metrics));
 
@@ -199,6 +200,15 @@ impl plan_ai_oauth::Admission for Approved {
         }
         Ok(())
     }
+}
+
+/// The chat's pages (artifacts, MCP Apps views) are `srcdoc` frames, which
+/// this doesn't govern; but no frame may navigate to a URL — a page that
+/// tried would leave its CSP behind and keep talking to the chat.
+async fn no_frame_navigation(req: Request, next: Next) -> Response {
+    let mut res = next.run(req).await;
+    res.headers_mut().entry(header::CONTENT_SECURITY_POLICY).or_insert(header::HeaderValue::from_static("frame-src 'none'; child-src 'none'"));
+    res
 }
 
 /// API clients with a Bearer token authenticate in the handler; everyone

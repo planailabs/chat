@@ -54,6 +54,13 @@ const currentStyles = () => {
   return { variables: styleVariables((n) => cs.getPropertyValue(n), cs.fontFamily) };
 };
 
+/**
+ * Whether the user just acted (a click or key press in the page counts: it
+ * activates the chat too). What a page does in the user's name — speaking
+ * for them, opening links, going full screen — needs it.
+ */
+export const userActed = (): boolean => (navigator as Navigator & { userActivation?: { isActive: boolean } }).userActivation?.isActive === true;
+
 /** Only http(s) links leave the chat. */
 export const linkAllowed = (url: unknown): url is string => {
   if (typeof url !== 'string') return false;
@@ -68,8 +75,12 @@ export const linkAllowed = (url: unknown): url is string => {
 export interface PageHostOptions {
   theme: () => 'light' | 'dark';
   lang: () => string;
-  /** The user decides a call the checks left to them. */
+  /** The user decides (a call the checks left to them, a link to open). */
   confirm: (message: string) => Promise<boolean>;
+  /** The text asking to open a link. */
+  openLinkText: (url: string) => string;
+  /** Whether the user just acted (see `userActed`). */
+  gesture?: () => boolean;
   /** The page asks for inline or full screen; answers the mode it got. */
   displayMode: (mode: string) => 'inline' | 'fullscreen';
   currentDisplayMode: () => 'inline' | 'fullscreen';
@@ -170,6 +181,7 @@ export class PageHost {
 
   private async request(method: string, p: Json): Promise<unknown> {
     const id = this.doc.id;
+    const gesture = (this.opts.gesture ?? userActed)();
     switch (method) {
       case 'ui/initialize':
         return {
@@ -195,7 +207,8 @@ export class PageHost {
         const content = p.content as { type?: string; text?: unknown } | undefined;
         const text = typeof content?.text === 'string' ? content.text.trim() : '';
         if (!text) throw { code: -32602, message: 'ui/message needs text content' };
-        await api.pages.message(id, text, this.opts.lang());
+        if (!gesture) throw { code: FAILED, message: 'Message sending denied: only right after the user acts on the page' };
+        await api.pages.message(id, text, this.opts.lang(), gesture);
         return {};
       }
       case 'ui/update-model-context':
@@ -203,9 +216,13 @@ export class PageHost {
         return {};
       case 'ui/open-link':
         if (!linkAllowed(p.url)) throw { code: FAILED, message: 'Invalid URL' };
+        // The user sees where it goes (a page can put data in the URL).
+        if (!(await this.opts.confirm(this.opts.openLinkText(p.url)))) throw { code: FAILED, message: 'Link opening denied by user' };
         window.open(p.url, '_blank', 'noopener,noreferrer');
         return {};
       case 'ui/request-display-mode':
+        // Full screen covers the chat: only when the user asked for it in the page.
+        if (p.mode === 'fullscreen' && !gesture) return { mode: this.opts.currentDisplayMode() };
         return { mode: this.opts.displayMode(String(p.mode)) };
       case 'gui/kv':
         if (this.doc.kind !== 'artifact') return { kv: {} };
@@ -219,6 +236,7 @@ export class PageHost {
           value: p.value ?? null,
           version: typeof p.version === 'string' ? p.version : String(this.doc.version),
           lang: this.opts.lang(),
+          gesture,
         });
       }
       default:

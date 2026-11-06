@@ -17,7 +17,9 @@ const frame = () => {
   return { posted, win: { postMessage: (m: Record<string, unknown>) => posted.push(m) } as unknown as Window };
 };
 
-const opts = (confirm = vi.fn(async () => true)) => ({
+const opts = (confirm = vi.fn(async () => true), gesture = true) => ({
+  openLinkText: (url: string) => `open ${url}?`,
+  gesture: () => gesture,
   theme: () => 'dark' as const,
   lang: () => 'de',
   confirm,
@@ -89,7 +91,7 @@ describe('PageHost', () => {
     const host = new PageHost(() => f.win, doc(), opts());
     send(host, f.win, { jsonrpc: '2.0', id: 1, method: 'gui/backflow', params: { action: 'bump', value: { by: 1 } } });
     await settle();
-    expect(backflow).toHaveBeenCalledWith('p1', { action: 'bump', component: null, value: { by: 1 }, version: '2', lang: 'de' });
+    expect(backflow).toHaveBeenCalledWith('p1', { action: 'bump', component: null, value: { by: 1 }, version: '2', lang: 'de', gesture: true });
     const view = new PageHost(() => f.win, doc({ kind: 'mcp_app' }), opts());
     send(view, f.win, { jsonrpc: '2.0', id: 2, method: 'gui/backflow', params: { action: 'x' } });
     await settle();
@@ -102,6 +104,22 @@ describe('PageHost', () => {
     send(host, f.win, { jsonrpc: '2.0', method: 'ui/notifications/initialized' });
     expect(f.posted.map((m) => m.method)).toEqual(['ui/notifications/tool-input', 'ui/notifications/tool-result']);
     expect(f.posted[0].params).toEqual({ arguments: { q: 1 } });
+  });
+
+  it('without a user action a page cannot speak, go full screen or open links unasked', async () => {
+    const f = frame();
+    const confirm = vi.fn(async () => false);
+    const host = new PageHost(() => f.win, doc(), opts(confirm, false));
+    send(host, f.win, { jsonrpc: '2.0', id: 1, method: 'ui/message', params: { role: 'user', content: { type: 'text', text: 'hi' } } });
+    send(host, f.win, { jsonrpc: '2.0', id: 2, method: 'ui/request-display-mode', params: { mode: 'fullscreen' } });
+    send(host, f.win, { jsonrpc: '2.0', id: 3, method: 'ui/open-link', params: { url: 'https://evil.example/?d=secret' } });
+    await settle();
+    await settle();
+    const byId = (id: number) => f.posted.find((m) => m.id === id) as { result?: { mode: string }; error?: { message: string } };
+    expect(byId(1).error?.message).toMatch(/only right after the user acts/);
+    expect(byId(2).result).toEqual({ mode: 'inline' });
+    expect(confirm).toHaveBeenCalledWith('open https://evil.example/?d=secret?');
+    expect(byId(3).error?.message).toBe('Link opening denied by user');
   });
 
   it('unknown methods are "method not found"', async () => {

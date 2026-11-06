@@ -112,15 +112,20 @@ gui-runtime with only their KV: no network, no files). A service tool with an
 MCP Apps view (`_meta.ui.resourceUri`) gets its view kept with the call
 (`artifacts::ChatViews`, via the connector).
 
-The browser shows a page in a sandboxed iframe without origin (`srcdoc`,
-`sandbox="allow-scripts"`, a CSP without network for artifacts, the view's
-declared origins for views) and is its MCP Apps host (`web/…/pageHost.ts`):
-the page's tool calls go to `/api/v1/pages/{id}/call` and are judged like the
-assistant's (reads go through; the validator's objection or a destructive
-call asks the user, who confirms with a one-time token; purchases never
-happen from a page); an action without a handler, and `ui/message`, reach the
-assistant as the user's message; `ui/update-model-context` rides on the next
-one.
+The browser shows a page in sandboxed frames without origin: a trusted outer
+`srcdoc` document carries the CSP (none of the network for artifacts, a
+view's declared origins for views) and relays messages; the page is its
+nested `srcdoc` frame, which inherits that policy whatever its markup does.
+The chat answers with `frame-src 'none'`, so no frame can navigate away from
+its policy. The browser is the page's MCP Apps host (`web/…/pageHost.ts`): a
+tool call goes to `/api/v1/pages/{id}/call`, where reads of tools the service
+marks read-only go through and anything else asks the user with the whole
+call (allowed with a one-time token; purchases never happen from a page). A
+page speaks for the user (an action without a handler, `ui/message`) only
+right after they acted on it, labelled as the page's; opening a link and
+full screen need the user too; `ui/update-model-context` rides on the next
+message. Handlers run a few at a time, one per user, with capped KV, events
+and logs.
 
 ## Deployment
 

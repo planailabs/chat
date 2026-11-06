@@ -84,7 +84,7 @@ A button's or form's `data-action` is an action. A form sends
 `{field: value, …}`, a button its `data-value` (JSON).
 
 - **Without a handler** the action comes to you as the user's message:
-  `[On the page "<title>"] save: {"email":"…"}`. Answer it like any message
+  `[The user acted on the page "<title>"] save: {"email":"…"}`. Answer it like any message
   (often by publishing a new version or setting KV values).
 - **With a handler** it runs on the server at once, without you: give
   `handlers: {"<action>": {"source": "function handle(event, host) { … }"}}`.
@@ -112,12 +112,12 @@ Write scripts as `<script type="module">`: `window.gui` is ready there.
 
 - `gui.callTool("list_services")`, `gui.callTool("list_tools", {service})`,
   `gui.callTool("call_tool", {service, tool, arguments})`: the user's services,
-  as the user, like your own `connector` calls. They're checked like yours;
-  risky ones ask the user in the chat first; purchases never happen from a
-  page. Returns the tool's result (its structured content when it has one).
-  Use it for live data (a dashboard that refreshes), not to change things
-  behind the user's back.
-- `gui.sendMessage(text)`: send a message as the user (you'll answer it).
+  as the user. Tools the service marks read-only run at once; anything else
+  asks the user first, showing the whole call; purchases never happen from
+  a page. Returns the tool's result (its structured content when it has
+  one). Use it for live data (a dashboard that refreshes).
+- `gui.sendMessage(text)`: right after the user clicked or typed on the page,
+  send a message for them (you'll see it came from the page).
 - `gui.updateContext(data, text)`: tell you something without a message; it
   reaches you with the user's next message.
 - `gui.backflow(action, value)`, `gui.kv()`, `gui.onKv(kv => …)`,

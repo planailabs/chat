@@ -78,6 +78,8 @@ export interface LocaleContent {
     failed: string;
     resize: string;
     confirmTitle: string;
+    /** "The page wants to open {url}" */
+    openLink: string;
     allow: string;
     deny: string;
   };
@@ -320,6 +322,7 @@ const en: LocaleContent = {
     failed: 'The page couldn’t be loaded:',
     resize: 'Resize the page',
     confirmTitle: 'Allow this?',
+    openLink: 'The page wants to open this link in a new tab:\n{url}',
     allow: 'Allow',
     deny: 'Deny',
   },
@@ -551,6 +554,7 @@ const de: LocaleContent = {
     failed: 'Die Seite konnte nicht geladen werden:',
     resize: 'Seitenbreite ändern',
     confirmTitle: 'Erlauben?',
+    openLink: 'Die Seite möchte diesen Link in einem neuen Tab öffnen:\n{url}',
     allow: 'Erlauben',
     deny: 'Ablehnen',
   },
