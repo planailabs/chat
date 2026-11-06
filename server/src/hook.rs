@@ -241,6 +241,36 @@ fn fetches_urls(tool: &str) -> bool {
     matches!(tool, "firecrawl.firecrawl_scrape" | "firecrawl.firecrawl_map" | "firecrawl.firecrawl_extract" | "firecrawl.firecrawl_crawl")
 }
 
+/// The tools that read the user's private data: their services, their other
+/// conversations, pages' stored data.
+fn reads_private_data(tool: &str) -> bool {
+    matches!(tool, "connector.call_tool" | "chat.conversation_search" | "chat.conversation_read" | "chat.artifact_get" | "chat.artifact_events")
+}
+
+/// Whether an agent has read anything private (its transcript's calls).
+pub fn read_private(transcript: &Value) -> bool {
+    transcript["messages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .flat_map(|m| m["tool_calls"].as_array().into_iter().flatten())
+        .any(|c| c["function"]["name"].as_str().is_some_and(reads_private_data))
+}
+
+/// For a worker: whether the agent that spawned it (and wrote its task) has
+/// read anything private. Unknown (the hub didn't answer): assume so.
+async fn parent_read_private(app: &AppState, agent: &str) -> bool {
+    let parent: Option<String> = sqlx::query_scalar("SELECT parent_agent_id FROM conversation_children WHERE agent_id = $1").bind(agent).fetch_optional(&app.pool).await.ok().flatten();
+    let Some(parent) = parent else { return false };
+    match app.hub.transcript(&parent).await {
+        Ok(t) => read_private(&t),
+        Err(e) => {
+            tracing::warn!(agent, "a worker's parent's transcript: {e:#}");
+            true
+        }
+    }
+}
+
 /// What the conversation was given: the user's messages and tool results
 /// (not the agent's own words or calls, which it could fill with anything).
 pub fn known_text(transcript: &Value) -> String {
@@ -557,18 +587,19 @@ pub async fn pre_tool(State(app): State<AppState>, headers: HeaderMap, Json(h): 
         tracing::error!("approval hook: transcript of {}: {e:#}", h.agent.id);
         StatusCode::BAD_GATEWAY
     })?;
-    // A fetch goes out unasked only to a URL the conversation already had (the
-    // user's messages, earlier results): a URL carrying data out (after a
-    // prompt injection) is new by nature, so it waits for the user.
-    if fetches_urls(tool) {
+    // Data can only leak after something private was read. Before that (web
+    // research, say), any URL is fine. After it (here or, for a worker, in
+    // its parent, which wrote its task), a fetch goes out unasked only to a
+    // URL the conversation already had: one carrying data out is new by nature.
+    if fetches_urls(tool) && (read_private(&transcript) || parent_read_private(&app, &h.agent.id).await) {
         let known = known_text(&transcript);
         if let Some(u) = fetched_urls(&h.input.args).into_iter().find(|u| !url_known(u, &known)) {
             let why = format!("This would fetch {u}, which didn't come from you or an earlier result. Check where it goes before allowing it.");
             return Ok(rec.answer(&app, "ask", Some(("always", "a URL the conversation didn't have")), why).await);
         }
-        if tool != "firecrawl.firecrawl_crawl" {
-            return Ok(rec.answer(&app, "allow", None, "a URL from the conversation".into()).await);
-        }
+    }
+    if fetches_urls(tool) && tool != "firecrawl.firecrawl_crawl" {
+        return Ok(rec.answer(&app, "allow", None, "a fetch with nothing private to leak, or a URL from the conversation".into()).await);
     }
     // The service's own annotations when the agent listed its tools (as it's
     // told to before calling one); the name's verb only otherwise.
@@ -650,6 +681,16 @@ mod tests {
         for t in ["spawn_agent", "wait_for", "connector.call_tool", "chat.send_message"] {
             assert!(!cross_agent(t), "{t}");
         }
+    }
+
+    #[test]
+    fn private_reads_are_noticed() {
+        let call = |name: &str| json!({ "messages": [{ "role": "assistant", "tool_calls": [{ "id": "a", "function": { "name": name, "arguments": "{}" } }] }] });
+        assert!(read_private(&call("connector.call_tool")));
+        assert!(read_private(&call("chat.conversation_read")));
+        assert!(!read_private(&call("firecrawl.firecrawl_search")));
+        assert!(!read_private(&call("chat.product_get")));
+        assert!(!read_private(&json!({ "messages": [] })));
     }
 
     #[test]
