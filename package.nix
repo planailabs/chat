@@ -31,6 +31,7 @@ in
         ./config.example.toml
         ./server
         ./common
+        ./generative-ui
         ./subnet
       ];
     };

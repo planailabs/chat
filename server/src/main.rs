@@ -1,5 +1,6 @@
 mod agent_tools;
 mod api;
+mod artifacts;
 mod chat;
 mod hook;
 mod config;
@@ -77,6 +78,7 @@ async fn main() -> anyhow::Result<()> {
     let registry = Arc::new(api::registry(Arc::new(plan_ai_accounts::TokenAuth(app.accounts.clone()))));
     let api = Router::new()
         .route("/api/v1/chat/events", get(chat_events).with_state(app.clone()))
+        .merge(artifacts::routes(app.clone()))
         .merge(registry.http_router(app.clone()))
         .layer(from_fn_with_state(app.clone(), session_principal))
         .layer(from_fn(auth_unless_bearer));

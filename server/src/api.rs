@@ -18,7 +18,7 @@ fn internal(e: impl std::fmt::Display) -> ApiError {
 }
 
 /// The signed-in, approved user behind a principal (set by `session_principal`).
-fn user_of(p: &Principal) -> Result<Uuid, ApiError> {
+pub(crate) fn user_of(p: &Principal) -> Result<Uuid, ApiError> {
     if p.scopes["pending"] == json!(true) {
         return Err(ApiError::forbidden("your account is waiting for an admin to approve it"));
     }
@@ -27,12 +27,12 @@ fn user_of(p: &Principal) -> Result<Uuid, ApiError> {
 
 /// The signed-in user, approved or still waiting: their own profile, export
 /// and deletion work either way.
-fn account_of(p: &Principal) -> Result<Uuid, ApiError> {
+pub(crate) fn account_of(p: &Principal) -> Result<Uuid, ApiError> {
     p.scopes["user_id"].as_str().and_then(|s| s.parse().ok()).ok_or_else(|| ApiError::forbidden("only signed-in users can chat"))
 }
 
 /// Admins acting as someone else read, but don't change that user's settings.
-fn require_not_impersonating(p: &Principal) -> Result<(), ApiError> {
+pub(crate) fn require_not_impersonating(p: &Principal) -> Result<(), ApiError> {
     if p.scopes["impersonating_from"].is_null() { Ok(()) } else { Err(ApiError::forbidden("read-only while impersonating")) }
 }
 

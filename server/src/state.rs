@@ -22,6 +22,8 @@ pub struct App {
     /// Users' and teams' MCP servers, and OAuth connections (also to
     /// configured OAuth apps).
     pub connectors: Option<Arc<crate::connectors::Connectors>>,
+    /// The user's services, for pages' tool calls (`artifacts::call`).
+    pub connector: Option<plan_ai_connector::Connector>,
 }
 
 pub type AppState = Arc<App>;
@@ -51,7 +53,7 @@ pub async fn init(cfg: &'static Config) -> anyhow::Result<(AppState, Option<plan
     // Stored connector secrets without the key to read them: refuse to start.
     connectors.check_startup().await?;
     let (connector, purchases) = crate::connector::build(cfg, pool.clone(), Some(connectors.clone()))?;
-    let app = App { cfg, pool, accounts, hub, owners, events, http: reqwest::Client::new(), purchases, oauth: std::sync::OnceLock::new(), connectors: Some(connectors) };
+    let app = App { cfg, pool, accounts, hub, owners, events, http: reqwest::Client::new(), purchases, oauth: std::sync::OnceLock::new(), connectors: Some(connectors), connector: connector.clone() };
     Ok((Arc::new(app), connector))
 }
 

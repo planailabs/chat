@@ -103,6 +103,7 @@ pub fn build(cfg: &'static Config, pool: PgPool, connectors: Option<Arc<Connecto
         (Some(c), Some(x)) => c.console.as_ref().map(|console| (console, x.clone(), subjects.clone(), http)),
         _ => None,
     };
+    let views = Arc::new(crate::artifacts::ChatViews(pool.clone()));
     let targets: Arc<dyn TargetSource> = Arc::new(Targets {
         fixed: &cfg.apps,
         secrets: &cfg.secrets,
@@ -111,7 +112,8 @@ pub fn build(cfg: &'static Config, pool: PgPool, connectors: Option<Arc<Connecto
         console,
         cache: Mutex::new(HashMap::new()),
     });
-    let mut builder = Connector::builder().secret(&cfg.subnet.callback_secret).targets(targets);
+    // Service tools' MCP Apps views become pages in the conversation.
+    let mut builder = Connector::builder().secret(&cfg.subnet.callback_secret).targets(targets).views(views);
     if let Some(x) = exchanger {
         builder = builder.exchanger(x).subjects(Arc::new(subjects));
     }

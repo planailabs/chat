@@ -317,7 +317,12 @@ pub async fn send(app: &App, user: Uuid, id: Option<Uuid>, text: &str, lang: &st
     check_budget(app, user).await?;
     if let Some(id) = id {
         let agent = live_agent(app, user, id).await?;
-        let msg = with_context(&format!("Reply in {}.", language_name(lang)), text);
+        let mut context = format!("Reply in {}.", language_name(lang));
+        if let Some(reports) = crate::artifacts::take_model_context(app, id).await? {
+            context.push_str("\n\n");
+            context.push_str(&reports);
+        }
+        let msg = with_context(&context, text);
         app.hub.send(&agent, &msg).await.map_err(internal)?;
         sqlx::query("UPDATE conversations SET updated_at = now() WHERE id = $1").bind(id).execute(&app.pool).await.map_err(internal)?;
         return Ok(id);

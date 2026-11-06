@@ -15,6 +15,10 @@ axum = "0.8"
 chrono = { version = "0.4", features = ["serde"] }
 futures = "0.3"
 mac-mgmt-common = { path = "../common", features = ["otel-axum"] }
+# Artifacts: the generative-ui suite's component tree and its sandboxed
+# backflow handlers (JavaScript only: the assistant writes source, not wasm).
+gui-schema = { path = "../generative-ui/crates/gui-schema" }
+gui-runtime = { path = "../generative-ui/crates/gui-runtime", default-features = false, features = ["js"] }
 plan-ai-accounts = { path = "../common/plan-ai-accounts" }
 plan-ai-oauth = { path = "../common/plan-ai-oauth" }
 # /public/mcp: its own MCP handler, which asks the user (elicitation).

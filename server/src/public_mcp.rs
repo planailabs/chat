@@ -24,7 +24,7 @@ use serde_json::{Value, json};
 use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
 
-use crate::hook::{self, Call, Risk, Verdict};
+use crate::hook::{self, Call, Judgement, Risk};
 use crate::state::AppState;
 
 type McpError = ErrorData;
@@ -100,38 +100,12 @@ fn refused(why: impl Into<String>) -> CallToolResult {
     CallToolResult::error(vec![Content::text(why.into())])
 }
 
-/// What the approval layers say about a call.
-enum Judgement {
-    Allow(String),
-    Deny(String),
-    /// Only the user can allow it; the text says why it needs them.
-    Ask(String),
-}
-
 impl PublicMcp {
     /// Layers 1 and 2 of `hook`, for a call from an MCP client: there is no
     /// agent reason and no transcript, only this session's calls.
     async fn judge(&self, call: &Call, risk: Risk) -> Judgement {
-        if self.app.cfg.approval.allow.iter().any(|p| hook::glob(p, &call.name)) {
-            return Judgement::Allow("allow-listed".into());
-        }
         let history = self.session.history.lock().await.clone();
-        if let Some(why) = hook::static_check(call, risk, &history) {
-            return Judgement::Deny(why);
-        }
-        if risk == Risk::ReadOnly {
-            return Judgement::Allow("read-only".into());
-        }
-        match hook::validate(&self.app, call, risk, "(called from an MCP client; no reason given)", &history).await {
-            Ok(Some(Verdict::Rejected(why))) => Judgement::Deny(format!("Rejected by the safety check: {why}")),
-            Ok(Some(Verdict::Approved(why))) if risk == Risk::Mutating => Judgement::Allow(why),
-            Ok(Some(Verdict::Approved(why))) => Judgement::Ask(format!("The safety check had no objection ({why}), but this is a destructive call.")),
-            Ok(None) => Judgement::Ask("No safety check is configured for this call.".into()),
-            Err(e) => {
-                tracing::warn!("validator failed for {}: {e:#}", call.name);
-                Judgement::Ask("The safety check couldn't run; please review this call.".into())
-            }
-        }
+        hook::judge_present(&self.app, call, risk, &history, "(called from an MCP client; no reason given)").await
     }
 
     /// Asks the user in their MCP client. `Ok(true)`: they confirmed.

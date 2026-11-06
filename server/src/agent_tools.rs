@@ -50,7 +50,19 @@ pub enum Skill {
     CmsAgentSetup,
     /// plan.ai cloud: the organization, accounts in its identity (Zitadel), identity providers.
     CloudSetup,
+    /// Interactive pages (artifacts): the components, the KV view, handlers, what a page can call.
+    Artifacts,
 }
+
+/// The user and the conversation of the agent making the call.
+async fn page_conversation(app: &AppState, p: &Principal) -> Result<(Uuid, Uuid), ApiError> {
+    let user = tenant(p)?;
+    let agent = calling_agent(p).ok_or_else(|| ApiError::bad_request("no calling agent: pages belong to a chat conversation"))?;
+    Ok((user, crate::artifacts::conversation_of(app, user, &agent).await?))
+}
+
+#[derive(Deserialize, JsonSchema, Default)]
+pub struct Empty {}
 
 #[derive(Deserialize, JsonSchema)]
 pub struct SkillInput {
@@ -175,11 +187,12 @@ pub fn registry(secret: &str) -> Registry<AppState> {
     );
 
     reg.resource("skill", "skill", "Playbooks for setting things up with the user").get(
-        "Load a skill: how to walk the user through a setup (which questions to ask, which tools to call, in what order). Load it before starting that setup, then follow it. cms-agent-setup: a cms-agent instance end to end. cloud-setup: a plan.ai cloud organization, its identity accounts and identity providers.",
+        "Load a skill: how to walk the user through a setup (which questions to ask, which tools to call, in what order), or how to build something. Load it before starting, then follow it. cms-agent-setup: a cms-agent instance end to end. cloud-setup: a plan.ai cloud organization, its identity accounts and identity providers. artifacts: interactive pages (dashboards, charts, tables, forms) with artifact_publish.",
         |_: AppState, _: Arc<Principal>, i: SkillInput| async move {
             let text = match i.skill {
                 Skill::CmsAgentSetup => include_str!("../content/skills/cms-agent-setup.md"),
                 Skill::CloudSetup => include_str!("../content/skills/cloud-setup.md"),
+                Skill::Artifacts => include_str!("../content/skills/artifacts.md"),
             };
             Ok(Text { text: text.to_string() })
         },
@@ -239,6 +252,46 @@ pub fn registry(secret: &str) -> Registry<AppState> {
                 let user = tenant(&p)?;
                 let (title, messages) = crate::chat::excerpt(&app, user, i.conversation, i.message_id, i.limit.unwrap_or(12)).await?;
                 Ok(Read { conversation: i.conversation, title, messages })
+            },
+        );
+
+    reg.resource("artifact", "artifact", "Interactive pages the user sees beside the conversation")
+        .custom(
+            "publish",
+            Risk::Mutating,
+            OnItem::No,
+            "Show the user an interactive page (dashboard, chart, table, form, tool) beside the chat, in the chat's design. Load the `artifacts` skill first. Publishing the same name again replaces what the user sees with a new version.",
+            |app: AppState, p: Arc<Principal>, i: crate::artifacts::PublishInput| async move {
+                let (user, conversation) = page_conversation(&app, &p).await?;
+                crate::artifacts::publish(&app, user, conversation, i).await
+            },
+        )
+        .list("This conversation's pages: your artifacts and services' views, their versions and how many new events each has.", |app: AppState, p: Arc<Principal>, _: Empty| async move {
+            let (_, conversation) = page_conversation(&app, &p).await?;
+            crate::artifacts::list(&app, conversation).await
+        })
+        .get("One page as stored: its HTML (to change it), handlers, KV view, and what it reported to you.", |app: AppState, p: Arc<Principal>, i: crate::artifacts::NameInput| async move {
+            let (_, conversation) = page_conversation(&app, &p).await?;
+            crate::artifacts::get(&app, conversation, i).await
+        })
+        .custom(
+            "events",
+            Risk::ReadOnly,
+            OnItem::No,
+            "What happened on this conversation's pages since you last looked: the user's actions that handlers took care of, and handlers' host.emit events. (Actions without a handler come to you as messages.)",
+            |app: AppState, p: Arc<Principal>, i: crate::artifacts::EventsInput| async move {
+                let (_, conversation) = page_conversation(&app, &p).await?;
+                crate::artifacts::events(&app, conversation, i).await
+            },
+        )
+        .custom(
+            "set_kv",
+            Risk::Mutating,
+            OnItem::No,
+            "Update values a page shows (its KV view, bound with data-kv) without a new version: progress, fresh numbers, status. The page updates at once.",
+            |app: AppState, p: Arc<Principal>, i: crate::artifacts::SetKvInput| async move {
+                let (user, conversation) = page_conversation(&app, &p).await?;
+                crate::artifacts::set_kv(&app, user, conversation, i).await
             },
         );
 

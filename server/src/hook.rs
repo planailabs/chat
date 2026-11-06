@@ -134,7 +134,7 @@ pub enum Verdict {
 }
 
 /// Layer 2.
-pub(crate) async fn validate(app: &AppState, call: &Call, risk: Risk, reason: &str, history: &[Call]) -> anyhow::Result<Option<Verdict>> {
+pub(crate) async fn validate(app: &crate::state::App, call: &Call, risk: Risk, reason: &str, history: &[Call]) -> anyhow::Result<Option<Verdict>> {
     let a = &app.cfg.approval;
     let (Some(url), Some(model)) = (&a.validator_url, &a.validator_model) else { return Ok(None) };
     let recent: String = history.iter().rev().take(10).rev().map(|h| format!("- {}({})\n", h.name, truncate(&h.args.to_string(), 200))).collect();
@@ -194,6 +194,40 @@ fn truncate(s: &str, max: usize) -> &str {
     match s.char_indices().nth(max) {
         Some((i, _)) => &s[..i],
         None => s,
+    }
+}
+
+/// What the approval layers say about a call the user makes themselves (an
+/// MCP client, a page in the chat): there's no agent transcript, only that
+/// caller's own recent calls.
+pub enum Judgement {
+    Allow(String),
+    Deny(String),
+    /// Only the user can allow it; the text says why it needs them.
+    Ask(String),
+}
+
+/// Layers 1 and 2 for a present user's call (`reason`: who calls, for the
+/// validator).
+pub async fn judge_present(app: &crate::state::App, call: &Call, risk: Risk, history: &[Call], reason: &str) -> Judgement {
+    if app.cfg.approval.allow.iter().any(|p| glob(p, &call.name)) {
+        return Judgement::Allow("allow-listed".into());
+    }
+    if let Some(why) = static_check(call, risk, history) {
+        return Judgement::Deny(why);
+    }
+    if risk == Risk::ReadOnly {
+        return Judgement::Allow("read-only".into());
+    }
+    match validate(app, call, risk, reason, history).await {
+        Ok(Some(Verdict::Rejected(why))) => Judgement::Deny(format!("Rejected by the safety check: {why}")),
+        Ok(Some(Verdict::Approved(why))) if risk == Risk::Mutating => Judgement::Allow(why),
+        Ok(Some(Verdict::Approved(why))) => Judgement::Ask(format!("The safety check had no objection ({why}), but this is a destructive call.")),
+        Ok(None) => Judgement::Ask("No safety check is configured for this call.".into()),
+        Err(e) => {
+            tracing::warn!("validator failed for {}: {e:#}", call.name);
+            Judgement::Ask("The safety check couldn't run; please review this call.".into())
+        }
     }
 }
 

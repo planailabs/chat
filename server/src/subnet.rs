@@ -281,7 +281,9 @@ impl Pump {
                     let reason = turn.reasons.remove(call);
                     let target = turn.targets.remove(call);
                     let check = self.check(agent, call).await?;
-                    let data = json!({ "call_id": call, "is_error": ev["is_error"], "reason": reason, "target": target, "check": check });
+                    // A page the call made (an artifact, a service tool's view) shows with it.
+                    let page = if ev["is_error"] == true { None } else { crate::artifacts::of_tool_result(&self.pool, &name, ev["content"].as_str().unwrap_or_default()).await };
+                    let data = json!({ "call_id": call, "is_error": ev["is_error"], "reason": reason, "target": target, "check": check, "artifact": page });
                     self.mirror(agent, seq, user, "tool", &name, Some(data.clone())).await?;
                     let mut end = data;
                     end["name"] = json!(name);

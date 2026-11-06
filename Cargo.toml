@@ -1,5 +1,7 @@
 [workspace]
 members = ["server"]
+# Its own workspace (the generative-ui crates inherit from it).
+exclude = ["generative-ui"]
 resolver = "3"
 
 # common's crates take these from the consuming workspace.
