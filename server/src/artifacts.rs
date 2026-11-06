@@ -50,9 +50,12 @@ const MAX_HANDLERS: usize = 16;
 const MAX_KV: usize = 256 * 1024;
 const MAX_ARTIFACTS: i64 = 100;
 
+/// A failure on our side: the details go to the log under a reference the
+/// client gets instead of them (SQL, the hub's answers aren't for clients).
 fn internal(e: impl std::fmt::Display) -> ApiError {
-    tracing::error!("{e:#}");
-    ApiError::internal(e.to_string())
+    let reference = &uuid::Uuid::new_v4().simple().to_string()[..8];
+    tracing::error!(reference, "{e:#}");
+    ApiError::internal(format!("Something went wrong on our side (reference {reference})."))
 }
 
 fn truncate(s: &str, max: usize) -> String {

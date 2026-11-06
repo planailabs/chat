@@ -42,9 +42,12 @@ pub fn title_from(text: &str) -> String {
     format!("{}…", cut.trim_end())
 }
 
+/// A failure on our side: the details go to the log under a reference the
+/// client gets instead of them (SQL, the hub's answers aren't for clients).
 fn internal(e: impl std::fmt::Display) -> ApiError {
-    tracing::error!("{e:#}");
-    ApiError::internal(e.to_string())
+    let reference = &uuid::Uuid::new_v4().simple().to_string()[..8];
+    tracing::error!(reference, "{e:#}");
+    ApiError::internal(format!("Something went wrong on our side (reference {reference})."))
 }
 
 #[derive(Serialize, schemars::JsonSchema, sqlx::FromRow)]

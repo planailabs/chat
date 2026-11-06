@@ -183,6 +183,7 @@ impl Pump {
                 if let Err(e) = self.apply(&agent, seq, user, conv, &notice["event"], turn).await {
                     tracing::error!(agent, seq, "mirroring subnet event: {e:#}");
                 }
+                forget_finished(&mut turns, &agent, &notice["event"]);
                 continue;
             }
             // A sub-agent: known from its parent's child_spawned, or by an ancestor of ours.
@@ -206,6 +207,7 @@ impl Pump {
             if let Err(e) = self.apply_child(&agent, seq, user, conv, &notice["event"], turn).await {
                 tracing::error!(agent, seq, "mirroring a sub-agent's event: {e:#}");
             }
+            forget_finished(&mut turns, &agent, &notice["event"]);
         }
         Ok(())
     }
@@ -426,6 +428,17 @@ impl Pump {
             _ => {}
         }
         Ok(())
+    }
+}
+
+/// Drops the turn state of an agent that's gone, and of idle ones once many
+/// have piled up (the pump runs for the server's lifetime).
+fn forget_finished(turns: &mut HashMap<String, Turn>, agent: &str, ev: &Value) {
+    if matches!(ev["type"].as_str(), Some("cancelled" | "superseded" | "failed")) {
+        turns.remove(agent);
+    }
+    if turns.len() > 2000 {
+        turns.retain(|_, t| !t.calls.is_empty() || !t.questions.is_empty() || !t.text.is_empty() || t.thinking);
     }
 }
 
