@@ -124,6 +124,15 @@ in
           exit 1
         '';
         ExecStart = "${lib.getExe' cfg.hub.package "subnet"} dev ${clusterFile}";
+        # Before stopping, the chat quick-pauses the conversations that are
+        # working (their in-flight steps finish); it resumes them once it
+        # follows the hub again. A chat that's down doesn't hold the stop up.
+        ExecStop = pkgs.writeShellScript "pause-chats" ''
+          ${lib.getExe pkgs.curl} -s -o /dev/null --max-time 60 -X POST \
+            -H "Authorization: Bearer $CHAT_CALLBACK_SECRET" \
+            http://${listen}/hooks/pause_for_restart || true
+        '';
+        TimeoutStopSec = 90;
         Restart = "on-failure";
         RestartSec = 5;
         User = "plan-ai-chat-subnet";

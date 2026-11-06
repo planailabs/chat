@@ -153,6 +153,14 @@ impl Pump {
     async fn follow(&self) -> anyhow::Result<()> {
         let res = self.hub.http.get(format!("{}/v1/events", self.hub.base)).bearer_auth(&self.hub.token).send().await?.error_for_status()?;
         tracing::info!("following subnet events");
+        // Following again (the chat or the hub restarted): what was paused
+        // for the restart goes on.
+        let (hub, pool) = (self.hub.clone(), self.pool.clone());
+        tokio::spawn(async move {
+            if let Err(e) = crate::restarts::resume_paused(&hub, &pool).await {
+                tracing::error!("resuming conversations after a restart: {e:#}");
+            }
+        });
         let mut turns: HashMap<String, Turn> = HashMap::new();
         let mut stream = sse_stream::SseStream::from_bytes_stream(res.bytes_stream());
         while let Some(sse) = stream.next().await {

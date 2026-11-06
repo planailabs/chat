@@ -9,6 +9,7 @@ mod connectors;
 mod public_mcp;
 mod purchase;
 mod ratelimit;
+mod restarts;
 mod state;
 mod subnet;
 
@@ -125,7 +126,7 @@ async fn main() -> anyhow::Result<()> {
     // Subnet calls back with the callback secret: the approval hook and the
     // agents' own tools.
     let agent_mcp = agent_tools::registry(&cfg.subnet.callback_secret).mcp_service(app.clone());
-    let mut callbacks = Router::new().route("/hooks/pre_tool", post(hook::pre_tool)).route("/hooks/post_tool", post(hook::post_tool)).with_state(app.clone()).route_service("/agent/mcp", agent_mcp);
+    let mut callbacks = Router::new().route("/hooks/pre_tool", post(hook::pre_tool)).route("/hooks/post_tool", post(hook::post_tool)).route("/hooks/pause_for_restart", post(restarts::pause_route)).with_state(app.clone()).route_service("/agent/mcp", agent_mcp);
     if let Some(c) = &connector {
         callbacks = callbacks.route_service("/connector/mcp", c.service());
     }
@@ -161,8 +162,14 @@ async fn main() -> anyhow::Result<()> {
     // event stream (/api/v1/chat/events) never ends by itself: without a
     // bound, every stop waited out systemd's 90 s and then got killed.
     let (stopping, stop) = tokio::sync::oneshot::channel::<()>();
+    // Running conversations get a quick pause first, while the server still
+    // answers their in-flight calls (hooks, tools); resumed on the next start.
+    let pausing = app.clone();
     let serve = axum::serve(listener, router).with_graceful_shutdown(async move {
         shutdown().await;
+        if let Err(e) = restarts::pause_running(&pausing, std::time::Duration::from_secs(30)).await {
+            tracing::error!("pausing running conversations before stopping: {e:#}");
+        }
         let _ = stopping.send(());
     });
     tokio::select! {
