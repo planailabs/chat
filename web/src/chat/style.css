@@ -1994,6 +1994,10 @@ html.is-first-visit #app {
   .page-panel__deny {
     border: 1px solid var(--border-muted);
   }
+  .page-panel__allow:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
 }
 
 @keyframes sidebar-pulse {

@@ -317,7 +317,7 @@ pub async fn publish(app: &App, user: Uuid, conversation: Uuid, i: PublishInput)
     }
 
     let mut tx = app.pool.begin().await.map_err(internal)?;
-    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM artifacts WHERE conversation_id = $1").bind(conversation).fetch_one(&mut *tx).await.map_err(internal)?;
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM artifacts WHERE conversation_id = $1 AND kind = 'artifact'").bind(conversation).fetch_one(&mut *tx).await.map_err(internal)?;
     let existing: Option<Uuid> = sqlx::query_scalar("SELECT id FROM artifacts WHERE conversation_id = $1 AND name = $2 FOR UPDATE")
         .bind(conversation)
         .bind(&i.name)
@@ -709,7 +709,7 @@ pub async fn backflow(app: &App, user: Uuid, id: Uuid, i: BackflowInput) -> Resu
         may_speak(id, i.gesture)?;
         record("user", i.action.clone(), i.value.clone(), true).execute(&app.pool).await.map_err(internal)?;
         let value = if i.value.is_null() { String::new() } else { format!(": {}", truncate(&i.value.to_string(), 1500)) };
-        let text = format!("[The user acted on the page \"{}\"] {}{value}", label(&a.title), i.action);
+        let text = format!("[The page \"{}\" reports the user's action] {}{value}", label(&a.title), i.action);
         crate::chat::send(app, user, Some(a.conversation_id), &text, &i.lang).await?;
         return Ok(json!({ "response": null, "sent": true }));
     };
@@ -779,7 +779,7 @@ pub struct MessageInput {
 pub async fn message(app: &App, user: Uuid, id: Uuid, i: MessageInput) -> Result<Value, ApiError> {
     let a = owned(app, user, id).await?;
     may_speak(id, i.gesture)?;
-    let text = format!("[Sent by the page \"{}\" as the user acted on it] {}", label(&a.title), i.text.trim());
+    let text = format!("[Sent by the page \"{}\" after the user interacted with it; the page wrote this, not necessarily the user] {}", label(&a.title), i.text.trim());
     crate::chat::send(app, user, Some(a.conversation_id), &text, &i.lang).await?;
     Ok(json!({}))
 }
@@ -838,7 +838,7 @@ fn reads_only(tool: &rmcp::model::Tool) -> bool {
 
 /// The most of a call's arguments a page may send: all of it is shown when
 /// the user is asked.
-const MAX_PAGE_ARGS: usize = 8 * 1024;
+const MAX_PAGE_ARGS: usize = 2 * 1024;
 
 fn tool_error(why: impl Into<String>) -> Value {
     json!({ "content": [{ "type": "text", "text": why.into() }], "isError": true })
@@ -852,6 +852,25 @@ pub async fn call(app: &App, user: Uuid, id: Uuid, i: CallInput) -> Result<Value
     let a = owned(app, user, id).await?;
     let connector = app.connector.as_ref().ok_or_else(|| ApiError::bad_request("no services are configured"))?;
     let tenant = user.to_string();
+    // An artifact reads the user's services only once they allowed it, for
+    // this page: whatever it reads could leave it (DNS prefetch isn't stoppable
+    // for these frames).
+    if a.kind == "artifact" && !i.name.is_empty() {
+        let allowed: bool = sqlx::query_scalar("SELECT services_allowed FROM artifacts WHERE id = $1").bind(id).fetch_one(&app.pool).await.map_err(internal)?;
+        if !allowed {
+            let gate = Call { name: "page.services".into(), args: json!({}) };
+            if i.confirmed.as_deref().is_some_and(|t| take_confirmation(t, id, &gate)) {
+                sqlx::query("UPDATE artifacts SET services_allowed = true WHERE id = $1").bind(id).execute(&app.pool).await.map_err(internal)?;
+                audit(app, user, &format!("page: {}", truncate(&a.title, 60)), "page.services", "allow", "the user let the page use their services").await;
+            } else {
+                let message = format!(
+                    "The page \"{}\" wants to use your services as you while it's open: list them and read from them. Changes would still ask you each time.",
+                    label(&a.title)
+                );
+                return Ok(json!({ "confirm": { "message": message, "tool": "page.services", "token": ask_token(id, &gate) } }));
+            }
+        }
+    }
     let (service, tool, arguments, from_view) = match (a.kind.as_str(), i.name.as_str()) {
         ("artifact", "list_services") => {
             return Ok(match connector.service_entries(&tenant).await {
@@ -1002,7 +1021,7 @@ impl plan_ai_connector::ViewSink for ChatViews {
         if meta.to_string().len() > 2 * MAX_HTML {
             return Err("the call's result is over 1 MiB; no view".into());
         }
-        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM artifacts WHERE conversation_id = $1").bind(conversation).fetch_one(&self.0).await.map_err(|e| e.to_string())?;
+        let count: i64 = sqlx::query_scalar("SELECT count(*) FROM artifacts WHERE conversation_id = $1 AND kind = 'mcp_app'").bind(conversation).fetch_one(&self.0).await.map_err(|e| e.to_string())?;
         if count >= 2 * MAX_ARTIFACTS {
             return Err("the conversation has too many pages".into());
         }

@@ -10,7 +10,7 @@ import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vu
 import { store } from '../app/store';
 import { locale } from '../app/locale';
 import { api, type PageDoc } from '../api';
-import { PageHost } from '../actions/pageHost';
+import { PageHost, userActed } from '../actions/pageHost';
 import { closePage, openPage, setPageFullscreen } from '../actions/pages';
 import { systemTheme } from '../actions/theme';
 import AppIcon from './AppIcon.vue';
@@ -26,6 +26,7 @@ let host: PageHost | null = null;
 
 /** A call waiting for the user: its text and how to answer. */
 const asking = ref<{ message: string; answer: (yes: boolean) => void } | null>(null);
+const armed = ref(false);
 
 const load = async () => {
   const o = open.value;
@@ -43,9 +44,17 @@ const load = async () => {
     host = new PageHost(() => frame.value?.contentWindow ?? null, d, {
       theme: () => theme.value,
       lang: () => store.state.localeKey,
+      // One question at a time: while one is open, a page's next one is
+      // declined (it can't swap the text under the user's click), and Allow
+      // only takes a click once the question has been visible a moment.
       confirm: (message) =>
         new Promise<boolean>((resolve) => {
-          asking.value?.answer(false);
+          if (asking.value) {
+            resolve(false);
+            return;
+          }
+          armed.value = false;
+          setTimeout(() => (armed.value = true), 700);
           asking.value = {
             message,
             answer: (yes) => {
@@ -54,6 +63,9 @@ const load = async () => {
             },
           };
         }),
+      // The user acted in this page: activation, with the focus in its frame
+      // (a click elsewhere in the chat doesn't count for the page).
+      gesture: () => userActed() && document.activeElement === frame.value,
       openLinkText: (url) => t.value.openLink.replace('{url}', url),
       displayMode: (mode) => {
         setPageFullscreen(mode === 'fullscreen');
@@ -184,7 +196,7 @@ const startDrag = (e: PointerEvent) => {
           <p class="page-panel__confirm-text">{{ asking.message }}</p>
           <div class="flex justify-end gap-2">
             <button type="button" class="page-panel__deny" @click="asking.answer(false)">{{ t.deny }}</button>
-            <button type="button" class="page-panel__allow" @click="asking.answer(true)">{{ t.allow }}</button>
+            <button type="button" class="page-panel__allow" :disabled="!armed" @click="armed && asking.answer(true)">{{ t.allow }}</button>
           </div>
         </div>
       </div>

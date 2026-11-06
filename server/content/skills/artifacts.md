@@ -112,7 +112,9 @@ Write scripts as `<script type="module">`: `window.gui` is ready there.
 
 - `gui.callTool("list_services")`, `gui.callTool("list_tools", {service})`,
   `gui.callTool("call_tool", {service, tool, arguments})`: the user's services,
-  as the user. Tools the service marks read-only run at once; anything else
+  as the user. The first such call asks the user to let the page use their
+  services at all (say so when you publish one that does). Then tools the
+  service marks read-only run at once; anything else
   asks the user first, showing the whole call; purchases never happen from
   a page. Returns the tool's result (its structured content when it has
   one). Use it for live data (a dashboard that refreshes).
