@@ -90,6 +90,8 @@ impl Owners {
 #[derive(Default)]
 struct Turn {
     text: String,
+    /// The model stopped at its output limit (`finish_reason: length`).
+    cut: bool,
     /// call_id → tool name, from streamed tool-call deltas.
     calls: HashMap<String, String>,
     /// Tool-call index → call_id (deltas after the first only carry the index).
@@ -343,6 +345,9 @@ impl Pump {
             }
             "llm_delta" => {
                 let delta = &ev["delta"];
+                if delta["finish_reason"] == "length" {
+                    turn.cut = true;
+                }
                 if let Some(text) = delta["content"].as_str().filter(|t| !t.is_empty()) {
                     turn.text.push_str(text);
                     self.emit(user, conv, "text_delta", json!({ "content": text }));
@@ -361,6 +366,19 @@ impl Pump {
                 if !text.trim().is_empty() {
                     self.mirror(agent, seq, user, "assistant", &text, None).await?;
                     self.emit(user, conv, "text_done", json!({ "content": text }));
+                }
+                if std::mem::take(&mut turn.cut) {
+                    // Cut at the output limit: a half-written tool call never
+                    // runs (the hub drops it), and the turn ends here. Said so,
+                    // instead of a silent stop or a tool that never comes.
+                    for id in turn.args.keys() {
+                        turn.calls.remove(id);
+                    }
+                    turn.args.clear();
+                    let note = CUT_NOTE.to_string();
+                    self.mirror(agent, seq, user, "assistant", &note, None).await?;
+                    self.emit(user, conv, "text_done", json!({ "content": note }));
+                    tracing::warn!(agent, "a reply was cut at the output limit");
                 }
                 for (id, args) in std::mem::take(&mut turn.args) {
                     if let Some(reason) = call_reason(&args) {
@@ -461,6 +479,9 @@ fn forget_finished(turns: &mut HashMap<String, Turn>, agent: &str, ev: &Value) {
         turns.retain(|_, t| !t.calls.is_empty() || !t.questions.is_empty() || !t.text.is_empty() || t.thinking);
     }
 }
+
+/// What the conversation shows when a reply hit the model's output limit.
+const CUT_NOTE: &str = "_(My reply got too long and was cut off. Ask me to continue, or to answer more briefly.)_";
 
 /// The `_reason` the assistant gave a call (call_reasons), from its arguments
 /// (connector calls may carry it inside `arguments`).

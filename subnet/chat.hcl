@@ -77,7 +77,7 @@ agent "chat-agent" {
   }
   model        = "deepseek-flash"
   nodes        = ["chat"]
-  params       = { max_tokens = 2048 }
+  params       = { max_tokens = 163840 }   # room for thinking and a long answer (deepseek-flash allows 393216)
   budget       = { max_tokens = 40000000, max_depth = 1, max_children = 6 }
   spawns       = ["worker"]
   hooks        = ["approval", "own-agents"]
@@ -164,7 +164,7 @@ agent "chat-worker" {
   }
   model        = "deepseek-flash"
   nodes        = ["chat"]
-  params       = { max_tokens = 4096 }
+  params       = { max_tokens = 163840 }
   budget       = { max_tokens = 4000000, max_depth = 0, max_children = 0 }
   hooks        = ["approval", "own-agents"]
   call_reasons = true
