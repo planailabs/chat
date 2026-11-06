@@ -83,11 +83,11 @@ agent "chat-agent" {
   hooks        = ["approval", "own-agents"]
   call_reasons = true
   isolated     = true   # the hub keeps its agents within their user (tenant)
-  # Long conversations: summarised at 64k tokens (deepseek-flash has room
-  # for more, but cost and focus drop well before), the last 8 messages kept
-  # as they are; search_history finds what a summary left out.
+  # Long conversations: summarised at 640k tokens (deepseek-flash takes up
+  # to 1M), the last 8 messages kept as they are; search_history finds what
+  # a summary left out.
   compact = {
-    at_tokens    = 64000
+    at_tokens    = 640000
     keep         = 8
     instructions = "Keep the user's goals and decisions, what was changed on which service (by name), approvals still open, the pages (artifacts) published and what they're for, workers still running and what they were asked, and anything the user asked to remember."
   }
@@ -169,13 +169,13 @@ agent "chat-worker" {
   hooks        = ["approval", "own-agents"]
   call_reasons = true
   isolated     = true   # the hub keeps its agents within their user (tenant)
-  # A worker's task is narrower: summarised sooner, keeping what it found.
+  # A worker's task is narrower: summarised a little sooner, keeping what it found.
   compact = {
-    at_tokens    = 48000
+    at_tokens    = 480000
     keep         = 6
     instructions = "Keep every fact found so far with its source (URL, service and tool), what was changed, and what of the task is still left to do."
   }
-  grep_results = 6000
+  grep_results = { over = 8000, except = ["chat.product_get", "chat.skill_get"] }
 
   system_prompt = <<-EOT
     You are a worker of the plan.ai assistant. It gives you one self-contained task; you do it and finish with a report to it. You can't talk to the user.
