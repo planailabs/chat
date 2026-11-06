@@ -89,11 +89,11 @@
         "rust-overlay": "rust-overlay"
       },
       "locked": {
-        "lastModified": 1793483279,
-        "narHash": "sha256-e26FgJdK8E7i4UelFELJhc/pRgRJiP9/DovchM6Epnc=",
+        "lastModified": 1793987252,
+        "narHash": "sha256-W6OR4S+1MyqNZ8pAVMBN/yolI5vvOYLid0lArCViqBM=",
         "ref": "refs/heads/trunk",
-        "rev": "54d4c72020ad6a1cf7cf64d9dbc29a1c83792d63",
-        "revCount": 117,
+        "rev": "823abbea6035f0e84811c3738e009a164746ee9e",
+        "revCount": 118,
         "type": "git",
         "url": "ssh://git@git.plan.ai/plan-ai/subagent-net"
       },

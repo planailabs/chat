@@ -82,6 +82,7 @@ agent "chat-agent" {
   spawns       = ["worker"]
   hooks        = ["approval", "own-agents"]
   call_reasons = true
+  isolated     = true   # the hub keeps its agents within their user (tenant)
 
   client_tool "ask_question" {
     description  = "Ask the user one structured question and wait for the answer. Use multiple_choice to pick from options, text for free-form input."
@@ -155,6 +156,7 @@ agent "chat-worker" {
   budget       = { max_tokens = 4000000, max_depth = 0, max_children = 0 }
   hooks        = ["approval", "own-agents"]
   call_reasons = true
+  isolated     = true   # the hub keeps its agents within their user (tenant)
 
   system_prompt = <<-EOT
     You are a worker of the plan.ai assistant. It gives you one self-contained task; you do it and finish with a report to it. You can't talk to the user.

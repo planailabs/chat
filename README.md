@@ -116,6 +116,11 @@ The approval hook's loop guard (`hook::static_check`) refuses an identical
 call made in the last 20 unless something was changed since, and a writing
 tool used more than 6 times in 20; reads over many items pass.
 
+The hub doesn't keep users apart by itself: the chat's agent types are
+`isolated` (their agents message and list only their own user's agents, no
+mailboxes), and the hook checks the same again (`send_message` only to the
+user's agents, `list_agents` narrowed by a `post_tool` hook).
+
 ## Pages (artifacts and MCP Apps views)
 
 The assistant can show the user an interactive page beside the conversation
