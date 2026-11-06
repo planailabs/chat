@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { locales } from '../../content';
-import { checkBadge, pendingApprovalOf, safetyCheckOf, toolRunOf } from './toolRuns';
+import { checkBadge, pageOf, pendingApprovalOf, safetyCheckOf, toolRunOf } from './toolRuns';
 
 const en = locales.en;
 const de = locales.de;
@@ -14,6 +14,7 @@ describe('tool runs', () => {
       reason: 'Why not',
       target: null,
       check: { agent_reason: null, decision: 'allowed', verdict: 'approved', reasoning: 'ok' },
+      page: null,
     });
   });
 
@@ -55,5 +56,16 @@ describe('checkBadge', () => {
     expect(checkBadge(check('asked', 'failed'), en)).toEqual({ label: 'Safety check: couldn’t run · asked you', tone: 'warn' });
     expect(checkBadge(check('asked', null), en).label).toBe('Safety check: couldn’t run · asked you');
     expect(checkBadge(check('asked', 'rejected'), de).label).toBe('Sicherheitsprüfung: abgelehnt · bei dir nachgefragt');
+  });
+});
+
+describe('pages of tool runs', () => {
+  it('a run that made a page carries it; malformed ones are dropped', () => {
+    const page = { id: 'p1', kind: 'artifact', title: ' Load ', version: 2 };
+    expect(toolRunOf('chat.artifact_publish', { artifact: page as never }).page).toEqual({ id: 'p1', kind: 'artifact', title: 'Load', version: 2 });
+    expect(pageOf({ id: 'v', kind: 'mcp_app', title: '', version: null })).toEqual({ id: 'v', kind: 'mcp_app', title: 'mcp_app', version: null });
+    expect(pageOf({ id: 'x', kind: 'other' })).toBeNull();
+    expect(pageOf([])).toBeNull();
+    expect(pageOf(null)).toBeNull();
   });
 });

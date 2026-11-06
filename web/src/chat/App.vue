@@ -4,6 +4,7 @@ import { RouterView } from 'vue-router';
 import AppHeader from './components/AppHeader.vue';
 import AppSidebar from './components/AppSidebar.vue';
 import SettingsOverlay from './components/SettingsOverlay.vue';
+import PagePanel from './components/PagePanel.vue';
 import ErrorBoundary from './components/ErrorBoundary.vue';
 import { store } from './app/store';
 import { locale } from './app/locale';
@@ -36,6 +37,7 @@ const footerMarkup = computed(() => {
       </ErrorBoundary>
       <footer class="shrink-0 px-4 py-3 text-center text-xs text-(--text-muted) md:px-6 md:py-4" v-html="footerMarkup" />
     </div>
+    <ErrorBoundary :reset-key="store.state.openPage?.id ?? ''"><PagePanel /></ErrorBoundary>
   </div>
   <ErrorBoundary :reset-key="String(store.state.isSettingsOverlayOpen)"><SettingsOverlay /></ErrorBoundary>
 </template>

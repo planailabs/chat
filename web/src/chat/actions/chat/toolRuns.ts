@@ -3,7 +3,7 @@
  * the safety check where one ran) and the check's badge text.
  */
 
-import type { ApprovalData, Purchase, SafetyCheck, ToolData } from '../../api';
+import type { ApprovalData, PageRef, Purchase, SafetyCheck, ToolData } from '../../api';
 import type { PendingApproval, ToolRun } from '../../app/state';
 import type { LocaleContent } from '../../content';
 
@@ -18,6 +18,14 @@ export const safetyCheckOf = (check: unknown): SafetyCheck | null => {
   return { agent_reason: text(c.agent_reason), decision: c.decision, verdict, reasoning: text(c.reasoning) };
 };
 
+/** The page a run made, or null when there is none (or it is malformed). */
+export const pageOf = (v: unknown): PageRef | null => {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+  const p = v as Record<string, unknown>;
+  if (typeof p.id !== 'string' || !p.id || (p.kind !== 'artifact' && p.kind !== 'mcp_app')) return null;
+  return { id: p.id, kind: p.kind, title: typeof p.title === 'string' && p.title.trim() ? p.title.trim() : p.kind, version: typeof p.version === 'number' ? p.version : null };
+};
+
 /** A finished tool run (history row or `tool_end`). */
 export const toolRunOf = (name: string, data: Partial<ToolData>): ToolRun => {
   const check = safetyCheckOf(data.check);
@@ -29,6 +37,7 @@ export const toolRunOf = (name: string, data: Partial<ToolData>): ToolRun => {
     target: text(data.target),
     // Allowed with no verdict: no check ran (read-only, allow-listed, "approve all") — nothing to show.
     check: check && (check.verdict !== null || check.decision !== 'allowed') ? check : null,
+    page: pageOf(data.artifact),
   };
 };
 

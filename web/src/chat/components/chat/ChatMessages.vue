@@ -9,6 +9,7 @@ import { store } from '../../app/store';
 import type { Purchase } from '../../api';
 import { priceLabel } from '../../utils/price';
 import ToolRun from './ToolRun.vue';
+import PageCard from './PageCard.vue';
 
 defineProps({ messages: { type: Array as PropType<ChatMessage[]>, required: true } });
 
@@ -37,7 +38,10 @@ const purchaseText = (purchase: Purchase) =>
         <span class="whitespace-nowrap">· {{ approvalStatus(msg.decision, Boolean(msg.purchase)) }}</span>
       </p>
     </div>
-    <ToolRun v-else-if="msg.role === 'tool'" :run="msg" />
+    <template v-else-if="msg.role === 'tool'">
+      <ToolRun :run="msg" />
+      <PageCard v-if="msg.page" :page="msg.page" />
+    </template>
     <div v-else-if="msg.role === 'qa'" class="flex justify-start">
       <p class="chat-qa max-w-[min(100%,640px)] text-sm leading-relaxed text-(--text-muted)">
         <span>{{ msg.question }}</span>

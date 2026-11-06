@@ -12,7 +12,7 @@ import { defaultLocale, supportedLocales, type LocaleKey, type StreamConfig } fr
 import { STORAGE_KEYS } from '../constants';
 import type { ConversationItem } from '../actions/chat/conversationList';
 import { createProfileState, type ProfileState } from './profileState';
-import type { Budget, Purchase, SafetyCheck } from '../api';
+import type { Budget, PageRef, Purchase, SafetyCheck } from '../api';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Type Definitions
@@ -59,6 +59,17 @@ export interface ToolRun {
   /** A connector call's real target (`service.tool`), for its icon. */
   target: string | null;
   check: SafetyCheck | null;
+  /** The page this call made (shown as a card that opens it). */
+  page: PageRef | null;
+}
+
+/** The page shown in the side panel; `rev` reloads it (a new version arrived). */
+export interface OpenPage {
+  id: string;
+  /** null: the latest. */
+  version: number | null;
+  rev: number;
+  fullscreen: boolean;
 }
 
 export type ChatMessage =
@@ -159,6 +170,8 @@ export interface AppState {
   highlightMessageId: number | null;
   /** null until the chat is set up on load */
   chat: ChatSession | null;
+  /** The page in the side panel, if one is open. */
+  openPage: OpenPage | null;
 
   // ─── Profile State Machine ─────────────────────────────────────────────────
   profile: ProfileState;
@@ -306,6 +319,7 @@ export const createInitialState = (): AppState => {
     activeConversationId: null,
     highlightMessageId: null,
     chat: null,
+    openPage: null,
     profile: createProfileState(),
   };
 };

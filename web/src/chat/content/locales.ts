@@ -61,6 +61,26 @@ export interface LocaleContent {
   composer: {
     submitLabel: string;
   };
+  /** Pages beside the conversation (artifacts, services' views). */
+  pages: {
+    page: string;
+    serviceView: string;
+    open: string;
+    shown: string;
+    close: string;
+    fullscreen: string;
+    exitFullscreen: string;
+    /** "Version {n}" */
+    versionLabel: string;
+    version: string;
+    latest: string;
+    loading: string;
+    failed: string;
+    resize: string;
+    confirmTitle: string;
+    allow: string;
+    deny: string;
+  };
   chat: {
     /** The empty chat's heading. */
     heading: string;
@@ -285,6 +305,24 @@ const en: LocaleContent = {
   composer: {
     submitLabel: 'Send',
   },
+  pages: {
+    page: 'Page',
+    serviceView: 'Service view',
+    open: 'Open',
+    shown: 'Shown',
+    close: 'Close',
+    fullscreen: 'Full screen',
+    exitFullscreen: 'Exit full screen',
+    versionLabel: 'Version {n}',
+    version: 'Version',
+    latest: 'latest',
+    loading: 'Loading…',
+    failed: 'The page couldn’t be loaded:',
+    resize: 'Resize the page',
+    confirmTitle: 'Allow this?',
+    allow: 'Allow',
+    deny: 'Deny',
+  },
   chat: {
     heading: 'What can we do for you?',
     placeholder: 'Ask about plan.ai, or tell me what your Mac should do…',
@@ -497,6 +535,24 @@ const de: LocaleContent = {
   },
   composer: {
     submitLabel: 'Senden',
+  },
+  pages: {
+    page: 'Seite',
+    serviceView: 'Ansicht des Dienstes',
+    open: 'Öffnen',
+    shown: 'Angezeigt',
+    close: 'Schließen',
+    fullscreen: 'Vollbild',
+    exitFullscreen: 'Vollbild beenden',
+    versionLabel: 'Version {n}',
+    version: 'Version',
+    latest: 'aktuell',
+    loading: 'Wird geladen…',
+    failed: 'Die Seite konnte nicht geladen werden:',
+    resize: 'Seitenbreite ändern',
+    confirmTitle: 'Erlauben?',
+    allow: 'Erlauben',
+    deny: 'Ablehnen',
   },
   chat: {
     heading: 'Was können wir für dich tun?',

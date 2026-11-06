@@ -18,6 +18,7 @@ import { startPreferenceQuestionStream } from './preference';
 import { resyncAll } from './session';
 import { backgroundActivity, eventDestination } from './conversationList';
 import { patchConversation, refetchConversationsSoon } from './conversations';
+import { openPage } from '../pages';
 
 // ─── Routing ────────────────────────────────────────────────────────────────
 
@@ -50,6 +51,11 @@ export const endNewConversation = (id: string | null) => {
 
 /** Dispatches an event of the shared stream to where it belongs. */
 export const routeServerEvent = <E extends ChatEventName>(name: E, data: ConversationEvent<E>) => {
+  // A page's KV view: for its host (the side panel), wherever the page is.
+  if (name === 'artifact_kv') {
+    window.dispatchEvent(new CustomEvent('page-kv', { detail: data }));
+    return;
+  }
   const state = store.state;
   const id = data.conversation;
   const destination = eventDestination(name, id, state.activeConversationId, state.conversations);
@@ -150,7 +156,10 @@ export const handleServerEvent = <E extends ChatEventName>(type: E, data: ChatEv
 
     case 'tool_end': {
       const end = data as ChatEvents['tool_end'];
-      mc.messages.push({ role: 'tool', ...toolRunOf(end.name, end) });
+      const run = toolRunOf(end.name, end);
+      mc.messages.push({ role: 'tool', ...run });
+      // A new page (or version) opens beside the conversation as it arrives.
+      if (run.page) openPage(run.page.id);
       cacheChatMessages(mc.messages);
       if (!awaitsUser(mc)) transition(mc, 'waiting');
       break;

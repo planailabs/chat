@@ -33,7 +33,7 @@ describe('historyToChat', () => {
     const snapshot = historyToChat(history([user, tool, assistant]), en);
     expect(snapshot.messages).toEqual([
       { role: 'user', content: 'Install git', id: user.id },
-      { role: 'tool', callId: 'c0', name: 'run_command', isError: false, reason: null, target: null, check: null },
+      { role: 'tool', callId: 'c0', name: 'run_command', isError: false, reason: null, target: null, check: null, page: null },
       { role: 'assistant', content: 'Done.', id: assistant.id },
     ]);
   });
@@ -128,9 +128,9 @@ describe('historyToChat', () => {
       en,
     );
     expect(snapshot.messages).toEqual([
-      { role: 'tool', callId: 't1', name: 'run_command', isError: false, reason: 'List big files', target: null, check },
+      { role: 'tool', callId: 't1', name: 'run_command', isError: false, reason: 'List big files', target: null, check, page: null },
       // No reason on the row: the check's copy of the agent's reason.
-      { role: 'tool', callId: 't2', name: 'read_file', isError: true, reason: 'Free disk space', target: null, check: { ...check, decision: 'denied', verdict: 'rejected' } },
+      { role: 'tool', callId: 't2', name: 'read_file', isError: true, reason: 'Free disk space', target: null, check: { ...check, decision: 'denied', verdict: 'rejected' }, page: null },
     ]);
     expect(snapshot.approvals[0]).toMatchObject({ reason: 'Needs your OK', agentReason: 'Free disk space', check: { decision: 'asked', verdict: 'failed', reasoning: null } });
   });

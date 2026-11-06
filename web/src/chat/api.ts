@@ -261,7 +261,35 @@ export interface ToolData extends AnswerData {
   /** A connector call's real target, `service.tool`. */
   target?: string | null;
   check?: SafetyCheck | null;
+  /** The page the call made: an artifact the assistant published, or a service tool's view. */
+  artifact?: PageRef | null;
 }
+
+/** A page in a conversation (an artifact or an MCP Apps view), as a tool run names it. */
+export interface PageRef {
+  id: string;
+  kind: 'artifact' | 'mcp_app';
+  title: string;
+  version: number | null;
+}
+
+/** A page ready for the iframe (`srcdoc`), and what its host needs. */
+export interface PageDoc {
+  id: string;
+  kind: 'artifact' | 'mcp_app';
+  title: string;
+  name: string | null;
+  service: string | null;
+  conversation: string;
+  version: number;
+  latest: number;
+  html: string;
+  tool: { name: string; arguments: Record<string, unknown> | null; result: unknown; definition: unknown } | null;
+  prefers_border: boolean | null;
+}
+
+/** A page's tool call: the result, or what the user has to confirm first. */
+export type PageCallResult = { confirm: { message: string; tool: string } } | Record<string, unknown>;
 
 export interface ApprovalData {
   call_id: string;
@@ -342,6 +370,8 @@ export interface ChatEvents {
   done: Empty;
   error: { message: string };
   resync: Empty;
+  /** A page's KV view changed (a handler ran, the assistant set values). */
+  artifact_kv: { artifact: string; kv: Record<string, unknown> };
 }
 
 export type ChatEventName = keyof ChatEvents;
@@ -360,6 +390,7 @@ export const CHAT_EVENT_NAMES: ChatEventName[] = [
   'done',
   'error',
   'resync',
+  'artifact_kv',
 ];
 
 export interface Stats {
@@ -444,6 +475,17 @@ export const api = {
     disconnect: (id: string) => request<Ok>('POST', `/api/v1/connector/${encodeURIComponent(id)}/disconnect`, {}),
   },
 
+  /** Pages (artifacts, MCP Apps views): what their iframe host asks for. */
+  pages: {
+    get: (id: string, opts: { version?: number; theme?: 'light' | 'dark' }) => request<PageDoc>('GET', `/api/v1/pages/${encodeURIComponent(id)}${query(opts)}`),
+    kv: (id: string) => request<{ kv: Record<string, unknown> }>('GET', `/api/v1/pages/${encodeURIComponent(id)}/kv`),
+    backflow: (id: string, body: { action: string; component: string | null; value: unknown; version: string | null; lang: string }) =>
+      request<{ response: unknown; kv?: Record<string, unknown>; sent?: boolean }>('POST', `/api/v1/pages/${encodeURIComponent(id)}/backflow`, body),
+    call: (id: string, body: { name: string; arguments: Record<string, unknown>; confirmed?: boolean }) =>
+      request<PageCallResult>('POST', `/api/v1/pages/${encodeURIComponent(id)}/call`, body),
+    message: (id: string, text: string, lang: string) => request<Empty>('POST', `/api/v1/pages/${encodeURIComponent(id)}/message`, { text, lang }),
+    context: (id: string, report: unknown) => request<Empty>('POST', `/api/v1/pages/${encodeURIComponent(id)}/context`, report),
+  },
   chat: {
     list: () => request<Conversation[]>('GET', '/api/v1/chat'),
     /** 404: the conversation is gone. */
