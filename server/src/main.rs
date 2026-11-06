@@ -8,6 +8,7 @@ mod connector;
 mod connectors;
 mod public_mcp;
 mod purchase;
+mod ratelimit;
 mod state;
 mod subnet;
 
@@ -150,6 +151,7 @@ async fn main() -> anyhow::Result<()> {
     let router = router
         .merge(web)
         .layer(from_fn(no_frame_navigation))
+        .layer(from_fn(ratelimit::limit))
         .layer(mac_mgmt_common::otel::http::trace_layer())
         .layer(from_fn(mac_mgmt_common::otel::http::record_request_metrics));
 
