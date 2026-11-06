@@ -101,6 +101,21 @@ user in the client (elicitation), and purchases are off unless the user turns
 on "Purchases from MCP clients" in the settings, then confirmed with the price.
 It needs `[auth]` (real sign-in); with `DEV_ONLY_NO_AUTH` it isn't mounted.
 
+## Workers (sub-agents)
+
+The assistant may hand self-contained jobs to workers (`spawn_agent` type
+`worker` in `subnet/chat.hcl`: up to 6 at once, one level deep, budget carved
+from its own). The chat learns of one from its parent's `child_spawned`
+(`conversation_children`): a worker's calls count as its conversation's (the
+approval hook, pages, services' views), its tool runs and approvals show
+there, approving goes to the worker that asked, and the history lists what
+open workers wait on. Workers have no user of their own; they report to the
+assistant.
+
+The approval hook's loop guard (`hook::static_check`) refuses an identical
+call made in the last 20 unless something was changed since, and a writing
+tool used more than 6 times in 20; reads over many items pass.
+
 ## Pages (artifacts and MCP Apps views)
 
 The assistant can show the user an interactive page beside the conversation
