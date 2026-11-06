@@ -104,6 +104,9 @@ impl PublicMcp {
     /// Layers 1 and 2 of `hook`, for a call from an MCP client: there is no
     /// agent reason and no transcript, only this session's calls.
     async fn judge(&self, call: &Call, risk: Risk) -> Judgement {
+        if hook::always_asks(&self.app, call) {
+            return Judgement::Ask(format!("`{}` always needs your approval: it can act with more than this client can see.", call.name));
+        }
         let history = self.session.history.lock().await.clone();
         hook::judge_present(&self.app, call, risk, &history, "(called from an MCP client; no reason given)").await
     }

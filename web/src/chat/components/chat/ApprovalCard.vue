@@ -12,7 +12,8 @@ const props = defineProps({ approval: { type: Object as PropType<PendingApproval
 
 const labels = computed(() => locale.value.chat.approval);
 const toolLabels = computed(() => locale.value.chat.tool);
-const args = computed(() => formatToolArgs(props.approval.input, 1200, true));
+// A call that always asks is shown whole: its arguments are what's at stake.
+const args = computed(() => formatToolArgs(props.approval.input, props.approval.check?.verdict === 'always' ? 20000 : 1200, true));
 
 const decide = (action: ApprovalAction) => void decideApproval(props.approval.callId, action);
 </script>

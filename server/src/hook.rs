@@ -212,6 +212,12 @@ fn truncate(s: &str, max: usize) -> &str {
     }
 }
 
+/// Whether a call (as judged: a connector call by its target) is on the
+/// always-ask list.
+pub fn always_asks(app: &crate::state::App, call: &Call) -> bool {
+    app.cfg.approval.always_ask.iter().any(|p| glob(p, &call.name))
+}
+
 /// What the approval layers say about a call the user makes themselves (an
 /// MCP client, a page in the chat): there's no agent transcript, only that
 /// caller's own recent calls.
@@ -362,6 +368,25 @@ pub async fn pre_tool(State(app): State<AppState>, headers: HeaderMap, Json(h): 
     // A connector call with no user behind it can't be priced or confirmed.
     if conversation.is_none() && tool == "connector.call_tool" {
         return Ok(decide("deny", "not a chat conversation"));
+    }
+    // Always the user's call: before the allow-list, the validator and
+    // "approve all"; a sub-agent (no conversation of its own) can't make it.
+    if always_asks(&app, &call) {
+        let Some(row) = &conversation_row else { return Ok(decide("deny", "not a chat conversation")) };
+        let own: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM conversations WHERE id = $1 AND agent_id = $2)")
+            .bind(row.0)
+            .bind(&h.agent.id)
+            .fetch_one(&app.pool)
+            .await
+            .map_err(|e| {
+                tracing::error!("approval hook: {e}");
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+        if !own {
+            return Ok(rec.answer(&app, "deny", None, format!("`{}` is for the assistant itself, with the user's approval; a worker can't make it. Report that it's needed instead.", call.name)).await);
+        }
+        let why = format!("`{}` always needs your approval: it can act with more than this chat can see (another agent, a shell). Check the whole call.", call.name);
+        return Ok(rec.answer(&app, "ask", Some(("always", "on the always-ask list")), why).await);
     }
     if app.cfg.approval.allow.iter().any(|p| glob(p, tool)) {
         return Ok(rec.answer(&app, "allow", None, "allow-listed".into()).await);

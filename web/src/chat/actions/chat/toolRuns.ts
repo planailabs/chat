@@ -14,7 +14,7 @@ export const safetyCheckOf = (check: unknown): SafetyCheck | null => {
   if (!check || typeof check !== 'object') return null;
   const c = check as Partial<SafetyCheck>;
   if (c.decision !== 'allowed' && c.decision !== 'denied' && c.decision !== 'asked') return null;
-  const verdict = c.verdict === 'approved' || c.verdict === 'rejected' || c.verdict === 'failed' ? c.verdict : null;
+  const verdict = c.verdict === 'approved' || c.verdict === 'rejected' || c.verdict === 'failed' || c.verdict === 'always' ? c.verdict : null;
   return { agent_reason: text(c.agent_reason), decision: c.decision, verdict, reasoning: text(c.reasoning) };
 };
 
@@ -90,7 +90,7 @@ export interface CheckBadge {
 /** The safety check's badge: its verdict, plus what the hook did when it stopped or asked. */
 export const checkBadge = (check: SafetyCheck, locale: LocaleContent): CheckBadge => {
   const t = locale.chat.tool;
-  const verdict = check.verdict === 'approved' ? t.verdicts.approved : check.verdict === 'rejected' ? t.verdicts.rejected : t.verdicts.failed;
+  const verdict = check.verdict === 'approved' ? t.verdicts.approved : check.verdict === 'rejected' ? t.verdicts.rejected : check.verdict === 'always' ? t.verdicts.always : t.verdicts.failed;
   const decision = check.decision === 'denied' ? t.decisions.denied : check.decision === 'asked' ? t.decisions.asked : null;
   const tone: CheckBadge['tone'] = check.decision === 'denied' || check.verdict === 'rejected' ? 'bad' : check.verdict === 'approved' && check.decision === 'allowed' ? 'ok' : 'warn';
   return { label: `${t.safetyCheck}: ${verdict}${decision ? ` · ${decision}` : ''}`, tone };

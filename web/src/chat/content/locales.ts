@@ -118,7 +118,8 @@ export interface LocaleContent {
       /** Before the tool's own name, shown when a run is expanded. */
       call: string;
       safetyCheck: string;
-      verdicts: { approved: string; rejected: string; failed: string };
+      /** `always`: the call is on the always-ask list. */
+      verdicts: { approved: string; rejected: string; failed: string; always: string };
       decisions: { denied: string; asked: string };
       failed: string;
       noReasoning: string;
@@ -352,7 +353,7 @@ const en: LocaleContent = {
       why: 'Why:',
       call: 'Tool:',
       safetyCheck: 'Safety check',
-      verdicts: { approved: 'approved', rejected: 'rejected', failed: 'couldn’t run' },
+      verdicts: { approved: 'approved', rejected: 'rejected', failed: 'couldn’t run', always: 'always asks you' },
       decisions: { denied: 'denied', asked: 'asked you' },
       failed: 'failed',
       noReasoning: 'No reasoning given.',
@@ -584,7 +585,7 @@ const de: LocaleContent = {
       why: 'Warum:',
       call: 'Werkzeug:',
       safetyCheck: 'Sicherheitsprüfung',
-      verdicts: { approved: 'bestanden', rejected: 'abgelehnt', failed: 'nicht möglich' },
+      verdicts: { approved: 'bestanden', rejected: 'abgelehnt', failed: 'nicht möglich', always: 'fragt immer dich' },
       decisions: { denied: 'blockiert', asked: 'bei dir nachgefragt' },
       failed: 'fehlgeschlagen',
       noReasoning: 'Keine Begründung angegeben.',

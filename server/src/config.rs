@@ -353,6 +353,12 @@ pub struct Approval {
     /// Tools that never need approval (exact names, `*` suffix globs).
     #[serde(default = "default_allow")]
     pub allow: Vec<String>,
+    /// Calls that always need the user (`service.tool` of a connector call,
+    /// or a tool name; `*` suffix globs): e.g. starting another agent that has
+    /// a shell. Neither the allow-list, the validator, "approve all" nor a
+    /// page lets them through, and sub-agents may not make them at all.
+    #[serde(default)]
+    pub always_ask: Vec<String>,
 }
 
 fn default_allow() -> Vec<String> {

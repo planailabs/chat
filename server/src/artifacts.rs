@@ -911,6 +911,10 @@ pub async fn call(app: &App, user: Uuid, id: Uuid, i: CallInput) -> Result<Value
     if !from_view && !plan_ai_connector::views::visibility(&listed).0 {
         return Ok(tool_error(format!("{tool} is only for {service}'s own view")));
     }
+    if hook::always_asks(app, &call) {
+        audit(app, user, &client, &call.name, "deny", "on the always-ask list: not from pages").await;
+        return Ok(tool_error(format!("{} isn't available to pages; ask the assistant in the chat.", call.name)));
+    }
     if call.args.to_string().len() > MAX_PAGE_ARGS {
         audit(app, user, &client, &call.name, "deny", "arguments too long to show").await;
         return Ok(tool_error(format!("A page's call may carry at most {} KiB of arguments.", MAX_PAGE_ARGS / 1024)));

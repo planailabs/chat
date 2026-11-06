@@ -250,7 +250,8 @@ export interface AnswerData {
 export interface SafetyCheck {
   agent_reason?: string | null;
   decision: 'allowed' | 'denied' | 'asked';
-  verdict: 'approved' | 'rejected' | 'failed' | null;
+  /** `always`: on the always-ask list (no validator; the user decides). */
+  verdict: 'approved' | 'rejected' | 'failed' | 'always' | null;
   reasoning?: string | null;
 }
 
