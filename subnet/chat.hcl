@@ -50,6 +50,7 @@ hook "approval" {
   # The hub's built-ins that reach other agents are here too: the hub doesn't
   # keep users apart, the chat limits them to the user's own agents.
   tools      = ["connector.call_tool", "firecrawl.firecrawl_crawl", "firecrawl.firecrawl_agent", "firecrawl.firecrawl_interact*", "firecrawl.firecrawl_monitor_*",
+                "firecrawl.firecrawl_scrape", "firecrawl.firecrawl_map", "firecrawl.firecrawl_extract",
                 "send_message", "list_agents", "list_types", "mailbox_*", "blob_get", "pause_agent", "resume_agent", "cancel_agent"]
   run        { url = "http://127.0.0.1:8080/hooks/pre_tool" }
   credential = { header = "Authorization", env = "CHAT_CALLBACK_SECRET", prefix = "Bearer " }

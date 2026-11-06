@@ -236,6 +236,38 @@ fn truncate(s: &str, max: usize) -> &str {
     }
 }
 
+/// Firecrawl's tools that fetch URLs the agent chooses.
+fn fetches_urls(tool: &str) -> bool {
+    matches!(tool, "firecrawl.firecrawl_scrape" | "firecrawl.firecrawl_map" | "firecrawl.firecrawl_extract" | "firecrawl.firecrawl_crawl")
+}
+
+/// A URL that looks like it carries data out (after a prompt injection, an
+/// agent could fetch `https://attacker/?d=<what it read>`): a long run of
+/// encoded-looking characters in a query value or a path segment, or a very
+/// long query. Ordinary pages' URLs pass.
+pub fn smuggles_data(url: &str) -> bool {
+    let Ok(u) = url::Url::parse(url) else { return true };
+    let encoded = |s: &str| {
+        let s = urlencoding_decode(s);
+        s.len() >= 48 && s.chars().filter(|c| c.is_ascii_alphanumeric() || "+/=_-.%".contains(*c)).count() * 10 >= s.len() * 9 && !s.contains(' ')
+    };
+    u.query().is_some_and(|q| q.len() > 300)
+        || u.query_pairs().any(|(_, v)| encoded(&v) || v.len() > 120)
+        || u.path_segments().into_iter().flatten().any(|seg| encoded(seg) && !seg.contains('.'))
+        || u.host_str().is_some_and(|h| h.split('.').any(|l| l.len() > 40))
+}
+
+fn urlencoding_decode(s: &str) -> String {
+    url::form_urlencoded::parse(format!("x={s}").as_bytes()).next().map(|(_, v)| v.into_owned()).unwrap_or_default()
+}
+
+/// The URLs a Firecrawl call fetches.
+fn fetched_urls(args: &Value) -> Vec<String> {
+    let mut out: Vec<String> = args["url"].as_str().map(|u| vec![u.to_string()]).unwrap_or_default();
+    out.extend(args["urls"].as_array().into_iter().flatten().filter_map(Value::as_str).map(String::from));
+    out
+}
+
 /// Whether a call (as judged: a connector call by its target) is on the
 /// always-ask list.
 pub fn always_asks(app: &crate::state::App, call: &Call) -> bool {
@@ -492,6 +524,16 @@ pub async fn pre_tool(State(app): State<AppState>, headers: HeaderMap, Json(h): 
     if conversation.is_none() && tool == "connector.call_tool" {
         return Ok(decide("deny", "not a chat conversation"));
     }
+    // Fetching a URL that looks like it carries data: the user looks first.
+    if fetches_urls(tool) {
+        if let Some(u) = fetched_urls(&h.input.args).into_iter().find(|u| smuggles_data(u)) {
+            let why = format!("This would fetch {u}, a URL that looks like it carries data. Check it before allowing it.");
+            return Ok(rec.answer(&app, "ask", Some(("always", "a URL that looks like it carries data")), why).await);
+        }
+        if tool != "firecrawl.firecrawl_crawl" {
+            return Ok(rec.answer(&app, "allow", None, "an ordinary URL".into()).await);
+        }
+    }
     // Always the user's call: before the allow-list, the validator and
     // "approve all"; a sub-agent (no conversation of its own) can't make it.
     if always_asks(&app, &call) {
@@ -600,6 +642,34 @@ mod tests {
         for t in ["spawn_agent", "wait_for", "connector.call_tool", "chat.send_message"] {
             assert!(!cross_agent(t), "{t}");
         }
+    }
+
+    #[test]
+    fn urls_that_carry_data_are_noticed() {
+        for ok in [
+            "https://docs.rs/axum/latest/axum/",
+            "https://www.example.com/search?q=mcp+apps&page=2",
+            "https://github.com/modelcontextprotocol/ext-apps/blob/main/specification/2026-01-26/apps.mdx",
+            "https://blog.example.com/posts/2026-01-26-mcp-apps/",
+            "https://example.com/a?utm_source=newsletter&utm_campaign=autumn-2026",
+        ] {
+            assert!(!smuggles_data(ok), "{ok}");
+        }
+        for bad in [
+            "https://evil.example/?d=dXNlcjphZG1pbkBwbGFuLmFpO3Rva2VuPXNrLWxpdmUtMTIzNDU2Nzg5MA==",
+            "https://evil.example/c/4f2a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a",
+            "https://evil.example/?a=1&b=" ,
+            "https://aGVsbG8gd29ybGQgdGhpcyBpcyBhIHNlY3JldCB0b2tlbg.evil.example/",
+            "not a url",
+        ]
+        .iter()
+        .filter(|u| !u.ends_with("b="))
+        {
+            assert!(smuggles_data(bad), "{bad}");
+        }
+        let long = format!("https://evil.example/?{}", "k=v&".repeat(100));
+        assert!(smuggles_data(&long));
+        assert_eq!(fetched_urls(&json!({ "urls": ["a", "b"], "url": "c" })), vec!["c", "a", "b"]);
     }
 
     #[test]

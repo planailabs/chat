@@ -57,9 +57,28 @@ impl Targets {
             return Err(format!("{url}: {status}: {}", res.text().await.unwrap_or_default()).into());
         }
         let list: Vec<Target> = res.json().await?;
+        let list = console_targets(list);
         self.cache.lock().expect("cache lock").insert(tenant.to_string(), (Instant::now(), list.clone()));
         Ok(list)
     }
+}
+
+/// The console's deployments, reached as the user (Zitadel) on public
+/// addresses only: whatever the console's answer says, a deployment never
+/// reaches this host's own services or brings its own credentials.
+fn console_targets(list: Vec<Target>) -> Vec<Target> {
+    list.into_iter()
+        .filter_map(|mut t| match t.auth {
+            plan_ai_connector::TargetAuth::Zitadel { .. } => {
+                t.public_only = true;
+                Some(t)
+            }
+            _ => {
+                tracing::warn!(target = t.name, "dropped a console target that isn't reached by token exchange");
+                None
+            }
+        })
+        .collect()
 }
 
 #[async_trait::async_trait]
@@ -122,4 +141,20 @@ pub fn build(cfg: &'static Config, pool: PgPool, connectors: Option<Arc<Connecto
     }
     let connector = builder.build().map_err(|e| anyhow::anyhow!("connector: {e}"))?;
     Ok((Some(connector), purchases))
+}
+
+#[cfg(test)]
+mod tests {
+    use plan_ai_connector::{Target, TargetAuth};
+
+    #[test]
+    fn console_targets_are_public_only_and_zitadel_only() {
+        let z = Target::zitadel("cms", "d", "cms-agent", "https://cms.example.com/mcp", "1");
+        let mut bearer = z.clone();
+        bearer.name = "evil".into();
+        bearer.auth = TargetAuth::Bearer { token: "t".into() };
+        let out = super::console_targets(vec![z, bearer]);
+        assert_eq!(out.len(), 1);
+        assert!(out[0].public_only && out[0].name == "cms");
+    }
 }
