@@ -237,18 +237,29 @@ async fn auth_unless_bearer(req: Request, next: Next) -> Response {
 /// handlers keep the admin from changing the user's settings. The user's
 /// Zitadel subject is recorded for the connector.
 async fn session_principal(State(app): State<AppState>, mut req: Request, next: Next) -> Response {
+    // An account is bound to the Zitadel user that first signed in as it:
+    // another one with the same email (an email changed to someone else's)
+    // isn't them. An admin clears `profiles.subject` for a recreated user.
     if let (Some(user), Some(sub)) = (req.extensions().get::<WebUser>(), req.extensions().get::<plan_ai_auth::OidcSubject>()) {
-        let res = sqlx::query(
+        let bound: Result<Option<Option<String>>, _> = sqlx::query_scalar(
             "INSERT INTO profiles (user_id, subject) VALUES ($1, $2)
-             ON CONFLICT (user_id) DO UPDATE SET subject = EXCLUDED.subject WHERE profiles.subject IS DISTINCT FROM EXCLUDED.subject",
+             ON CONFLICT (user_id) DO UPDATE SET subject = COALESCE(profiles.subject, EXCLUDED.subject)
+             RETURNING subject",
         )
         .bind(user.id)
         .bind(&sub.subject)
-        .execute(&app.pool)
+        .fetch_optional(&app.pool)
         .await;
-        if let Err(e) = res {
-            tracing::error!("recording the Zitadel subject of {}: {e}", user.email);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        match bound {
+            Ok(Some(Some(s))) if s != sub.subject => {
+                tracing::warn!(user = %user.id, email = user.email, "sign-in by another Zitadel user with this account's email refused");
+                return (StatusCode::FORBIDDEN, axum::Json(json!({ "error": "forbidden", "message": "This account belongs to another sign-in. Ask an admin." }))).into_response();
+            }
+            Ok(_) => {}
+            Err(e) => {
+                tracing::error!("recording the Zitadel subject of {}: {e}", user.email);
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
         }
     }
     if let Some(user) = req.extensions().get::<WebUser>() {
