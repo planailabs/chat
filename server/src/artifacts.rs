@@ -226,13 +226,8 @@ fn emit(app: &App, user: Uuid, conversation: Uuid, name: &'static str, mut data:
 
 /// The conversation an agent's call comes from.
 pub async fn conversation_of(app: &App, user: Uuid, agent: &str) -> Result<Uuid, ApiError> {
-    sqlx::query_scalar("SELECT id FROM conversations WHERE agent_id = $1 AND user_id = $2")
-        .bind(agent)
-        .bind(user)
-        .fetch_optional(&app.pool)
-        .await
-        .map_err(internal)?
-        .ok_or_else(|| ApiError::bad_request("artifacts belong to a chat conversation; this call isn't from one"))
+    let row: Option<(Uuid, Uuid, bool)> = sqlx::query_as(crate::chat::CONVERSATION_OF_AGENT).bind(agent).fetch_optional(&app.pool).await.map_err(internal)?;
+    row.filter(|(_, u, _)| *u == user).map(|(id, _, _)| id).ok_or_else(|| ApiError::bad_request("artifacts belong to a chat conversation; this call isn't from one"))
 }
 
 // ─── The assistant's tools ──────────────────────────────────────────────────
@@ -999,13 +994,8 @@ impl plan_ai_connector::ViewSink for ChatViews {
     async fn view(&self, v: plan_ai_connector::ToolView) -> Result<String, String> {
         let user: Uuid = v.tenant.parse().map_err(|e| format!("tenant: {e}"))?;
         let agent = v.caller.as_ref().and_then(|m| m.get("subnet/agent")).and_then(Value::as_str).ok_or("no calling agent")?;
-        let conversation: Uuid = sqlx::query_scalar("SELECT id FROM conversations WHERE agent_id = $1 AND user_id = $2")
-            .bind(agent)
-            .bind(user)
-            .fetch_optional(&self.0)
-            .await
-            .map_err(|e| e.to_string())?
-            .ok_or("not a chat conversation")?;
+        let row: Option<(Uuid, Uuid, bool)> = sqlx::query_as(crate::chat::CONVERSATION_OF_AGENT).bind(agent).fetch_optional(&self.0).await.map_err(|e| e.to_string())?;
+        let conversation = row.filter(|(_, u, _)| *u == user).map(|(id, _, _)| id).ok_or("not a chat conversation")?;
         let html = plan_ai_connector::views::view_html(&v.resource).ok_or("the view isn't text")?;
         if html.len() > 4 * MAX_HTML {
             return Err("the view is over 2 MiB".into());

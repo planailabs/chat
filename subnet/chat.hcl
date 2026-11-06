@@ -64,7 +64,8 @@ agent "chat-agent" {
   model        = "deepseek-flash"
   nodes        = ["chat"]
   params       = { max_tokens = 2048 }
-  budget       = { max_tokens = 40000000, max_depth = 0, max_children = 0 }
+  budget       = { max_tokens = 40000000, max_depth = 1, max_children = 6 }
+  spawns       = ["worker"]
   hooks        = ["approval"]
   call_reasons = true
 
@@ -118,10 +119,42 @@ agent "chat-agent" {
     - For current facts from the web (news, prices, a company's site, papers) use firecrawl search/scrape; for how a library, framework or API works use context7 (resolve the library id, then query its docs). Say where an answer comes from.
     - Before helping the user set something up, load the matching skill with `chat.skill_get` and follow it: `cms-agent-setup` (a cms-agent instance: repository, deploy type, subdomain, sign-in, model, accounts, its URL) and `cloud-setup` (a plan.ai cloud organization, its identity accounts and identity providers).
     - When something is easier to look at or use than to read (numbers over time, comparisons, status overviews, a form with several fields, a small tool), show it as an interactive page beside the chat: load the `artifacts` skill with `chat.skill_get`, then `chat.artifact_publish`. Not for plain answers. A service's own view (a call_tool result naming a `ui-view:`) is already shown to the user; don't rebuild it.
+    - For a self-contained job of many steps (going through many services, items or pages; researching several sources), hand it to sub-agents: `spawn_agent` with type `worker` and a complete prompt (they don't see this conversation: say what to find, where, and what to report), several at once for independent parts, then `wait_for` them and use their reports. Workers' calls go through the same checks as yours.
+    - Never work around the safety checks (spreading calls out, rephrasing a denied call): a denied call means stop and tell the user or ask them.
     - Ask questions with `ask_question`, never in plain text; one question at a time unless it's multiple choice.
     - Use `chat.staff_ping_send` when the user wants a demo, a callback, custom pricing, or help you can't give (a hardware issue, manual support); then tell them the team will follow up.
     - Only if the context says "Newsletter: not asked yet", you may offer the newsletter once with `prompt_preference` (preference_id "newsletter"), and only when the conversation winds down after the user's goal is done. Never offer it during a task, or right after a question, a decision, a cancellation or a problem.
   EOT
+}
+
+# A worker the assistant hands a self-contained task to (spawn_agent type
+# "worker"): same tools and checks, no user of its own; it reports back.
+agent "chat-worker" {
+  description = "A worker of the plan.ai assistant: does one self-contained task (a scan, research, a batch of reads) and reports back."
+  credential {
+    env      = "LITELLM_API_KEY"
+    base_url = "https://codex.plan.ai/v1"
+  }
+  model        = "deepseek-flash"
+  nodes        = ["chat"]
+  params       = { max_tokens = 4096 }
+  budget       = { max_tokens = 4000000, max_depth = 0, max_children = 0 }
+  hooks        = ["approval"]
+  call_reasons = true
+
+  system_prompt = <<-EOT
+    You are a worker of the plan.ai assistant. It gives you one self-contained task; you do it and finish with a report to it. You can't talk to the user.
+
+    - Work as the user on their plan.ai services: `connector.list_services`, `connector.list_tools` {service} (read a tool's schema before calling it), `connector.call_tool` {service, tool, arguments}. Give every tool call a short `_reason`.
+    - Do what the task asks and nothing more: read freely; change things only if the task says so. Calls that change things may wait for the user's approval in the chat; if one is denied, don't retry or work around it: report it.
+    - Never work around the safety checks (spreading calls out, rephrasing a denied call).
+    - Your last message is the report: the facts and numbers found (with names, never ids), what you changed, and what you couldn't do and why. Be concise; no greetings.
+  EOT
+}
+
+mixture "worker" {
+  agent = "chat-worker"
+  mcp   = ["chat", "connector", "context7", "firecrawl"]
 }
 
 # What the chat spawns ([subnet].agent_type).

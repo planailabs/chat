@@ -58,19 +58,31 @@ pub struct BrowserEvent {
 
 /// Our agents: id → (user, conversation, seq up to which its log is history
 /// copied by an upgrade). Loaded at start, extended on spawn and upgrade.
+/// Sub-agents are kept apart: their events show differently.
 #[derive(Clone, Default)]
-pub struct Owners(Arc<RwLock<HashMap<String, (Uuid, Uuid, i64)>>>);
+pub struct Owners(Arc<RwLock<HashMap<String, (Uuid, Uuid, i64)>>>, Arc<RwLock<HashMap<String, (Uuid, Uuid)>>>);
 
 impl Owners {
     pub async fn load(pool: &PgPool) -> anyhow::Result<Self> {
         let rows: Vec<(String, Uuid, Uuid, i64)> = sqlx::query_as("SELECT agent_id, user_id, id, mirror_from_seq FROM conversations").fetch_all(pool).await?;
-        Ok(Self(Arc::new(RwLock::new(rows.into_iter().map(|(a, u, c, f)| (a, (u, c, f))).collect()))))
+        let kids: Vec<(String, Uuid, Uuid)> =
+            sqlx::query_as("SELECT k.agent_id, c.user_id, c.id FROM conversation_children k JOIN conversations c ON c.id = k.conversation_id WHERE k.finished_at IS NULL").fetch_all(pool).await?;
+        Ok(Self(
+            Arc::new(RwLock::new(rows.into_iter().map(|(a, u, c, f)| (a, (u, c, f))).collect())),
+            Arc::new(RwLock::new(kids.into_iter().map(|(a, u, c)| (a, (u, c))).collect())),
+        ))
     }
     pub async fn insert(&self, agent: String, user: Uuid, conversation: Uuid, copied_upto: i64) {
         self.0.write().await.insert(agent, (user, conversation, copied_upto));
     }
     async fn get(&self, agent: &str) -> Option<(Uuid, Uuid, i64)> {
         self.0.read().await.get(agent).cloned()
+    }
+    async fn child(&self, agent: &str) -> Option<(Uuid, Uuid)> {
+        self.1.read().await.get(agent).cloned()
+    }
+    async fn insert_child(&self, agent: String, user: Uuid, conversation: Uuid) {
+        self.1.write().await.insert(agent, (user, conversation));
     }
 }
 
@@ -162,15 +174,92 @@ impl Pump {
                 continue;
             }
             let agent = notice["agent"].as_str().unwrap_or_default().to_string();
-            let Some((user, conv, copied_upto)) = self.owners.get(&agent).await else { continue };
             let seq = notice["seq"].as_i64().unwrap_or_default();
-            if seq <= copied_upto {
+            if let Some((user, conv, copied_upto)) = self.owners.get(&agent).await {
+                if seq <= copied_upto {
+                    continue;
+                }
+                let turn = turns.entry(agent.clone()).or_default();
+                if let Err(e) = self.apply(&agent, seq, user, conv, &notice["event"], turn).await {
+                    tracing::error!(agent, seq, "mirroring subnet event: {e:#}");
+                }
                 continue;
             }
-            let turn = turns.entry(agent.clone()).or_default();
-            if let Err(e) = self.apply(&agent, seq, user, conv, &notice["event"], turn).await {
-                tracing::error!(agent, seq, "mirroring subnet event: {e:#}");
+            // A sub-agent: known from its parent's child_spawned, or by an ancestor of ours.
+            let mut owner = self.owners.child(&agent).await;
+            if owner.is_none() {
+                for a in notice["ancestors"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+                    if let Some((u, c, _)) = self.owners.get(a).await {
+                        owner = Some((u, c));
+                        break;
+                    }
+                }
+                if let Some((u, c)) = owner {
+                    let parent = notice["ancestors"][0].as_str().unwrap_or_default().to_string();
+                    if let Err(e) = self.adopt(&agent, &parent, u, c).await {
+                        tracing::error!(agent, "recording a sub-agent: {e:#}");
+                    }
+                }
             }
+            let Some((user, conv)) = owner else { continue };
+            let turn = turns.entry(agent.clone()).or_default();
+            if let Err(e) = self.apply_child(&agent, seq, user, conv, &notice["event"], turn).await {
+                tracing::error!(agent, seq, "mirroring a sub-agent's event: {e:#}");
+            }
+        }
+        Ok(())
+    }
+
+    /// A sub-agent of a conversation's agent: its calls are the conversation's.
+    async fn adopt(&self, agent: &str, parent: &str, user: Uuid, conv: Uuid) -> anyhow::Result<()> {
+        sqlx::query("INSERT INTO conversation_children (agent_id, conversation_id, parent_agent_id) VALUES ($1, $2, $3) ON CONFLICT (agent_id) DO NOTHING")
+            .bind(agent)
+            .bind(conv)
+            .bind(parent)
+            .execute(&self.pool)
+            .await?;
+        self.owners.insert_child(agent.to_string(), user, conv).await;
+        Ok(())
+    }
+
+    /// A sub-agent's events: its tool runs and approvals show in the
+    /// conversation (approvals wait for the user like the assistant's own);
+    /// its text and turns are its parent's business (the report goes there).
+    async fn apply_child(&self, agent: &str, seq: i64, user: Uuid, conv: Uuid, ev: &Value, turn: &mut Turn) -> anyhow::Result<()> {
+        match ev["type"].as_str().unwrap_or_default() {
+            "llm_delta" => {
+                let delta = &ev["delta"];
+                turn.fold_tool_calls(delta);
+                if let Some(u) = delta.get("usage").filter(|u| u.is_object()) {
+                    turn.usage = Some(u.clone());
+                }
+            }
+            "llm_done" => {
+                if let Some(u) = turn.usage.take() {
+                    self.record_usage(agent, seq, user, &u).await?;
+                }
+                turn.index.clear();
+                for (id, args) in std::mem::take(&mut turn.args) {
+                    if let Some(reason) = call_reason(&args) {
+                        turn.reasons.insert(id.clone(), reason);
+                    }
+                    if turn.calls.get(&id).is_some_and(|n| n == "connector.call_tool")
+                        && let Ok(v) = serde_json::from_str::<Value>(&args)
+                    {
+                        turn.targets.insert(id, crate::hook::effective("connector.call_tool", &v).name);
+                    }
+                }
+            }
+            "compacted" => {
+                if let Some(u) = ev.get("usage").filter(|u| u.is_object()) {
+                    self.record_usage(agent, seq, user, u).await?;
+                }
+            }
+            "tool_result" | "tool_aborted" | "approval_requested" => return self.apply(agent, seq, user, conv, ev, turn).await,
+            "cancelled" | "superseded" => {
+                self.owners.1.write().await.remove(agent);
+            }
+            _ => {}
         }
         Ok(())
     }
@@ -318,6 +407,17 @@ impl Pump {
             "compacted" => {
                 if let Some(u) = ev.get("usage").filter(|u| u.is_object()) {
                     self.record_usage(agent, seq, user, u).await?;
+                }
+            }
+            "child_spawned" => {
+                if let Some(child) = ev["id"].as_str() {
+                    self.adopt(child, agent, user, conv).await?;
+                }
+            }
+            "child_report" => {
+                if let Some(child) = ev["id"].as_str() {
+                    sqlx::query("UPDATE conversation_children SET finished_at = now() WHERE agent_id = $1").bind(child).execute(&self.pool).await?;
+                    self.owners.1.write().await.remove(child);
                 }
             }
             "cancelled" | "superseded" => {

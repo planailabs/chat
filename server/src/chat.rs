@@ -177,8 +177,23 @@ async fn owned(app: &App, user: Uuid, id: Uuid) -> Result<(String, bool), ApiErr
 }
 
 /// Every agent the conversation has had (older ones first, after upgrades).
+/// The conversation an agent works for (its own, or its parent's for a
+/// sub-agent): `$1` the agent; columns id, user_id, auto_approve.
+pub const CONVERSATION_OF_AGENT: &str = "SELECT c.id, c.user_id, c.auto_approve FROM conversations c WHERE c.agent_id = $1
+     UNION ALL SELECT c.id, c.user_id, c.auto_approve FROM conversation_children k JOIN conversations c ON c.id = k.conversation_id WHERE k.agent_id = $1
+     LIMIT 1";
+
+/// Every agent of a conversation: its current one, the ones upgrades
+/// replaced, and the sub-agents they spawned.
 async fn agents_of(app: &App, id: Uuid) -> Result<Vec<String>, ApiError> {
-    sqlx::query_scalar("SELECT previous_agents || agent_id FROM conversations WHERE id = $1").bind(id).fetch_one(&app.pool).await.map_err(internal)
+    sqlx::query_scalar(
+        "SELECT (c.previous_agents || c.agent_id) || COALESCE((SELECT array_agg(k.agent_id) FROM conversation_children k WHERE k.conversation_id = c.id), '{}')
+         FROM conversations c WHERE c.id = $1",
+    )
+    .bind(id)
+    .fetch_one(&app.pool)
+    .await
+    .map_err(internal)
 }
 
 /// The conversation's agent, upgraded first when it runs an outdated version
@@ -368,6 +383,15 @@ pub async fn history(app: &App, user: Uuid, id: Uuid) -> Result<Value, ApiError>
         rows.into_iter().map(|(id, role, content, data, at)| json!({ "id": id, "role": role, "content": content, "data": data, "at": at })).collect();
     // The agent's summary is flattened into its transcript.
     let t = app.hub.transcript(&agent).await.map_err(internal)?;
+    // Sub-agents still at work may wait on the user too.
+    let mut waiting = raw_approvals(&t["awaiting_approval"]);
+    let open: Vec<String> = sqlx::query_scalar("SELECT agent_id FROM conversation_children WHERE conversation_id = $1 AND finished_at IS NULL").bind(id).fetch_all(&app.pool).await.map_err(internal)?;
+    for child in open {
+        match app.hub.transcript(&child).await {
+            Ok(ct) => waiting.extend(raw_approvals(&ct["awaiting_approval"])),
+            Err(e) => tracing::warn!(child, "a sub-agent's transcript: {e:#}"),
+        }
+    }
     Ok(json!({
         "id": id,
         "title": title,
@@ -375,7 +399,7 @@ pub async fn history(app: &App, user: Uuid, id: Uuid) -> Result<Value, ApiError>
         "phase": t["phase"],
         // Lists, never null: subnet leaves the field out when nothing waits.
         "pending_questions": if t["awaiting_client"].is_array() { t["awaiting_client"].clone() } else { json!([]) },
-        "pending_approvals": pending_approvals(app, &t["awaiting_approval"], &agents).await?,
+        "pending_approvals": pending_approvals(app, &Value::Array(waiting), &agents).await?,
         "auto_approve": auto_approve,
     }))
 }
@@ -462,8 +486,24 @@ pub fn approve_all(purchase: bool, approved: bool, all: bool, confirm_purchase: 
 
 #[allow(clippy::too_many_arguments)]
 pub async fn approve(app: &App, user: Uuid, id: Uuid, call_id: &str, approved: bool, reason: Option<String>, all: bool, confirm_purchase: bool) -> Result<(), ApiError> {
-    let agent = live_agent(app, user, id).await?;
-    let purchase = purchase_of(app, &agents_of(app, id).await?, call_id).await?.is_some();
+    let agents = agents_of(app, id).await?;
+    // A sub-agent's call goes back to that sub-agent.
+    let child: Option<String> = sqlx::query_scalar(
+        "SELECT k.agent_id FROM conversation_children k JOIN approval_checks a ON a.agent_id = k.agent_id WHERE k.conversation_id = $1 AND a.call_id = $2 LIMIT 1",
+    )
+    .bind(id)
+    .bind(call_id)
+    .fetch_optional(&app.pool)
+    .await
+    .map_err(internal)?;
+    let agent = match child {
+        Some(c) => {
+            owned(app, user, id).await?;
+            c
+        }
+        None => live_agent(app, user, id).await?,
+    };
+    let purchase = purchase_of(app, &agents, call_id).await?.is_some();
     if approve_all(purchase, approved, all, confirm_purchase)? {
         sqlx::query("UPDATE conversations SET auto_approve = true WHERE id = $1").bind(id).execute(&app.pool).await.map_err(internal)?;
     }

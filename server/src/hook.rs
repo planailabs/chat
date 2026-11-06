@@ -111,18 +111,33 @@ pub fn past_calls(transcript: &Value, current_call: &str) -> Vec<Call> {
     out
 }
 
-/// Layer 1. `Some(reason)` denies.
+/// How far back the loop rules look.
+const LOOP_WINDOW: usize = 20;
+/// The same writing tool more often than this in the window is a loop.
+const MAX_SAME_WRITES: usize = 6;
+
+/// Layer 1. `Some(reason)` denies. Aimed at loops, not at counts: going
+/// through many items (the same read with different arguments) is fine;
+/// repeating an identical call without having changed anything since isn't,
+/// however many other calls come between (spacing calls out doesn't help).
 pub fn static_check(call: &Call, risk: Risk, history: &[Call]) -> Option<String> {
     let name = &call.name;
-    if history.iter().rev().take(3).any(|h| h == call) {
-        return Some(format!("An identical call to `{name}` was made just before. Use its result instead of repeating it."));
+    let recent = &history[history.len().saturating_sub(LOOP_WINDOW)..];
+    if let Some(at) = recent.iter().rposition(|h| h == call)
+        && !recent[at + 1..].iter().any(|h| !reads(&h.name))
+    {
+        return Some(format!("An identical call to `{name}` was already made, and nothing was changed since. Use its result instead of repeating it."));
     }
     if risk == Risk::Destructive && !history.iter().any(|h| reads(&h.name)) {
         return Some(format!("`{name}` changes things irreversibly and nothing was read first. Read the current state first."));
     }
-    let repeats = history.iter().rev().take(10).filter(|h| &h.name == name).count();
-    if repeats > 3 {
-        return Some(format!("`{name}` was called {repeats} times in the last 10 calls. This looks like a loop; try another approach or ask the user."));
+    if risk != Risk::ReadOnly {
+        let repeats = recent.iter().filter(|h| &h.name == name).count();
+        if repeats >= MAX_SAME_WRITES {
+            return Some(format!(
+                "`{name}` changed things {repeats} times in the last {LOOP_WINDOW} calls. If that's intended, do it in one call where the tool takes several items, or ask the user before going on."
+            ));
+        }
     }
     None
 }
@@ -328,7 +343,7 @@ pub async fn pre_tool(State(app): State<AppState>, headers: HeaderMap, Json(h): 
     let call = effective(tool, &h.input.args);
     let rec = Record { agent: &h.agent.id, call_id: &h.input.call_id, tool: &call.name, agent_reason: h.input.reason.as_deref() };
     // Only our conversations: an unknown agent has no user to answer for it.
-    let conversation: Option<(uuid::Uuid, bool)> = sqlx::query_as("SELECT user_id, auto_approve FROM conversations WHERE agent_id = $1")
+    let conversation_row: Option<(uuid::Uuid, uuid::Uuid, bool)> = sqlx::query_as(crate::chat::CONVERSATION_OF_AGENT)
         .bind(&h.agent.id)
         .fetch_optional(&app.pool)
         .await
@@ -336,6 +351,7 @@ pub async fn pre_tool(State(app): State<AppState>, headers: HeaderMap, Json(h): 
             tracing::error!("approval hook: {e}");
             StatusCode::INTERNAL_SERVER_ERROR
         })?;
+    let conversation = conversation_row.map(|(_, user, auto)| (user, auto));
     // Purchases first: before the allow-list, the validator and "approve all".
     if let (Some(purchases), Some((user, _))) = (&app.purchases, conversation)
         && let Some(quote) = purchases.check(&user.to_string(), tool, &h.input.args).await
@@ -439,8 +455,26 @@ mod tests {
         assert_eq!(static_check(&del, Risk::Destructive, &[read]), None);
         let dup = call("svc.config_update", json!({ "a": 1 }));
         assert!(static_check(&dup, Risk::Mutating, &[call("svc.config_update", json!({ "a": 1 }))]).unwrap().contains("identical"));
-        let loopy: Vec<Call> = (0..4).map(|i| call("svc.config_update", json!({ "a": i }))).collect();
-        assert!(static_check(&call("svc.config_update", json!({ "a": 9 })), Risk::Mutating, &loopy).unwrap().contains("loop"));
+        let writes: Vec<Call> = (0..6).map(|i| call("svc.config_update", json!({ "a": i }))).collect();
+        assert!(static_check(&call("svc.config_update", json!({ "a": 9 })), Risk::Mutating, &writes).unwrap().contains("6 times"));
+        assert_eq!(static_check(&call("svc.config_update", json!({ "a": 9 })), Risk::Mutating, &writes[..5]), None, "five is fine");
+    }
+
+    #[test]
+    fn scans_pass_and_spaced_out_repeats_dont() {
+        // A scan: the same read over many items.
+        let scan: Vec<Call> = (0..40).map(|i| call("svc.page_get", json!({ "id": i }))).collect();
+        assert_eq!(static_check(&call("svc.page_get", json!({ "id": 40 })), Risk::ReadOnly, &scan), None);
+        // Repeating a read with other calls in between is still a repeat…
+        let spaced = vec![call("svc.page_get", json!({ "id": 1 })), call("chat.product_get", json!({})), call("svc.user_list", json!({})), call("svc.page_list", json!({}))];
+        assert!(static_check(&call("svc.page_get", json!({ "id": 1 })), Risk::ReadOnly, &spaced).unwrap().contains("identical"));
+        // …unless something was changed since: reading again to check is fine.
+        let changed = vec![call("svc.page_get", json!({ "id": 1 })), call("svc.page_update", json!({ "id": 1 }))];
+        assert_eq!(static_check(&call("svc.page_get", json!({ "id": 1 })), Risk::ReadOnly, &changed), None);
+        // Out of the window: forgotten.
+        let mut long = vec![call("svc.page_get", json!({ "id": 1 }))];
+        long.extend((0..LOOP_WINDOW).map(|i| call("svc.user_get", json!({ "id": i }))));
+        assert_eq!(static_check(&call("svc.page_get", json!({ "id": 1 })), Risk::ReadOnly, &long), None);
     }
 
     #[test]
