@@ -47,10 +47,23 @@ mcp "firecrawl" {
 # call made as the user. The user's decision comes after this answers `ask`.
 hook "approval" {
   on         = "pre_tool"
-  tools      = ["connector.call_tool", "firecrawl.firecrawl_crawl", "firecrawl.firecrawl_agent", "firecrawl.firecrawl_interact*", "firecrawl.firecrawl_monitor_*"]
+  # The hub's built-ins that reach other agents are here too: the hub doesn't
+  # keep users apart, the chat limits them to the user's own agents.
+  tools      = ["connector.call_tool", "firecrawl.firecrawl_crawl", "firecrawl.firecrawl_agent", "firecrawl.firecrawl_interact*", "firecrawl.firecrawl_monitor_*",
+                "send_message", "list_agents", "list_types", "mailbox_*", "blob_get", "pause_agent", "resume_agent", "cancel_agent"]
   run        { url = "http://127.0.0.1:8080/hooks/pre_tool" }
   credential = { header = "Authorization", env = "CHAT_CALLBACK_SECRET", prefix = "Bearer " }
   timeout    = "60s"   # the validator model's call
+  on_lost    = "deny"
+}
+
+# list_agents shows every user's agents: narrowed to the caller's user's.
+hook "own-agents" {
+  on         = "post_tool"
+  tools      = ["list_agents"]
+  run        { url = "http://127.0.0.1:8080/hooks/post_tool" }
+  credential = { header = "Authorization", env = "CHAT_CALLBACK_SECRET", prefix = "Bearer " }
+  timeout    = "10s"
   on_lost    = "deny"
 }
 
@@ -66,7 +79,7 @@ agent "chat-agent" {
   params       = { max_tokens = 2048 }
   budget       = { max_tokens = 40000000, max_depth = 1, max_children = 6 }
   spawns       = ["worker"]
-  hooks        = ["approval"]
+  hooks        = ["approval", "own-agents"]
   call_reasons = true
 
   client_tool "ask_question" {
@@ -139,7 +152,7 @@ agent "chat-worker" {
   nodes        = ["chat"]
   params       = { max_tokens = 4096 }
   budget       = { max_tokens = 4000000, max_depth = 0, max_children = 0 }
-  hooks        = ["approval"]
+  hooks        = ["approval", "own-agents"]
   call_reasons = true
 
   system_prompt = <<-EOT

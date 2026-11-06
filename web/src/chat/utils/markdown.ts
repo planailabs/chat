@@ -24,5 +24,9 @@ DOMPurify.addHook('afterSanitizeAttributes', (node) => {
 });
 
 /** Renders markdown to sanitized HTML. */
+// No images (one could carry data out in its URL), forms, styles or media:
+// a reply is text and links.
+const FORBID_TAGS = ['img', 'picture', 'source', 'video', 'audio', 'form', 'input', 'button', 'select', 'textarea', 'style', 'svg', 'math'];
+
 export const renderMarkdown = (text: string): string =>
-  DOMPurify.sanitize(marked.parse(text, { async: false }));
+  DOMPurify.sanitize(marked.parse(text, { async: false }), { FORBID_TAGS, FORBID_ATTR: ['style', 'srcset'] });

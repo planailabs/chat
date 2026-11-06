@@ -259,7 +259,7 @@ pub struct Budget {
 }
 
 impl Budget {
-    fn exhausted(&self) -> bool {
+    pub(crate) fn exhausted(&self) -> bool {
         let over = |limit: u64, used: u64| limit > 0 && used >= limit;
         over(self.hourly_input_tokens, self.used_input_tokens) || over(self.hourly_output_tokens, self.used_output_tokens)
     }
@@ -489,7 +489,9 @@ pub async fn approve(app: &App, user: Uuid, id: Uuid, call_id: &str, approved: b
     let agents = agents_of(app, id).await?;
     // A sub-agent's call goes back to that sub-agent.
     let child: Option<String> = sqlx::query_scalar(
-        "SELECT k.agent_id FROM conversation_children k JOIN approval_checks a ON a.agent_id = k.agent_id WHERE k.conversation_id = $1 AND a.call_id = $2 LIMIT 1",
+        // Call ids may repeat across agents: the latest asked one is meant.
+        "SELECT k.agent_id FROM conversation_children k JOIN approval_checks a ON a.agent_id = k.agent_id
+         WHERE k.conversation_id = $1 AND a.call_id = $2 AND a.decision = 'asked' ORDER BY a.created_at DESC LIMIT 1",
     )
     .bind(id)
     .bind(call_id)

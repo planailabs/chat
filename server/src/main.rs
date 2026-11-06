@@ -124,7 +124,7 @@ async fn main() -> anyhow::Result<()> {
     // Subnet calls back with the callback secret: the approval hook and the
     // agents' own tools.
     let agent_mcp = agent_tools::registry(&cfg.subnet.callback_secret).mcp_service(app.clone());
-    let mut callbacks = Router::new().route("/hooks/pre_tool", post(hook::pre_tool)).with_state(app.clone()).route_service("/agent/mcp", agent_mcp);
+    let mut callbacks = Router::new().route("/hooks/pre_tool", post(hook::pre_tool)).route("/hooks/post_tool", post(hook::post_tool)).with_state(app.clone()).route_service("/agent/mcp", agent_mcp);
     if let Some(c) = &connector {
         callbacks = callbacks.route_service("/connector/mcp", c.service());
     }
@@ -202,12 +202,16 @@ impl plan_ai_oauth::Admission for Approved {
     }
 }
 
-/// The chat's pages (artifacts, MCP Apps views) are `srcdoc` frames, which
-/// this doesn't govern; but no frame may navigate to a URL — a page that
-/// tried would leave its CSP behind and keep talking to the chat.
+/// No frame navigates to a URL: the pages (artifacts, MCP Apps views) are
+/// `srcdoc` frames, which this doesn't govern, and one that navigated would
+/// leave its own CSP behind. Nothing more: `srcdoc` frames inherit this
+/// policy, and views may declare origins of their own (img, connect). Replies
+/// can't load anything: the markdown sanitizer drops images, forms and styles.
 async fn no_frame_navigation(req: Request, next: Next) -> Response {
     let mut res = next.run(req).await;
-    res.headers_mut().entry(header::CONTENT_SECURITY_POLICY).or_insert(header::HeaderValue::from_static("frame-src 'none'; child-src 'none'"));
+    res.headers_mut()
+        .entry(header::CONTENT_SECURITY_POLICY)
+        .or_insert(header::HeaderValue::from_static("frame-src 'none'; child-src 'none'; object-src 'none'; base-uri 'self'"));
     res
 }
 

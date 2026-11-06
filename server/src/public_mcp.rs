@@ -75,6 +75,13 @@ fn risk_of_annotations(a: Option<&ToolAnnotations>, name: &str) -> Risk {
     }
 }
 
+/// Whether an outside client's call of the chat's own API needs the user:
+/// anything restricted (admin endpoints, account features) or that changes
+/// something, except talking to the assistant (its own calls are checked).
+fn chat_api_asks(name: &str, risk: Risk, restricted: bool) -> bool {
+    restricted || (risk != Risk::ReadOnly && !matches!(name, "chat_send" | "chat_answer" | "chat_rename"))
+}
+
 fn api_risk(r: plan_ai_api_mcp::Risk) -> Risk {
     match r {
         plan_ai_api_mcp::Risk::ReadOnly => Risk::ReadOnly,
@@ -266,8 +273,24 @@ impl ServerHandler for PublicMcp {
         // The chat's own API.
         if let Some(ep) = self.registry.endpoints().iter().find(|e| e.tool_name() == name && e.visible_to(&who.principal)).cloned() {
             let call = Call { name: format!("chat.{name}"), args: args.clone() };
-            if let Some(refusal) = self.gate(&who, &call, api_risk(ep.risk()), &context).await {
-                return Ok(refusal);
+            // Not the agents' allow-list (`chat.*`): an outside client could
+            // otherwise approve calls, buy, add servers or (admins) act on
+            // other users unasked. Those the user confirms in the client.
+            let anyone = Principal::scoped("anyone", Default::default(), Default::default());
+            if chat_api_asks(&name, api_risk(ep.risk()), !ep.visible_to(&anyone)) {
+                let message = format!("{} wants to call {name} with {}. Allow it?", who.client, truncate(&args.to_string(), 600));
+                let verdict = match self.confirm(&context, message).await {
+                    Ok(true) => Ok("confirmed by the user"),
+                    Ok(false) => Err("You declined this call; it wasn't made.".to_string()),
+                    Err(why) => Err(why),
+                };
+                if let Err(why) = verdict {
+                    self.audit(&who, &call.name, "deny", &why).await;
+                    return Ok(refused(why));
+                }
+                self.audit(&who, &call.name, "allow", "confirmed by the user").await;
+            } else {
+                self.audit(&who, &call.name, "allow", "the chat's own API").await;
             }
             let out = self.registry.call_by_name(self.app.clone(), who.principal.clone(), &name, args).await;
             return ep.mcp_result(out);
@@ -349,6 +372,16 @@ impl ServerHandler for PublicMcp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn outside_clients_confirm_what_acts_for_the_user() {
+        assert!(chat_api_asks("chat_approve", Risk::Mutating, false));
+        assert!(chat_api_asks("connector_create", Risk::Mutating, true));
+        assert!(chat_api_asks("message_list", Risk::ReadOnly, true), "admin reads too");
+        assert!(chat_api_asks("profile_request_deletion", Risk::Destructive, false));
+        assert!(!chat_api_asks("chat_send", Risk::Mutating, false));
+        assert!(!chat_api_asks("chat_history", Risk::ReadOnly, false));
+    }
 
     #[test]
     fn a_service_tool_is_judged_by_its_annotations_then_its_verb() {
