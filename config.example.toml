@@ -64,6 +64,7 @@ max_chars = 2048
 # [connector.exchange]
 # issuer = "https://id.plan.ai"
 # client = { method = "basic", client_id = "xxx", client_secret = "xxx" }   # app with the token-exchange grant
+# client_project_id = "xxx"   # that app's Zitadel project (Zitadel v4: in the actor token's audience)
 # actor = { method = "jwt_profile", key = { type = "serviceaccount", keyId = "xxx", key = "-----BEGIN RSA PRIVATE KEY-----...", userId = "xxx" } }
 #
 # # Each user's plan-ai-cloud deployments, listed by the console for them.
